@@ -28,6 +28,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const [claudeKey, setClaudeKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
+  // Detected-on-mount: whether a key is already stored in the macOS Keychain.
+  // A stored key is treated as "present" for gating purposes, but the user can
+  // still overwrite it by typing a new value.
+  const [hasClaude, setHasClaude] = useState<boolean>(false);
+  const [hasOpenai, setHasOpenai] = useState<boolean>(false);
 
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
@@ -44,6 +49,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       }
     });
     api.depsCheck().then(setDeps);
+    api.secrets.has("claude").then(setHasClaude).catch(() => {});
+    api.secrets.has("openai").then(setHasOpenai).catch(() => {});
   }, []);
 
   const pickDataDir = async () => {
@@ -228,22 +235,36 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
             <option value="whisper-local">whisper.cpp (local)</option>
           </select>
 
-          <label style={{ marginTop: 12 }}>Anthropic API key (for Claude)</label>
+          <label style={{ marginTop: 12 }}>
+            Anthropic API key (for Claude)
+            {hasClaude && (
+              <span style={{ color: "var(--success)", marginLeft: 8, fontWeight: 400 }}>
+                ✓ already stored in Keychain
+              </span>
+            )}
+          </label>
           <input
             type="password"
             value={claudeKey}
             onChange={(e) => setClaudeKey(e.target.value)}
-            placeholder="sk-ant-…"
+            placeholder={hasClaude ? "leave blank to keep existing key" : "sk-ant-…"}
           />
 
           {asrProvider === "openai" && (
             <>
-              <label style={{ marginTop: 12 }}>OpenAI API key (for transcription)</label>
+              <label style={{ marginTop: 12 }}>
+                OpenAI API key (for transcription)
+                {hasOpenai && (
+                  <span style={{ color: "var(--success)", marginLeft: 8, fontWeight: 400 }}>
+                    ✓ already stored in Keychain
+                  </span>
+                )}
+              </label>
               <input
                 type="password"
                 value={openaiKey}
                 onChange={(e) => setOpenaiKey(e.target.value)}
-                placeholder="sk-…"
+                placeholder={hasOpenai ? "leave blank to keep existing key" : "sk-…"}
               />
             </>
           )}
@@ -252,7 +273,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
           <div className="actions">
             <button onClick={() => setStep(3)}>Back</button>
-            <button className="primary" onClick={() => setStep(5)} disabled={!claudeKey}>
+            <button
+              className="primary"
+              onClick={() => setStep(5)}
+              disabled={
+                // Need a Claude key either typed or already present
+                !(claudeKey || hasClaude) ||
+                // If user picked OpenAI ASR, they also need an OpenAI key
+                (asrProvider === "openai" && !(openaiKey || hasOpenai))
+              }
+            >
               Next
             </button>
           </div>
