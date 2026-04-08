@@ -39,6 +39,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Parakeet install state (only matters if asr_provider === "parakeet-mlx")
+  const [parakeetInstalling, setParakeetInstalling] = useState(false);
+  const [parakeetLog, setParakeetLog] = useState<string[]>([]);
+  const [parakeetError, setParakeetError] = useState<string | null>(null);
+
   useEffect(() => {
     api.recording.listAudioDevices().then((list) => {
       setDevices(list);
@@ -52,6 +57,38 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     api.secrets.has("claude").then(setHasClaude).catch(() => {});
     api.secrets.has("openai").then(setHasOpenai).catch(() => {});
   }, []);
+
+  // Subscribe to Parakeet install logs — only active during install.
+  useEffect(() => {
+    const unsub = api.on.setupAsrLog((line) => {
+      setParakeetLog((prev) => [...prev, line]);
+    });
+    return () => unsub();
+  }, []);
+
+  // Re-run deps check when entering step 5 so stale ffmpeg/Parakeet state
+  // gets refreshed after any out-of-band installs.
+  useEffect(() => {
+    if (step === 5) {
+      api.depsCheck().then(setDeps).catch(() => {});
+    }
+  }, [step]);
+
+  const installParakeet = async () => {
+    setParakeetInstalling(true);
+    setParakeetLog([]);
+    setParakeetError(null);
+    try {
+      await api.setupAsr({ force: false });
+      // Re-run deps check so the row flips to ✓
+      const fresh = await api.depsCheck();
+      setDeps(fresh);
+    } catch (err) {
+      setParakeetError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setParakeetInstalling(false);
+    }
+  };
 
   const pickDataDir = async () => {
     const picked = await api.config.pickDirectory();
@@ -313,12 +350,65 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 hint="brew install python@3.11"
                 value={deps.python ?? undefined}
               />
+              {asrProvider === "parakeet-mlx" && (
+                <>
+                  <DepRow
+                    name="Parakeet"
+                    ok={!!deps.parakeet}
+                    hint="install below"
+                    value={deps.parakeet ?? undefined}
+                  />
+                  {!deps.parakeet && (
+                    <div className="card" style={{ marginTop: 8 }}>
+                      <div className="muted" style={{ marginBottom: 8 }}>
+                        Parakeet is a local-only transcription model. Installing
+                        creates a Python venv at ~/.meeting-notes/parakeet-venv
+                        and downloads the model weights (~600 MB). Takes about
+                        a minute on a fast connection.
+                      </div>
+                      <button
+                        className="primary"
+                        onClick={installParakeet}
+                        disabled={parakeetInstalling || !deps.python}
+                      >
+                        {parakeetInstalling ? "Installing…" : "Install Parakeet"}
+                      </button>
+                      {!deps.python && (
+                        <div className="muted" style={{ marginTop: 6, color: "var(--warning)" }}>
+                          Python 3 is required to install Parakeet.
+                        </div>
+                      )}
+                      {parakeetLog.length > 0 && (
+                        <pre className="log-view" style={{ marginTop: 12, maxHeight: 240 }}>
+                          {parakeetLog.join("\n")}
+                        </pre>
+                      )}
+                      {parakeetError && (
+                        <div className="muted" style={{ color: "var(--danger)", marginTop: 8 }}>
+                          {parakeetError}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
           {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
           <div className="actions">
-            <button onClick={() => setStep(4)}>Back</button>
-            <button className="primary" onClick={onFinish} disabled={busy}>
+            <button onClick={() => setStep(4)} disabled={parakeetInstalling}>
+              Back
+            </button>
+            <button
+              className="primary"
+              onClick={onFinish}
+              disabled={
+                busy ||
+                parakeetInstalling ||
+                // If user picked Parakeet, it must be installed before finishing.
+                (asrProvider === "parakeet-mlx" && !deps?.parakeet)
+              }
+            >
               {busy ? "Finishing…" : "Finish setup"}
             </button>
           </div>

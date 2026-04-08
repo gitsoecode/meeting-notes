@@ -566,7 +566,29 @@ export function registerIpcHandlers(): void {
     } catch {
       blackhole = false;
     }
-    return { ffmpeg, python, blackhole };
+    // Parakeet: check the default install path rather than the configured path,
+    // because during the Setup Wizard the user hasn't written a config yet and
+    // safeLoadConfig() returns null. This default matches DEFAULT_CONFIG in
+    // engine/core/config.ts — if either changes, this check needs to move.
+    const parakeetBin = path.join(
+      os.homedir(),
+      ".meeting-notes",
+      "parakeet-venv",
+      "bin",
+      "mlx_audio.stt.generate"
+    );
+    let parakeet: string | null = null;
+    try {
+      const st = fs.statSync(parakeetBin);
+      // Executable bit check — if the file is there but not executable the
+      // venv is broken and we should offer to reinstall.
+      if (st.isFile() && (st.mode & 0o111) !== 0) {
+        parakeet = parakeetBin;
+      }
+    } catch {
+      parakeet = null;
+    }
+    return { ffmpeg, python, blackhole, parakeet };
   });
 
   // Create an app logger on first registration — gives us structured

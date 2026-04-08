@@ -292,12 +292,24 @@ export function Settings({ config, onChange }: SettingsProps) {
                 {deps.python ?? "not found"}
               </span>
             </div>
+            <div className="row">
+              <span>Parakeet:</span>
+              <span className={deps.parakeet ? "" : "muted"}>
+                {deps.parakeet ?? "not installed — use Install button above"}
+              </span>
+            </div>
           </div>
         )}
       </div>
 
       {setupAsrOpen && (
-        <SetupAsrModal onClose={() => setSetupAsrOpen(false)} />
+        <SetupAsrModal
+          onClose={() => {
+            setSetupAsrOpen(false);
+            // Pick up new status after install so the Deps card flips to ✓.
+            api.depsCheck().then(setDeps).catch(() => {});
+          }}
+        />
       )}
     </>
   );

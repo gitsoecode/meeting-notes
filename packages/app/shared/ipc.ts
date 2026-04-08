@@ -103,6 +103,8 @@ export interface DepsCheckResult {
   ffmpeg: string | null;
   blackhole: boolean;
   python: string | null;
+  /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
+  parakeet: string | null;
 }
 
 export interface AppConfigDTO {
