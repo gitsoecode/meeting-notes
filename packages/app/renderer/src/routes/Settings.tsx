@@ -234,7 +234,7 @@ export function Settings({ config, onChange }: SettingsProps) {
         </div>
         {config.asr_provider === "openai" && (
           <>
-            <label style={{ marginTop: 12 }}>OpenAI API key</label>
+            <label style={{ marginTop: 12 }}>OpenAI API key (for transcription)</label>
             <div className="row">
               <input
                 type="password"
@@ -243,6 +243,15 @@ export function Settings({ config, onChange }: SettingsProps) {
                 placeholder={hasOpenai ? "••••• stored in Keychain" : "paste key to set"}
               />
               <button onClick={onSaveOpenaiKey} disabled={!openaiInput}>Save</button>
+            </div>
+            <div
+              className="muted"
+              style={{ marginTop: 6, color: "var(--warning)", fontSize: 12 }}
+              title="OpenAI's transcription endpoint enforces a 25 MB per-file upload limit. We transcode to 32 kbps mono Opus to stretch that from ~13 min (PCM) to ~80 min per channel, but beyond that the request will fail. Automatic chunking would lift this ceiling and is on the roadmap."
+            >
+              ⚠ OpenAI caps uploads at 25 MB per file. Meetings longer than
+              ~80 min per audio channel will fail — switch to Parakeet (local)
+              for long recordings. Automatic chunking is on the roadmap.
             </div>
           </>
         )}

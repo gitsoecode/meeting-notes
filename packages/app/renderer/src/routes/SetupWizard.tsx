@@ -303,6 +303,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 onChange={(e) => setOpenaiKey(e.target.value)}
                 placeholder={hasOpenai ? "leave blank to keep existing key" : "sk-…"}
               />
+              <div
+                className="muted"
+                style={{ marginTop: 6, color: "var(--warning)", fontSize: 12 }}
+                title="OpenAI's transcription endpoint enforces a 25 MB per-file upload limit. We transcode to 32 kbps mono Opus to stretch that from ~13 min (PCM) to ~80 min per channel, but beyond that the request will fail. Automatic chunking would lift this ceiling and is on the roadmap."
+              >
+                ⚠ OpenAI caps uploads at 25 MB per file. Meetings longer than
+                ~80 min per audio channel will fail — use Parakeet (local) for
+                long recordings. Automatic chunking is on the roadmap.
+              </div>
             </>
           )}
           <div className="muted" style={{ marginTop: 6 }}>
