@@ -67,7 +67,14 @@ function getNotesTemplate(config: AppConfig): string {
   return "# Meeting Notes\n\n- \n";
 }
 
-function manifestToFrontmatter(manifest: RunManifest): Record<string, unknown> {
+export interface CreateRunOptions {
+  /** Source mode: mic+system, mic only, or existing audio file. */
+  sourceMode?: "both" | "mic" | "file";
+  /** When true, the run logger does not print to stdout. */
+  quiet?: boolean;
+}
+
+export function manifestToFrontmatter(manifest: RunManifest): Record<string, unknown> {
   return {
     type: "meeting-run",
     run_id: manifest.run_id,
@@ -113,8 +120,14 @@ function writeManifest(folderPath: string, manifest: RunManifest): void {
 export function createRun(
   config: AppConfig,
   title: string,
-  sourceMode: "both" | "mic" | "file" = "both"
+  sourceModeOrOptions: "both" | "mic" | "file" | CreateRunOptions = "both"
 ): RunContext {
+  const opts: CreateRunOptions =
+    typeof sourceModeOrOptions === "string"
+      ? { sourceMode: sourceModeOrOptions }
+      : sourceModeOrOptions;
+  const sourceMode = opts.sourceMode ?? "both";
+  const consoleLog = !opts.quiet;
   const now = new Date();
   const runId = ulid();
   const dateFolder = formatDateFolder(now);
@@ -145,7 +158,7 @@ export function createRun(
   const notesContent = getNotesTemplate(config);
   writeRawFile(path.join(folderPath, "notes.md"), notesContent);
 
-  const logger = createRunLogger(path.join(folderPath, "run.log"), true);
+  const logger = createRunLogger(path.join(folderPath, "run.log"), consoleLog);
   logger.info("Run created", { run_id: runId, title, source_mode: sourceMode });
 
   return { manifest, folderPath, logger };

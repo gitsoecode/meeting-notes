@@ -8,43 +8,42 @@ import readline from "node:readline";
 import matter from "gray-matter";
 import {
   loadConfig,
+  saveConfig,
   getConfigPath,
   getAppLogPath,
   resolveBasePath,
   DEFAULT_CONFIG,
   type AppConfig,
-} from "../core/config.js";
-import { createPrompter } from "./prompt.js";
-import {
   getSecret,
   setSecret,
   hasSecret,
   requireSecret,
   SECRET_LABELS,
   type SecretName,
-} from "../core/secrets.js";
-import { initProject } from "../core/init.js";
-import { createRun, updateRunStatus, loadRunManifest } from "../core/run.js";
-import { processRun } from "../core/process-run.js";
-import { createAppLogger, createRunLogger } from "../logging/logger.js";
-import {
+  initProject,
+  createRun,
+  updateRunStatus,
+  loadRunManifest,
+  processRun,
+  createAppLogger,
+  createRunLogger,
   loadAllPrompts,
   updatePromptFrontmatter,
   resetDefaultPrompts,
-  getVaultPromptsDir,
+  getPromptsDir,
   DEFAULT_PROMPTS_DIR,
-} from "../core/pipeline.js";
-import { getAudioInfo } from "../core/audio.js";
-import { FfmpegRecorder } from "../adapters/recording/ffmpeg.js";
-import {
+  getAudioInfo,
+  FfmpegRecorder,
   saveActiveRecording,
   loadActiveRecording,
   clearActiveRecording,
   isProcessAlive,
   stopRecordingProcesses,
-} from "../core/recording-state.js";
-import { openInObsidian } from "../core/obsidian.js";
-import { setupAsr } from "../core/setup-asr.js";
+  openInObsidian,
+  setupAsr,
+  moveDataDirectory,
+} from "@meeting-notes/engine";
+import { createPrompter } from "./prompt.js";
 
 /**
  * Wait for the user to press Enter (resolves "enter") or send SIGINT
@@ -82,7 +81,7 @@ interface RunProcessingPipelineOpts {
     system_path?: string;
     system_captured: boolean;
   };
-  logger: import("../logging/logger.js").Logger;
+  logger: import("@meeting-notes/engine").Logger;
   autoOnly: boolean;
 }
 
@@ -159,17 +158,37 @@ program
 // --- init ---
 program
   .command("init")
-  .description("Interactive setup — configure vault path, base folder, and API key")
+  .description("Interactive setup — configure data directory, Obsidian integration, and API keys")
   .action(async () => {
     const prompter = createPrompter();
 
     console.log("\n  Meeting Notes — Setup\n");
 
-    const vaultPath = await prompter.ask(
-      "Obsidian vault path",
-      DEFAULT_CONFIG.vault_path.replace(os.homedir(), "~")
+    const dataPathInput = await prompter.ask(
+      "Data directory (where meeting runs are stored)",
+      DEFAULT_CONFIG.data_path.replace(os.homedir(), "~")
     );
-    const baseFolder = await prompter.ask("Base folder within vault", DEFAULT_CONFIG.base_folder);
+    const dataPath = dataPathInput.replace(/^~/, os.homedir());
+
+    const obsidianYn = (
+      await prompter.ask(
+        "Enable Obsidian integration? (opens notes in Obsidian when recording) (y/N)",
+        "N"
+      )
+    ).toLowerCase();
+    const obsidianEnabled = obsidianYn === "y" || obsidianYn === "yes";
+
+    let obsidianVaultPath: string | undefined;
+    let obsidianVaultName: string | undefined;
+    if (obsidianEnabled) {
+      const vaultPathInput = await prompter.ask(
+        "  Obsidian vault path (the vault that contains the data directory)",
+        path.dirname(dataPath)
+      );
+      obsidianVaultPath = vaultPathInput.replace(/^~/, os.homedir());
+      obsidianVaultName = path.basename(obsidianVaultPath);
+    }
+
     const asrProvider = await prompter.ask(
       "ASR provider (parakeet-mlx, openai, or whisper-local)",
       DEFAULT_CONFIG.asr_provider
@@ -212,25 +231,36 @@ program
     prompter.close();
 
     const config: AppConfig = {
-      vault_path: vaultPath,
-      base_folder: baseFolder,
+      data_path: dataPath,
+      obsidian_integration: {
+        enabled: obsidianEnabled,
+        vault_name: obsidianVaultName,
+        vault_path: obsidianVaultPath,
+      },
       asr_provider: normalizedAsr,
       llm_provider: "claude",
       whisper_local: DEFAULT_CONFIG.whisper_local,
       parakeet_mlx: DEFAULT_CONFIG.parakeet_mlx,
       claude: DEFAULT_CONFIG.claude,
       recording: { mic_device: micDevice, system_device: systemDevice },
+      shortcuts: DEFAULT_CONFIG.shortcuts,
     };
 
-    initProject(config);
+    initProject(config, {
+      onMessage: (msg) => console.log(msg),
+    });
 
     console.log(`\n  Config saved to: ${getConfigPath()}`);
-    console.log(`  Vault folder:    ${resolveBasePath(config)}`);
+    console.log(`  Data folder:     ${resolveBasePath(config)}`);
     console.log(`  Dashboard:       ${path.join(resolveBasePath(config), "Dashboard.md")}`);
     if (normalizedAsr === "parakeet-mlx") {
       console.log(`\n  Next step: run 'meeting-notes setup-asr' to install Parakeet.`);
     }
-    console.log(`\n  Open your vault in Obsidian and install the Dataview plugin for dashboard queries.\n`);
+    if (obsidianEnabled) {
+      console.log(`\n  Open your Obsidian vault and install the Dataview plugin for dashboard queries.\n`);
+    } else {
+      console.log(`\n  Obsidian integration is off. You can turn it on later with 'meeting-notes config obsidian enable'.\n`);
+    }
   });
 
 // --- set-key ---
@@ -269,7 +299,7 @@ program
   .option("--force", "Remove any existing venv before installing")
   .action(async (opts: { force?: boolean }) => {
     try {
-      await setupAsr({ force: opts.force });
+      await setupAsr({ force: opts.force, onLog: (line) => console.log(line) });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`\n  ✗ setup-asr failed:\n${msg}\n`);
@@ -561,8 +591,7 @@ program
 
     updateRunStatus(resolvedPath, "processing");
 
-    const { ClaudeProvider } = await import("../adapters/llm/claude.js");
-    const { runPipeline } = await import("../core/pipeline.js");
+    const { ClaudeProvider, runPipeline } = await import("@meeting-notes/engine");
     const claude = new ClaudeProvider(apiKey, config.claude.model);
     const logger = createRunLogger(path.join(resolvedPath, "run.log"), true);
 
@@ -660,7 +689,7 @@ prompts
     const config = loadConfig();
     const all = loadAllPrompts(config);
     if (all.length === 0) {
-      console.log(`  No prompts found in ${getVaultPromptsDir(config)}`);
+      console.log(`  No prompts found in ${getPromptsDir()}`);
       return;
     }
     const rows = all.map((p) => ({
@@ -687,7 +716,7 @@ prompts
         `  ${pad(r.id, widths.id)}  ${pad(r.label, widths.label)}  ${pad(r.enabled, widths.enabled)}  ${pad(r.auto, widths.auto)}  ${pad(r.builtin, widths.builtin)}  ${r.file}`
       );
     }
-    console.log(`\n  Directory: ${getVaultPromptsDir(config)}`);
+    console.log(`\n  Directory: ${getPromptsDir()}`);
   });
 
 prompts
@@ -695,7 +724,7 @@ prompts
   .description("Print the absolute path to a prompt file (or the prompts directory)")
   .action((id?: string) => {
     const config = loadConfig();
-    const dir = getVaultPromptsDir(config);
+    const dir = getPromptsDir();
     if (!id) {
       console.log(dir);
       return;
@@ -721,7 +750,7 @@ prompts
       console.error(`  Invalid id "${id}". Use lowercase letters, digits, hyphen, underscore.`);
       process.exit(1);
     }
-    const dir = getVaultPromptsDir(config);
+    const dir = getPromptsDir();
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, `${id}.md`);
     if (fs.existsSync(dest)) {
@@ -853,8 +882,7 @@ prompts
       process.exit(1);
     }
 
-    const { ClaudeProvider } = await import("../adapters/llm/claude.js");
-    const { runPipeline } = await import("../core/pipeline.js");
+    const { ClaudeProvider, runPipeline } = await import("@meeting-notes/engine");
     const claude = new ClaudeProvider(apiKey, config.claude.model);
     const logger = createRunLogger(path.join(resolvedPath, "run.log"), true);
 
@@ -894,7 +922,7 @@ prompts
   .option("-y, --yes", "Skip confirmation")
   .action(async (id: string | undefined, opts: { yes?: boolean }) => {
     const config = loadConfig();
-    const dir = getVaultPromptsDir(config);
+    const dir = getPromptsDir();
     const fileName = id ? `${id}.md` : undefined;
     const defaultSrc = fileName ? path.join(DEFAULT_PROMPTS_DIR, fileName) : DEFAULT_PROMPTS_DIR;
     if (fileName && !fs.existsSync(defaultSrc)) {
@@ -922,6 +950,91 @@ prompts
       return;
     }
     for (const p of written) console.log(`  ✓ ${path.basename(p)}`);
+  });
+
+// --- config ---
+const configCmd = program
+  .command("config")
+  .description("View or edit app configuration (data path, Obsidian integration, etc.)");
+
+configCmd
+  .command("get")
+  .description("Print the current config as YAML")
+  .action(() => {
+    const config = loadConfig();
+    console.log(JSON.stringify(config, null, 2));
+  });
+
+configCmd
+  .command("set-data-path <path>")
+  .description("Move the data directory to a new location (moves files, updates config)")
+  .action(async (newPath: string) => {
+    const config = loadConfig();
+    try {
+      const { result } = moveDataDirectory(config, newPath);
+      if (result.moved) {
+        console.log(`  Moved data directory: ${result.from} → ${result.to}`);
+      } else if (result.from === result.to) {
+        console.log(`  Data directory unchanged: ${result.to}`);
+      } else {
+        console.log(`  Created new data directory: ${result.to}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`  ${msg}`);
+      process.exit(1);
+    }
+  });
+
+const obsidianCmd = configCmd
+  .command("obsidian")
+  .description("Toggle or configure the optional Obsidian viewer layer");
+
+obsidianCmd
+  .command("enable")
+  .description("Enable Obsidian integration (opens notes in Obsidian on record)")
+  .action(() => {
+    const config = loadConfig();
+    config.obsidian_integration = {
+      ...config.obsidian_integration,
+      enabled: true,
+    };
+    if (!config.obsidian_integration.vault_path) {
+      console.warn(
+        "  Warning: no vault_path set. Run 'meeting-notes config obsidian set-vault <path>' next."
+      );
+    }
+    saveConfig(config);
+    console.log("  Obsidian integration enabled.");
+  });
+
+obsidianCmd
+  .command("disable")
+  .description("Disable Obsidian integration (notes stay in the app only)")
+  .action(() => {
+    const config = loadConfig();
+    config.obsidian_integration = {
+      ...config.obsidian_integration,
+      enabled: false,
+    };
+    saveConfig(config);
+    console.log("  Obsidian integration disabled.");
+  });
+
+obsidianCmd
+  .command("set-vault <vaultPath>")
+  .description("Point Obsidian integration at a specific vault root")
+  .action((vaultPath: string) => {
+    const config = loadConfig();
+    const resolved = vaultPath.replace(/^~/, os.homedir());
+    config.obsidian_integration = {
+      ...config.obsidian_integration,
+      vault_path: resolved,
+      vault_name: path.basename(resolved),
+    };
+    saveConfig(config);
+    console.log(`  Obsidian vault set to: ${resolved}`);
+    console.log(`  Vault name: ${config.obsidian_integration.vault_name}`);
   });
 
 program.parse();

@@ -3,14 +3,16 @@ import path from "node:path";
 import matter from "gray-matter";
 import { AppConfig, resolveBasePath, saveConfig } from "./config.js";
 import { writeRawFile } from "./markdown.js";
-import { getVaultPromptsDir, seedAllDefaultPrompts } from "./pipeline.js";
+import { getPromptsDir, seedAllDefaultPrompts } from "./pipeline.js";
+import { migrateVaultPromptsToHome } from "./migrate-prompts.js";
+import type { Logger } from "../logging/logger.js";
 
 const DASHBOARD_CONTENT = `# Meeting Dashboard
 
 ## Recent Meetings
 \`\`\`dataview
 TABLE title, date, status, duration_minutes as "Duration", tags
-FROM "Meetings/Runs"
+FROM "Runs"
 WHERE type = "meeting-run"
 SORT date DESC
 LIMIT 20
@@ -19,7 +21,7 @@ LIMIT 20
 ## Pending Processing
 \`\`\`dataview
 LIST
-FROM "Meetings/Runs"
+FROM "Runs"
 WHERE status != "complete"
 SORT date DESC
 \`\`\`
@@ -40,7 +42,7 @@ interface LegacyPipelineEntry {
 
 /**
  * One-shot migration of the old Config/pipeline.json format into the
- * new Config/Prompts/<id>.md layout. Each entry becomes a markdown file
+ * new prompts directory layout. Each entry becomes a markdown file
  * with frontmatter; `auto: true` is set to preserve today's behavior where
  * every enabled section ran on processing. The old file is renamed to
  * pipeline.json.migrated as a breadcrumb.
@@ -92,17 +94,27 @@ function migrateLegacyPipelineJson(
   return { migrated, legacyPath };
 }
 
-export function bootstrapVault(config: AppConfig): { created: string[] } {
+export interface BootstrapOptions {
+  logger?: Logger;
+  onMessage?: (msg: string) => void;
+}
+
+export function bootstrapVault(
+  config: AppConfig,
+  opts: BootstrapOptions = {}
+): { created: string[] } {
   const basePath = resolveBasePath(config);
   const created: string[] = [];
+  const emit = (msg: string) => {
+    opts.onMessage?.(msg);
+    opts.logger?.info(msg);
+  };
 
-  // Create directory structure
-  const promptsDir = getVaultPromptsDir(config);
+  // Create data directory structure (same shape with or without Obsidian).
   const dirs = [
+    basePath,
     path.join(basePath, "Runs"),
-    path.join(basePath, "Config"),
     path.join(basePath, "Templates"),
-    promptsDir,
   ];
   for (const dir of dirs) {
     if (!fs.existsSync(dir)) {
@@ -111,7 +123,8 @@ export function bootstrapVault(config: AppConfig): { created: string[] } {
     }
   }
 
-  // Write Dashboard.md
+  // Write Dashboard.md unconditionally — it's inert markdown when
+  // Obsidian isn't present, so writing it is free.
   const dashboardPath = path.join(basePath, "Dashboard.md");
   if (!fs.existsSync(dashboardPath)) {
     writeRawFile(dashboardPath, DASHBOARD_CONTENT);
@@ -125,22 +138,38 @@ export function bootstrapVault(config: AppConfig): { created: string[] } {
     created.push(notesTemplatePath);
   }
 
-  // One-shot migration from the old pipeline.json format, if present.
-  const migration = migrateLegacyPipelineJson(basePath, promptsDir);
-  if (migration && migration.migrated > 0) {
-    console.log(
-      `  Migrated ${migration.migrated} prompt(s) from pipeline.json → Config/Prompts/ (all set to auto: true — use "prompts manual <id>" to change)`
+  // Ensure the prompts home dir exists.
+  const promptsDir = getPromptsDir();
+  fs.mkdirSync(promptsDir, { recursive: true });
+
+  // One-shot migration: move prompts out of the vault's Config/Prompts dir
+  // into the home dir if we haven't already.
+  const movedFromVault = migrateVaultPromptsToHome(config);
+  if (movedFromVault.moved > 0) {
+    emit(
+      `  Migrated ${movedFromVault.moved} prompt(s) from vault → ${promptsDir}`
     );
   }
 
-  // Seed any default prompts that aren't already in the vault.
+  // One-shot migration from the even older pipeline.json format, if present.
+  const migration = migrateLegacyPipelineJson(basePath, promptsDir);
+  if (migration && migration.migrated > 0) {
+    emit(
+      `  Migrated ${migration.migrated} prompt(s) from pipeline.json → ${promptsDir} (all set to auto: true — use "prompts manual <id>" to change)`
+    );
+  }
+
+  // Seed any default prompts that aren't already present.
   const seeded = seedAllDefaultPrompts(promptsDir);
   created.push(...seeded);
 
   return { created };
 }
 
-export function initProject(config: AppConfig): void {
+export function initProject(
+  config: AppConfig,
+  opts: BootstrapOptions = {}
+): void {
   saveConfig(config);
-  bootstrapVault(config);
+  bootstrapVault(config, opts);
 }

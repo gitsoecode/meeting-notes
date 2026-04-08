@@ -11,6 +11,16 @@ const execFileAsync = promisify(execFile);
 const MLX_AUDIO_VERSION = "0.4.2";
 const DEFAULT_MODEL = "mlx-community/parakeet-tdt-0.6b-v2";
 
+export interface SetupAsrOptions {
+  force?: boolean;
+  /**
+   * Called with human-readable progress lines. The CLI wires this to
+   * stdout; the Electron app streams it into a log pane. When omitted,
+   * nothing is printed.
+   */
+  onLog?: (line: string) => void;
+}
+
 function venvDir(): string {
   return path.join(getConfigDir(), "parakeet-venv");
 }
@@ -29,10 +39,33 @@ async function which(cmd: string): Promise<string | null> {
   }
 }
 
-async function runStreaming(cmd: string, args: string[], label: string): Promise<void> {
+function streamChildOutput(
+  child: ReturnType<typeof spawn>,
+  onLog?: (line: string) => void
+): void {
+  if (!onLog) return;
+  const forward = (chunk: Buffer) => {
+    const text = chunk.toString("utf-8");
+    for (const line of text.split(/\r?\n/)) {
+      if (line.length > 0) onLog(line);
+    }
+  };
+  child.stdout?.on("data", forward);
+  child.stderr?.on("data", forward);
+}
+
+async function runStreaming(
+  cmd: string,
+  args: string[],
+  label: string,
+  onLog?: (line: string) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
-    console.log(`  $ ${label}`);
-    const child = spawn(cmd, args, { stdio: ["ignore", "inherit", "inherit"] });
+    onLog?.(`  $ ${label}`);
+    const child = spawn(cmd, args, {
+      stdio: onLog ? ["ignore", "pipe", "pipe"] : ["ignore", "inherit", "inherit"],
+    });
+    if (onLog) streamChildOutput(child, onLog);
     child.on("error", reject);
     child.on("exit", (code) => {
       if (code === 0) resolve();
@@ -65,8 +98,10 @@ async function ensureFfmpeg(): Promise<string> {
   return found;
 }
 
-export async function setupAsr(opts: { force?: boolean } = {}): Promise<void> {
-  console.log("\n  Meeting Notes — ASR setup (Parakeet via mlx-audio)\n");
+export async function setupAsr(opts: SetupAsrOptions = {}): Promise<void> {
+  const { onLog } = opts;
+  const log = (msg: string) => onLog?.(msg);
+  log("\n  Meeting Notes — ASR setup (Parakeet via mlx-audio)\n");
 
   // 1. Load config (or start from defaults if not initialized yet)
   let config;
@@ -80,41 +115,43 @@ export async function setupAsr(opts: { force?: boolean } = {}): Promise<void> {
 
   // 2. Verify prerequisites
   const python = await findPython3();
-  console.log(`  ✓ Python:  ${python}`);
+  log(`  ✓ Python:  ${python}`);
   const ffmpeg = await ensureFfmpeg();
-  console.log(`  ✓ ffmpeg:  ${ffmpeg}`);
+  log(`  ✓ ffmpeg:  ${ffmpeg}`);
 
   // 3. Create venv (or reuse)
   const venv = venvDir();
   if (opts.force && fs.existsSync(venv)) {
-    console.log(`  Removing existing venv: ${venv}`);
+    log(`  Removing existing venv: ${venv}`);
     fs.rmSync(venv, { recursive: true, force: true });
   }
   if (!fs.existsSync(venv)) {
     fs.mkdirSync(path.dirname(venv), { recursive: true });
-    console.log(`  Creating venv: ${venv}`);
-    await runStreaming(python, ["-m", "venv", venv], `${python} -m venv ${venv}`);
+    log(`  Creating venv: ${venv}`);
+    await runStreaming(python, ["-m", "venv", venv], `${python} -m venv ${venv}`, onLog);
   } else {
-    console.log(`  ✓ Venv exists: ${venv}`);
+    log(`  ✓ Venv exists: ${venv}`);
   }
 
   const venvPython = venvBin("python");
   const venvPip = venvBin("pip");
 
   // 4. Upgrade pip
-  console.log("\n  Upgrading pip...");
+  log("\n  Upgrading pip...");
   await runStreaming(
     venvPython,
     ["-m", "pip", "install", "--upgrade", "pip"],
-    "pip install --upgrade pip"
+    "pip install --upgrade pip",
+    onLog
   );
 
   // 5. Install mlx-audio at pinned version
-  console.log(`\n  Installing mlx-audio==${MLX_AUDIO_VERSION}...`);
+  log(`\n  Installing mlx-audio==${MLX_AUDIO_VERSION}...`);
   await runStreaming(
     venvPip,
     ["install", `mlx-audio==${MLX_AUDIO_VERSION}`],
-    `pip install mlx-audio==${MLX_AUDIO_VERSION}`
+    `pip install mlx-audio==${MLX_AUDIO_VERSION}`,
+    onLog
   );
 
   // 6. Verify the entry-point exists
@@ -125,10 +162,10 @@ export async function setupAsr(opts: { force?: boolean } = {}): Promise<void> {
       "Something went wrong with pip install mlx-audio."
     );
   }
-  console.log(`\n  ✓ Installed: ${parakeetBin}`);
+  log(`\n  ✓ Installed: ${parakeetBin}`);
 
   // 7. Smoke test — generate 3s of TTS audio and transcribe it
-  console.log("\n  Running smoke test (generates TTS audio + transcribes)...");
+  log("\n  Running smoke test (generates TTS audio + transcribes)...");
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-setup-"));
   const aiffPath = path.join(tmpDir, "speech.aiff");
   const wavPath = path.join(tmpDir, "speech.wav");
@@ -144,7 +181,8 @@ export async function setupAsr(opts: { force?: boolean } = {}): Promise<void> {
     await runStreaming(
       parakeetBin,
       ["--model", DEFAULT_MODEL, "--audio", wavPath, "--output-path", outBase, "--format", "json"],
-      `mlx_audio.stt.generate --model ${DEFAULT_MODEL} --audio <wav> --output-path <out> --format json`
+      `mlx_audio.stt.generate --model ${DEFAULT_MODEL} --audio <wav> --output-path <out> --format json`,
+      onLog
     );
 
     const jsonPath = `${outBase}.json`;
@@ -155,7 +193,7 @@ export async function setupAsr(opts: { force?: boolean } = {}): Promise<void> {
     if (!parsed.text || typeof parsed.text !== "string") {
       throw new Error(`Smoke test produced invalid JSON (no 'text' field): ${JSON.stringify(parsed).slice(0, 200)}`);
     }
-    console.log(`\n  ✓ Smoke test transcription: "${parsed.text.trim()}"`);
+    log(`\n  ✓ Smoke test transcription: "${parsed.text.trim()}"`);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -168,8 +206,8 @@ export async function setupAsr(opts: { force?: boolean } = {}): Promise<void> {
   };
   saveConfig(config);
 
-  console.log("\n  ✓ Parakeet ready. Config updated.");
-  console.log(`    asr_provider: parakeet-mlx`);
-  console.log(`    binary:       ${parakeetBin}`);
-  console.log(`    model:        ${DEFAULT_MODEL}\n`);
+  log("\n  ✓ Parakeet ready. Config updated.");
+  log(`    asr_provider: parakeet-mlx`);
+  log(`    binary:       ${parakeetBin}`);
+  log(`    model:        ${DEFAULT_MODEL}\n`);
 }

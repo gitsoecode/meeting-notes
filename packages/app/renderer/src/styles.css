@@ -1,0 +1,665 @@
+:root {
+  color-scheme: dark;
+  --bg-0: #0b0b0e;
+  --bg-1: #131318;
+  --bg-2: #1a1a21;
+  --bg-3: #24242d;
+  --border: #2a2a35;
+  --text-0: #f0f0f5;
+  --text-1: #b7b7c2;
+  --text-2: #6e6e7a;
+  --accent: #7c7cff;
+  --accent-hover: #9595ff;
+  --danger: #ff6b6b;
+  --success: #57d18c;
+  --warning: #f0b24a;
+  --radius: 8px;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+}
+
+button:hover:not(:disabled) {
+  background: var(--bg-3);
+  border-color: #3a3a47;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: white;
+}
+
+button.big {
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+input,
+textarea,
+select {
+  font: inherit;
+  color: var(--text-0);
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  width: 100%;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+label {
+  display: block;
+  color: var(--text-1);
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* -------- Layout -------- */
+
+.app {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  height: 100vh;
+  width: 100vw;
+}
+
+.sidebar {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  -webkit-app-region: drag;
+}
+
+.sidebar-header {
+  padding: 0 20px 20px;
+  font-weight: 600;
+  color: var(--text-0);
+  font-size: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-rec-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.nav-item {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  text-align: left;
+  padding: 10px 20px;
+  color: var(--text-1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  -webkit-app-region: no-drag;
+}
+
+.nav-item:hover {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+
+.nav-item.active {
+  background: var(--bg-2);
+  color: var(--text-0);
+  border-left: 2px solid var(--accent);
+  padding-left: 18px;
+}
+
+.main {
+  overflow-y: auto;
+  padding: 28px 40px;
+}
+
+.section-title {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+
+.section-subtitle {
+  color: var(--text-2);
+  margin: 0 0 24px;
+  font-size: 13px;
+}
+
+.card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.card-header {
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.muted {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* -------- Record view -------- */
+
+.record-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 20px;
+  height: calc(100vh - 180px);
+}
+
+.record-editor-pane {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.record-editor-pane .cm-editor {
+  flex: 1;
+  background: var(--bg-1);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.record-editor-pane .cm-scroller {
+  font-family: inherit;
+}
+
+.record-editor-pane .cm-gutters {
+  background: var(--bg-1);
+  border-right: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.record-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.status-big {
+  font-size: 14px;
+  color: var(--text-1);
+}
+
+.status-big .dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-2);
+  margin-right: 8px;
+}
+
+.status-big.recording .dot {
+  background: var(--danger);
+  animation: pulse 1.2s infinite ease-in-out;
+}
+
+.pipeline-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pipeline-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: var(--bg-2);
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.pipeline-row .state {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--bg-3);
+  color: var(--text-2);
+}
+
+.pipeline-row .state.running { background: #2a345c; color: #c4c9ff; }
+.pipeline-row .state.complete { background: #1f3d2b; color: var(--success); }
+.pipeline-row .state.failed { background: #3d1f1f; color: var(--danger); }
+
+/* -------- Meetings list -------- */
+
+.meetings-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.meetings-table th,
+.meetings-table td {
+  padding: 10px 14px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.meetings-table th {
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-weight: 500;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.meetings-table tr {
+  cursor: pointer;
+}
+
+.meetings-table tr:hover {
+  background: var(--bg-2);
+}
+
+.meetings-table .status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  background: var(--bg-3);
+  color: var(--text-2);
+}
+.meetings-table .status-pill.complete { background: #1f3d2b; color: var(--success); }
+.meetings-table .status-pill.processing { background: #2a345c; color: #c4c9ff; }
+.meetings-table .status-pill.error { background: #3d1f1f; color: var(--danger); }
+.meetings-table .status-pill.recording { background: #3d2a1f; color: var(--warning); }
+
+/* -------- Tabs -------- */
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 20px;
+}
+
+.tab {
+  background: transparent;
+  border: none;
+  padding: 10px 16px;
+  color: var(--text-2);
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+}
+
+.tab:hover {
+  background: transparent;
+  color: var(--text-0);
+}
+
+.tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--accent);
+}
+
+/* -------- Markdown view -------- */
+
+.markdown-view {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px 36px;
+  line-height: 1.65;
+}
+
+.markdown-view h1,
+.markdown-view h2,
+.markdown-view h3 {
+  margin-top: 1.4em;
+}
+
+.markdown-view h1:first-child,
+.markdown-view h2:first-child {
+  margin-top: 0;
+}
+
+.markdown-view code {
+  background: var(--bg-3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.markdown-view pre {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  overflow-x: auto;
+}
+
+.markdown-view pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.markdown-view a {
+  color: var(--accent);
+}
+
+.markdown-view ul,
+.markdown-view ol {
+  padding-left: 1.4em;
+}
+
+.markdown-view hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 24px 0;
+}
+
+.markdown-view blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 0;
+  padding: 0 14px;
+  color: var(--text-1);
+}
+
+/* -------- Modals -------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  width: 520px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.modal h2 {
+  margin: 0 0 16px;
+  font-size: 18px;
+}
+
+.modal .actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: auto;
+}
+
+/* -------- Logs / pre view -------- */
+
+.log-view {
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-1);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* -------- Wizard -------- */
+
+.wizard {
+  max-width: 560px;
+  margin: 40px auto;
+}
+
+.wizard-step {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 28px;
+  margin-bottom: 16px;
+}
+
+.wizard-step h2 {
+  margin: 0 0 8px;
+}
+
+.wizard-progress {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.wizard-progress-dot {
+  height: 4px;
+  flex: 1;
+  background: var(--bg-2);
+  border-radius: 2px;
+}
+
+.wizard-progress-dot.active {
+  background: var(--accent);
+}
+
+.wizard-progress-dot.done {
+  background: var(--success);
+}
+
+/* -------- Toggle switch -------- */
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background: var(--bg-3);
+  border-radius: 20px;
+  transition: 0.2s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  top: 3px;
+  background: white;
+  border-radius: 50%;
+  transition: 0.2s;
+}
+
+.switch input:checked + .slider {
+  background: var(--accent);
+}
+
+.switch input:checked + .slider:before {
+  transform: translateX(16px);
+}
+
+/* -------- Audio meter -------- */
+
+.audio-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.audio-meter-track {
+  flex: 1;
+  height: 6px;
+  background: var(--bg-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.audio-meter-fill {
+  height: 100%;
+  background: var(--success);
+  transition: width 60ms linear;
+}
+
+.audio-meter-label {
+  font-size: 11px;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  width: 24px;
+}
+
+/* -------- Loading splash -------- */
+
+.loading-splash {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  color: var(--text-2);
+}
+
+/* -------- Markdown editor fills parent -------- */
+
+.markdown-editor,
+.markdown-editor > div,
+.markdown-editor .cm-editor {
+  height: 100%;
+}

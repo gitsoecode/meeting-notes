@@ -8,12 +8,24 @@ const execFileAsync = promisify(execFile);
 
 /**
  * Open a file in Obsidian via the obsidian:// URI scheme.
- * Vault is identified by name (the basename of the vault folder).
- * File path is relative to the vault root, without extension.
+ *
+ * Early-returns when `config.obsidian_integration.enabled === false` so
+ * call sites don't need to branch on the toggle. The vault is identified
+ * by `obsidian_integration.vault_name`; the relative path is computed
+ * against `obsidian_integration.vault_path`.
  */
-export async function openInObsidian(config: AppConfig, absoluteFilePath: string): Promise<void> {
-  const vaultPath = config.vault_path.replace(/^~/, os.homedir());
-  const vaultName = path.basename(vaultPath);
+export async function openInObsidian(
+  config: AppConfig,
+  absoluteFilePath: string
+): Promise<void> {
+  const integration = config.obsidian_integration;
+  if (!integration?.enabled) return;
+
+  const vaultPathRaw = integration.vault_path;
+  const vaultName = integration.vault_name;
+  if (!vaultPathRaw || !vaultName) return;
+
+  const vaultPath = vaultPathRaw.replace(/^~/, os.homedir());
 
   // Compute path relative to vault root
   const relativePath = path.relative(vaultPath, absoluteFilePath);

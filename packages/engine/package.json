@@ -1,0 +1,42 @@
+{
+  "name": "@meeting-notes/engine",
+  "version": "0.1.0",
+  "description": "Meeting Notes engine: config, recording, transcription, pipeline",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./core/*": {
+      "types": "./dist/core/*.d.ts",
+      "default": "./dist/core/*.js"
+    },
+    "./adapters/*": {
+      "types": "./dist/adapters/*.d.ts",
+      "default": "./dist/adapters/*.js"
+    },
+    "./logging/*": {
+      "types": "./dist/logging/*.d.ts",
+      "default": "./dist/logging/*.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').cpSync('src/defaults','dist/defaults',{recursive:true})\"",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@napi-rs/keyring": "^1.2.0",
+    "gray-matter": "^4.0.3",
+    "openai": "^6.33.0",
+    "ulid": "^2.3.0",
+    "yaml": "^2.7.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}

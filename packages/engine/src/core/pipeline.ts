@@ -1,11 +1,42 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
-import { resolveBasePath, AppConfig } from "./config.js";
+import { AppConfig, getConfigDir } from "./config.js";
 import { writeMarkdownFile } from "./markdown.js";
 import { updateSectionState } from "./run.js";
+import { migrateVaultPromptsToHome } from "./migrate-prompts.js";
 import { Logger } from "../logging/logger.js";
+
+/**
+ * Callback the pipeline invokes to report per-section progress. The
+ * Electron app subscribes to this to stream a live status panel; the
+ * CLI ignores it (its logs already tell the same story).
+ */
+export type PipelineProgressEvent =
+  | { type: "section-start"; sectionId: string; label: string; filename: string }
+  | {
+      type: "section-complete";
+      sectionId: string;
+      label: string;
+      filename: string;
+      latencyMs: number;
+      tokensUsed?: number;
+    }
+  | {
+      type: "section-failed";
+      sectionId: string;
+      label: string;
+      filename: string;
+      error: string;
+      latencyMs: number;
+    };
+
+export type LlmCallFn = (
+  systemPrompt: string,
+  userMessage: string
+) => Promise<{ content: string; tokensUsed?: number }>;
 
 export interface PipelineInput {
   transcript: string;
@@ -43,6 +74,8 @@ export interface PipelineRunOptions {
    * Builtin prompts always run. Ignored when `onlyIds` is set.
    */
   autoOnly?: boolean;
+  /** Live progress callback (Electron app subscribes; CLI ignores). */
+  onProgress?: (event: PipelineProgressEvent) => void;
 }
 
 /**
@@ -72,8 +105,26 @@ const __dirname = path.dirname(__filename);
  */
 export const DEFAULT_PROMPTS_DIR = path.resolve(__dirname, "../defaults/prompts");
 
-export function getVaultPromptsDir(config: AppConfig): string {
-  return path.join(resolveBasePath(config), "Config", "Prompts");
+/**
+ * Prompts live in `~/.meeting-notes/prompts/` — outside the data directory
+ * so they're never touched by Obsidian. This is the single source of truth
+ * for prompt location; callers no longer take config.
+ */
+export function getPromptsDir(): string {
+  return path.join(getConfigDir(), "prompts");
+}
+
+/**
+ * Legacy path inside a vault — used only by the one-shot migration in
+ * `migrate-prompts.ts`. Do not use in new code.
+ */
+export function getLegacyVaultPromptsDir(config: AppConfig): string {
+  // Historically: {data_path}/Config/Prompts
+  const homeExpanded = config.data_path.replace(
+    /^~/,
+    os.homedir()
+  );
+  return path.join(homeExpanded, "Config", "Prompts");
 }
 
 interface PromptFrontmatter {
@@ -146,12 +197,28 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
 }
 
 /**
- * Load every prompt from the vault's Config/Prompts directory.
+ * Load every prompt from `~/.meeting-notes/prompts/`.
  * Returns builtin prompts first, then the rest alphabetically by filename.
  * Self-heals by re-seeding the default summary if no builtin is present.
+ *
+ * If `config` is provided and legacy prompts still exist in the vault,
+ * they are migrated lazily on first load (idempotent).
  */
-export function loadAllPrompts(config: AppConfig, logger?: Logger): ResolvedPrompt[] {
-  const dir = getVaultPromptsDir(config);
+export function loadAllPrompts(config?: AppConfig, logger?: Logger): ResolvedPrompt[] {
+  const dir = getPromptsDir();
+
+  // Lazy migration from the legacy vault location, if any.
+  // (migrate-prompts.ts imports from this file; ES module cycles are fine
+  // because we only reference the export at call time, not init time.)
+  if (config) {
+    try {
+      migrateVaultPromptsToHome(config);
+    } catch (err) {
+      logger?.warn("Prompt migration skipped", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
@@ -260,12 +327,12 @@ export function resetDefaultPrompts(destDir: string, fileName?: string): string[
  * the file doesn't exist or can't be parsed.
  */
 export function updatePromptFrontmatter(
-  config: AppConfig,
+  _config: AppConfig | undefined,
   id: string,
   patch: Record<string, unknown>,
   logger?: Logger
 ): ResolvedPrompt | null {
-  const prompts = loadAllPrompts(config, logger);
+  const prompts = loadAllPrompts(undefined, logger);
   const existing = prompts.find((p) => p.id === id);
   if (!existing) return null;
 
@@ -371,11 +438,11 @@ export async function runPipeline(
   config: AppConfig,
   runFolderPath: string,
   input: PipelineInput,
-  llmCall: (systemPrompt: string, userMessage: string) => Promise<{ content: string; tokensUsed?: number }>,
+  llmCall: LlmCallFn,
   logger: Logger,
   options: PipelineRunOptions = {}
 ): Promise<PipelineResult[]> {
-  const { onlyIds, skipComplete, onlyFailed, maxAttempts = 3, autoOnly } = options;
+  const { onlyIds, skipComplete, onlyFailed, maxAttempts = 3, autoOnly, onProgress } = options;
 
   let allPrompts = loadAllPrompts(config, logger);
 
@@ -420,6 +487,12 @@ export async function runPipeline(
       filename: prompt.filename,
       label: prompt.label,
       builtin: prompt.builtin,
+    });
+    onProgress?.({
+      type: "section-start",
+      sectionId: prompt.id,
+      label: prompt.label,
+      filename: prompt.filename,
     });
   }
 
@@ -475,6 +548,15 @@ export async function runPipeline(
           attempts: response.attempts,
         });
 
+        onProgress?.({
+          type: "section-complete",
+          sectionId: prompt.id,
+          label: prompt.label,
+          filename: prompt.filename,
+          latencyMs,
+          tokensUsed: response.tokensUsed,
+        });
+
         return {
           sectionId: prompt.id,
           filename: prompt.filename,
@@ -496,6 +578,15 @@ export async function runPipeline(
           builtin: prompt.builtin,
           error: errorMsg,
           latency_ms: latencyMs,
+        });
+
+        onProgress?.({
+          type: "section-failed",
+          sectionId: prompt.id,
+          label: prompt.label,
+          filename: prompt.filename,
+          error: errorMsg,
+          latencyMs,
         });
 
         return {

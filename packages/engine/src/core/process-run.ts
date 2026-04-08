@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AppConfig } from "./config.js";
 import { updateRunStatus } from "./run.js";
-import { runPipeline, type PipelineInput } from "./pipeline.js";
+import {
+  runPipeline,
+  type PipelineInput,
+  type PipelineProgressEvent,
+} from "./pipeline.js";
 import { getSecret, requireSecret } from "./secrets.js";
 import { ClaudeProvider } from "../adapters/llm/claude.js";
 import type { AsrProvider, TranscriptResult } from "../adapters/asr/provider.js";
@@ -95,13 +99,15 @@ interface ProcessRunOptions {
    * Set false to run every enabled prompt regardless of `auto` frontmatter.
    */
   autoOnly?: boolean;
+  /** Live progress callback forwarded to the pipeline. */
+  onProgress?: (event: PipelineProgressEvent) => void;
 }
 
 export async function processRun(opts: ProcessRunOptions): Promise<{
   succeeded: string[];
   failed: string[];
 }> {
-  const { config, runFolder, title, date, audioFiles, logger, autoOnly = true } = opts;
+  const { config, runFolder, title, date, audioFiles, logger, autoOnly = true, onProgress } = opts;
 
   updateRunStatus(runFolder, "processing");
 
@@ -171,7 +177,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     input,
     (sys, usr) => claude.call(sys, usr),
     logger,
-    { autoOnly }
+    { autoOnly, onProgress }
   );
 
   const succeeded = results.filter((r) => r.success).map((r) => r.sectionId);

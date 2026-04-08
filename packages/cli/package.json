@@ -1,0 +1,23 @@
+{
+  "name": "@meeting-notes/cli",
+  "version": "0.1.0",
+  "description": "Meeting Notes CLI",
+  "type": "module",
+  "bin": {
+    "meeting-notes": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@meeting-notes/engine": "*",
+    "commander": "^13.1.0",
+    "gray-matter": "^4.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.8.0"
+  }
+}
