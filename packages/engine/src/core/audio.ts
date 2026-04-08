@@ -39,20 +39,53 @@ export async function getAudioInfo(audioPath: string): Promise<AudioInfo> {
   }
 }
 
+/**
+ * Output format for ASR normalization.
+ *
+ * - `wav16`: 16 kHz mono 16-bit PCM WAV. Default. Largest (~1.92 MB/min) but
+ *   lossless and accepted by every ASR provider. Use for local providers
+ *   (Parakeet, whisper-local) where there's no upload cost.
+ *
+ * - `opus32k`: 16 kHz mono 32 kbps Opus in an Ogg container (~0.24 MB/min —
+ *   8x smaller than wav16). Use for OpenAI Whisper, which enforces a 25 MB
+ *   per-file upload limit. With wav16 the limit caps you around 13 minutes
+ *   per channel; with opus32k you get ~100 minutes per channel. Opus at
+ *   32 kbps mono is well above transparent-for-speech quality — whisper
+ *   shows no measurable WER difference vs. lossless at this bitrate.
+ */
+export type AsrAudioFormat = "wav16" | "opus32k";
+
+/**
+ * Returns the file extension (including the leading dot) for a given ASR
+ * audio format. Callers build the normalized output path with this so the
+ * extension always matches the encoded format.
+ */
+export function asrAudioExtension(format: AsrAudioFormat): string {
+  return format === "opus32k" ? ".ogg" : ".wav";
+}
+
 export async function normalizeAudio(
   inputPath: string,
-  outputPath: string
+  outputPath: string,
+  format: AsrAudioFormat = "wav16"
 ): Promise<void> {
   const dir = path.dirname(outputPath);
   fs.mkdirSync(dir, { recursive: true });
 
+  // Common args: 16 kHz mono. Whisper and Parakeet both operate at 16 kHz
+  // internally; anything higher gets downsampled on their side anyway.
+  const commonArgs = ["-i", inputPath, "-ar", "16000", "-ac", "1"];
+
+  const formatArgs =
+    format === "opus32k"
+      ? ["-c:a", "libopus", "-b:a", "32k", "-application", "voip"]
+      : ["-c:a", "pcm_s16le"];
+
   try {
     await execFileAsync("ffmpeg", [
-      "-i", inputPath,
-      "-ar", "16000",       // 16kHz sample rate (standard for ASR)
-      "-ac", "1",            // mono
-      "-c:a", "pcm_s16le",  // 16-bit PCM WAV
-      "-y",                  // overwrite
+      ...commonArgs,
+      ...formatArgs,
+      "-y", // overwrite
       outputPath,
     ]);
   } catch {

@@ -10,7 +10,7 @@ import {
 import { getSecret, requireSecret } from "./secrets.js";
 import { ClaudeProvider } from "../adapters/llm/claude.js";
 import type { AsrProvider, TranscriptResult } from "../adapters/asr/provider.js";
-import { normalizeAudio } from "./audio.js";
+import { normalizeAudio, asrAudioExtension, type AsrAudioFormat } from "./audio.js";
 import { formatTranscriptMarkdown, buildTranscriptForLlm, buildSpeakerExcerpts } from "./transcript.js";
 import { writeMarkdownFile } from "./markdown.js";
 import type { Logger } from "../logging/logger.js";
@@ -50,13 +50,25 @@ export async function transcribeAudio(opts: TranscribeAudioOptions): Promise<Tra
 
   const asr = await createAsrProvider(config);
 
-  // Normalize audio for ASR
-  const normalizedPath = path.join(runFolder, "audio", `normalized-${path.basename(audioPath, path.extname(audioPath))}.wav`);
+  // Pick the normalization format based on the ASR provider:
+  // - OpenAI has a 25 MB per-file upload limit. At 16 kHz mono PCM WAV that
+  //   caps at ~13 minutes. Transcoding to 32 kbps Opus gives ~100 minutes
+  //   per channel with no measurable WER hit on speech content.
+  // - Local providers (Parakeet, whisper-local) have no upload cost, so we
+  //   keep lossless WAV to avoid any theoretical quality loss.
+  const asrFormat: AsrAudioFormat =
+    config.asr_provider === "openai" ? "opus32k" : "wav16";
+  const normalizedExt = asrAudioExtension(asrFormat);
+  const normalizedPath = path.join(
+    runFolder,
+    "audio",
+    `normalized-${path.basename(audioPath, path.extname(audioPath))}${normalizedExt}`
+  );
   let audioForAsr = audioPath;
   try {
-    await normalizeAudio(audioPath, normalizedPath);
+    await normalizeAudio(audioPath, normalizedPath, asrFormat);
     audioForAsr = normalizedPath;
-    logger.info("Audio normalized for ASR", { path: normalizedPath });
+    logger.info("Audio normalized for ASR", { path: normalizedPath, format: asrFormat });
   } catch (err) {
     logger.warn("Audio normalization failed, using original file", {
       error: err instanceof Error ? err.message : String(err),
