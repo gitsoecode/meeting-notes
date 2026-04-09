@@ -176,12 +176,16 @@ export function RecordView({
 
   return (
     <>
-      <h1 className="section-title">Home</h1>
-      <p className="section-subtitle">
-        {recording.active
-          ? `Recording "${recording.title ?? "Untitled Meeting"}"`
-          : "Start a new meeting or jump back into a recent one."}
-      </p>
+      <div className="page-header">
+        <div>
+          <h1 className="section-title">Home</h1>
+          <p className="section-subtitle">
+            {recording.active
+              ? `Recording "${recording.title ?? "Untitled Meeting"}"`
+              : "Start a new meeting or jump back into a recent one."}
+          </p>
+        </div>
+      </div>
 
       {!recording.active && (
         <>
@@ -208,11 +212,7 @@ export function RecordView({
                 {starting ? "Starting…" : "Start recording"}
               </button>
             </div>
-            {error && (
-              <div className="muted" style={{ color: "var(--danger)", marginTop: 12 }}>
-                {error}
-              </div>
-            )}
+            {error && <div className="muted tone-error" style={{ marginTop: 12 }}>{error}</div>}
           </div>
 
           {recentRuns.length > 0 && (
@@ -280,11 +280,7 @@ export function RecordView({
                   {stopping ? "Stopping…" : "Stop"}
                 </button>
               </div>
-              {error && (
-                <div className="muted" style={{ color: "var(--danger)", marginTop: 12 }}>
-                  {error}
-                </div>
-              )}
+              {error && <div className="muted tone-error" style={{ marginTop: 12 }}>{error}</div>}
             </div>
             <PipelineStatus sections={sections} title="Processing" />
           </div>

@@ -80,7 +80,7 @@ export function LogsView() {
         </div>
       </div>
 
-      {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+      {error && <div className="muted tone-error">{error}</div>}
       <pre className="log-view">{content || "(empty)"}</pre>
     </>
   );

@@ -129,8 +129,8 @@ export function ModelDropdown({
               padding: "2px 8px",
               borderRadius: 999,
               background:
-                currentKind === "claude" ? "var(--accent-bg, #2a3a5a)" : "var(--success-bg, #234d2a)",
-              color: "var(--fg)",
+                currentKind === "claude" ? "var(--accent-muted)" : "var(--success-muted)",
+              color: currentKind === "claude" ? "var(--accent)" : "var(--success)",
             }}
           >
             {currentKind === "claude" ? "Cloud" : "Local"}
@@ -225,9 +225,9 @@ function InstallHint({ model }: { model: string }) {
             <p className="muted">First-time download — runs in the background.</p>
             {log.length > 0 && <pre className="log-view">{log.join("\n")}</pre>}
             {error && (
-              <div className="muted" style={{ color: "var(--danger)" }}>
-                {error}
-              </div>
+            <div className="muted tone-error">
+              {error}
+            </div>
             )}
             <div className="actions">
               <button onClick={() => setLogOpen(false)} disabled={busy}>

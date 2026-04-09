@@ -185,7 +185,7 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
   };
 
   if (loading) return <div className="muted">Loading…</div>;
-  if (error) return <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>;
+  if (error) return <div className="muted tone-error">{error}</div>;
   if (!detail) return <div className="muted">Meeting not found.</div>;
 
   const notesContent = tabContents.notes ?? "";
@@ -208,7 +208,7 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+      <div className="page-header" style={{ alignItems: "flex-start" }}>
         <div>
           <button onClick={onBack} style={{ marginBottom: 12 }}>
             ← Back
@@ -220,7 +220,7 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
             <span className={`status-pill ${detail.status}`}>{detail.status}</span>
           </p>
         </div>
-        <div className="row">
+        <div className="page-actions">
           <button onClick={() => setReprocessOpen(true)}>Reprocess…</button>
           <button onClick={() => setRunPromptOpen(true)}>Run prompt…</button>
           <button onClick={onOpenFinder}>Open folder</button>
@@ -234,7 +234,7 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
             sections.some((s) => s.state === "running") && (
               <div
                 className="card"
-                style={{ borderColor: "var(--accent, #6aa0ff)", marginBottom: 8 }}
+                style={{ borderColor: "var(--accent)", marginBottom: 8 }}
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                   <span className="spinner" aria-hidden="true" />
@@ -422,7 +422,7 @@ function ReprocessModal({
             Include manual prompts (off = auto-only)
           </label>
         </div>
-        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+        {error && <div className="muted tone-error">{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>Cancel</button>
           <button className="primary" onClick={onRun} disabled={running}>
@@ -483,7 +483,7 @@ function RunPromptModal({
             </option>
           ))}
         </select>
-        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+        {error && <div className="muted tone-error">{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>Cancel</button>
           <button className="primary" onClick={onRun} disabled={running || !selectedId}>

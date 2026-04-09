@@ -58,7 +58,7 @@ export function MeetingsList({ onOpen }: MeetingsListProps) {
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+      <div className="page-header">
         <div>
           <h1 className="section-title">Meetings</h1>
           <p className="section-subtitle">
@@ -67,7 +67,7 @@ export function MeetingsList({ onOpen }: MeetingsListProps) {
               : `${runs.length} meeting${runs.length === 1 ? "" : "s"} on disk.`}
           </p>
         </div>
-        <div className="row">
+        <div className="page-actions">
           <button onClick={refresh} disabled={loading}>
             Refresh
           </button>
@@ -82,7 +82,7 @@ export function MeetingsList({ onOpen }: MeetingsListProps) {
         </div>
       </div>
 
-      {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+      {error && <div className="muted tone-error">{error}</div>}
 
       {loading ? (
         <div className="muted">Loading…</div>
@@ -195,9 +195,7 @@ function BulkRunPromptModal({ runFolders, onClose, onDone }: BulkRunPromptModalP
             </option>
           ))}
         </select>
-        {error && (
-          <div className="muted" style={{ color: "var(--danger)", marginTop: 12 }}>{error}</div>
-        )}
+        {error && <div className="muted tone-error" style={{ marginTop: 12 }}>{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>
             Cancel

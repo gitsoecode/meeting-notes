@@ -99,7 +99,7 @@ export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
           Clear
         </button>
       )}
-      {hint && <span className="muted" style={{ color: "var(--warning)" }}>{hint}</span>}
+      {hint && <span className="muted tone-warning">{hint}</span>}
     </div>
   );
 }

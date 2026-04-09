@@ -1,21 +1,70 @@
 :root {
-  color-scheme: dark;
-  --bg-0: #0b0b0e;
-  --bg-1: #131318;
-  --bg-2: #1a1a21;
-  --bg-3: #24242d;
-  --border: #2a2a35;
-  --text-0: #f0f0f5;
-  --text-1: #b7b7c2;
-  --text-2: #6e6e7a;
-  --accent: #7c7cff;
-  --accent-hover: #9595ff;
-  --danger: #ff6b6b;
-  --success: #57d18c;
-  --warning: #f0b24a;
+  color-scheme: light;
+  --accent: #2d6b3f;
+  --accent-hover: #245533;
+  --accent-muted: #2d6b3f1a;
+
+  --bg-primary: #ffffff;
+  --bg-secondary: #f4f5f5;
+  --bg-tertiary: #eaebeb;
+  --bg-hover: #edefed;
+  --bg-active: #e5e8e5;
+
+  --text-primary: #1e3322;
+  --text-secondary: #6b7b6b;
+  --text-tertiary: #808a80;
+  --text-disabled: #b0b8b0;
+  --text-inverse: #ffffff;
+
+  --border-default: #d0d4d0;
+  --border-strong: #b0b8b0;
+  --border-subtle: #e8e9e8;
+  --border-focus: #2d6b3f;
+
+  --success: #2d6b3f;
+  --success-muted: #2d6b3f1a;
+  --warning: #e8a800;
+  --warning-muted: #e8a8001a;
+  --warning-text: #b08600;
+  --error: #d93025;
+  --error-muted: #d930251a;
+  --info: #3b82c4;
+  --info-muted: #3b82c41a;
+  --recording: #d93025;
+
+  --radius-sm: 4px;
   --radius: 8px;
-  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
-  --font-mono: "SF Mono", "JetBrains Mono", "Menlo", monospace;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 40px;
+
+  --shadow-sm: 0 1px 2px rgba(30, 51, 34, 0.05);
+  --shadow-md: 0 12px 30px rgba(30, 51, 34, 0.08);
+
+  --font-sans: "Geist", "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --font-heading: "Playfair Display", "Iowan Old Style", "Times New Roman", serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", "JetBrains Mono", "Menlo", monospace;
+
+  /* Compatibility aliases used across the renderer. */
+  --bg-0: var(--bg-primary);
+  --bg-1: var(--bg-primary);
+  --bg-2: var(--bg-secondary);
+  --bg-3: var(--bg-tertiary);
+  --border: var(--border-default);
+  --text-0: var(--text-primary);
+  --text-1: var(--text-secondary);
+  --text-2: var(--text-tertiary);
+  --danger: var(--error);
+  --fg: var(--text-primary);
+  --accent-bg: var(--accent-muted);
+  --success-bg: var(--success-muted);
 }
 
 * {
@@ -28,39 +77,42 @@ body,
   margin: 0;
   padding: 0;
   height: 100%;
-  background: var(--bg-0);
-  color: var(--text-0);
+  background: var(--bg-primary);
+  color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button {
   font: inherit;
   color: inherit;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius);
-  padding: 8px 14px;
+  padding: 10px 16px;
   cursor: pointer;
-  transition: background 0.1s, border-color 0.1s;
+  box-shadow: var(--shadow-sm);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
 }
 
 button:hover:not(:disabled) {
-  background: var(--bg-3);
-  border-color: #3a3a47;
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }
 
 button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: white;
+  color: var(--text-inverse);
 }
 
 button.primary:hover:not(:disabled) {
@@ -69,26 +121,26 @@ button.primary:hover:not(:disabled) {
 }
 
 button.danger {
-  background: var(--danger);
-  border-color: var(--danger);
-  color: white;
+  background: var(--error);
+  border-color: var(--error);
+  color: var(--text-inverse);
 }
 
 button.big {
-  padding: 14px 28px;
+  padding: 14px 22px;
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 input,
 textarea,
 select {
   font: inherit;
-  color: var(--text-0);
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius);
-  padding: 8px 12px;
+  padding: 10px 12px;
   width: 100%;
 }
 
@@ -96,14 +148,16 @@ input:focus,
 textarea:focus,
 select:focus {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px var(--accent-muted);
 }
 
 label {
   display: block;
-  color: var(--text-1);
+  color: var(--text-secondary);
   margin-bottom: 6px;
   font-size: 13px;
+  font-weight: 500;
 }
 
 a {
@@ -113,6 +167,10 @@ a {
 
 a:hover {
   text-decoration: underline;
+}
+
+code {
+  font-family: var(--font-mono);
 }
 
 /* -------- Layout -------- */
@@ -136,8 +194,8 @@ a:hover {
  */
 .app-titlebar {
   grid-area: titlebar;
-  background: var(--bg-0);
-  border-bottom: 1px solid var(--border);
+  background: var(--bg-primary);
+  border-bottom: 1px solid var(--border-subtle);
   -webkit-app-region: drag;
   display: flex;
   align-items: center;
@@ -149,22 +207,24 @@ a:hover {
 .app-titlebar .titlebar-button {
   -webkit-app-region: no-drag;
   background: var(--accent);
-  color: white;
-  border: none;
+  color: var(--text-inverse);
+  border: 1px solid var(--accent);
   border-radius: 6px;
   padding: 4px 12px;
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 600;
   cursor: pointer;
+  box-shadow: none;
 }
 .app-titlebar .titlebar-button:hover {
-  filter: brightness(1.1);
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 
 .sidebar {
   grid-area: sidebar;
-  background: var(--bg-1);
-  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-subtle);
   padding: 20px 0;
   display: flex;
   flex-direction: column;
@@ -175,7 +235,7 @@ a:hover {
 .sidebar-header {
   padding: 0 20px 20px;
   font-weight: 600;
-  color: var(--text-0);
+  color: var(--text-primary);
   font-size: 15px;
   display: flex;
   align-items: center;
@@ -186,7 +246,7 @@ a:hover {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: var(--danger);
+  background: var(--recording);
   animation: pulse 1.2s infinite ease-in-out;
 }
 
@@ -199,9 +259,10 @@ a:hover {
   background: transparent;
   border: none;
   border-radius: 0;
+  box-shadow: none;
   text-align: left;
   padding: 10px 20px;
-  color: var(--text-1);
+  color: var(--text-secondary);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -209,40 +270,45 @@ a:hover {
 }
 
 .nav-item:hover {
-  background: var(--bg-2);
-  color: var(--text-0);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 .nav-item.active {
-  background: var(--bg-2);
-  color: var(--text-0);
+  background: var(--bg-active);
+  color: var(--text-primary);
   border-left: 2px solid var(--accent);
   padding-left: 18px;
+  font-weight: 600;
 }
 
 .main {
   overflow-y: auto;
-  padding: 28px 40px;
+  padding: 32px 40px 40px;
+  background: var(--bg-primary);
 }
 
 .section-title {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
   margin: 0 0 4px;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
 }
 
 .section-subtitle {
-  color: var(--text-2);
+  color: var(--text-secondary);
   margin: 0 0 24px;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .card {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   padding: 20px;
   margin-bottom: 20px;
+  box-shadow: var(--shadow-sm);
 }
 
 .card-header {
@@ -251,6 +317,7 @@ a:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  color: var(--text-primary);
 }
 
 .row {
@@ -273,7 +340,7 @@ a:hover {
 }
 
 .muted {
-  color: var(--text-2);
+  color: var(--text-secondary);
   font-size: 13px;
 }
 
@@ -282,27 +349,67 @@ a:hover {
   font-size: 12px;
 }
 
+.tone-error {
+  color: var(--error);
+}
+
+.tone-success {
+  color: var(--success);
+}
+
+.tone-warning {
+  color: var(--warning-text);
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.page-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.surface-frame {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+
 /* -------- Record view -------- */
 
 .record-layout {
   display: grid;
   grid-template-columns: 1fr 320px;
-  gap: 20px;
+  gap: 24px;
   height: calc(100vh - 180px);
 }
 
 .record-editor-pane {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  box-shadow: var(--shadow-sm);
 }
 
 .record-editor-pane .cm-editor {
   flex: 1;
-  background: var(--bg-1);
+  background: var(--bg-primary);
   font-family: var(--font-mono);
   font-size: 13px;
 }
@@ -312,9 +419,9 @@ a:hover {
 }
 
 .record-editor-pane .cm-gutters {
-  background: var(--bg-1);
-  border-right: 1px solid var(--border);
-  color: var(--text-2);
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-subtle);
+  color: var(--text-tertiary);
 }
 
 .record-controls {
@@ -325,7 +432,8 @@ a:hover {
 
 .status-big {
   font-size: 14px;
-  color: var(--text-1);
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .status-big .dot {
@@ -333,12 +441,12 @@ a:hover {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--text-2);
+  background: var(--text-tertiary);
   margin-right: 8px;
 }
 
 .status-big.recording .dot {
-  background: var(--danger);
+  background: var(--recording);
   animation: pulse 1.2s infinite ease-in-out;
 }
 
@@ -352,9 +460,10 @@ a:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: var(--bg-2);
+  background: var(--bg-secondary);
   padding: 10px 14px;
-  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
   font-size: 13px;
 }
 
@@ -362,38 +471,39 @@ a:hover {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: var(--bg-3);
-  color: var(--text-2);
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
 }
 
-.pipeline-row .state.running { background: #2a345c; color: #c4c9ff; }
-.pipeline-row .state.complete { background: #1f3d2b; color: var(--success); }
-.pipeline-row .state.failed { background: #3d1f1f; color: var(--danger); }
+.pipeline-row .state.running { background: var(--info-muted); color: var(--info); }
+.pipeline-row .state.complete { background: var(--success-muted); color: var(--success); }
+.pipeline-row .state.failed { background: var(--error-muted); color: var(--error); }
 
 /* -------- Meetings list -------- */
 
 .meetings-table {
   width: 100%;
   border-collapse: collapse;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   overflow: hidden;
+  box-shadow: var(--shadow-sm);
 }
 
 .meetings-table th,
 .meetings-table td {
-  padding: 10px 14px;
+  padding: 12px 14px;
   text-align: left;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
   font-size: 13px;
 }
 
 .meetings-table th {
-  background: var(--bg-2);
-  color: var(--text-1);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
   font-weight: 500;
   font-size: 11px;
   text-transform: uppercase;
@@ -405,29 +515,15 @@ a:hover {
 }
 
 .meetings-table tr:hover {
-  background: var(--bg-2);
+  background: var(--bg-secondary);
 }
-
-.meetings-table .status-pill {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  text-transform: uppercase;
-  background: var(--bg-3);
-  color: var(--text-2);
-}
-.meetings-table .status-pill.complete { background: #1f3d2b; color: var(--success); }
-.meetings-table .status-pill.processing { background: #2a345c; color: #c4c9ff; }
-.meetings-table .status-pill.error { background: #3d1f1f; color: var(--danger); }
-.meetings-table .status-pill.recording { background: #3d2a1f; color: var(--warning); }
 
 /* -------- Tabs -------- */
 
 .tabs {
   display: flex;
   gap: 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-default);
   margin-bottom: 20px;
 }
 
@@ -435,19 +531,21 @@ a:hover {
   background: transparent;
   border: none;
   padding: 10px 16px;
-  color: var(--text-2);
+  color: var(--text-tertiary);
   border-bottom: 2px solid transparent;
   border-radius: 0;
+  box-shadow: none;
 }
 
 .tab:hover {
   background: transparent;
-  color: var(--text-0);
+  color: var(--text-primary);
 }
 
 .tab.active {
-  color: var(--text-0);
+  color: var(--text-primary);
   border-bottom-color: var(--accent);
+  font-weight: 600;
 }
 
 /* -------- Home: recent meetings grid -------- */
@@ -463,25 +561,27 @@ a:hover {
 }
 
 .recent-meeting-card {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius);
   padding: 14px 16px;
   text-align: left;
   cursor: pointer;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  transition: border-color 0.1s;
+  gap: 6px;
+  transition: border-color 0.1s, transform 0.1s, box-shadow 0.1s;
+  box-shadow: var(--shadow-sm);
 }
 
 .recent-meeting-card:hover {
   border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .recent-meeting-title {
   font-weight: 600;
-  color: var(--text-0);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -501,8 +601,8 @@ a:hover {
 
 .segmented {
   display: inline-flex;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   padding: 2px;
   gap: 0;
@@ -513,34 +613,77 @@ a:hover {
   border: none;
   padding: 4px 12px;
   font-size: 12px;
-  color: var(--text-2);
+  color: var(--text-secondary);
   border-radius: 4px;
   cursor: pointer;
+  box-shadow: none;
 }
 
 .segmented button.active {
   background: var(--accent);
-  color: white;
+  color: var(--text-inverse);
 }
 
 .segmented button:hover:not(.active) {
-  color: var(--text-0);
+  color: var(--text-primary);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.status-pill.complete {
+  background: var(--success-muted);
+  color: var(--success);
+}
+
+.status-pill.processing,
+.status-pill.running {
+  background: var(--info-muted);
+  color: var(--info);
+}
+
+.status-pill.error,
+.status-pill.failed {
+  background: var(--error-muted);
+  color: var(--error);
+}
+
+.status-pill.recording {
+  background: var(--warning-muted);
+  color: var(--warning-text);
+}
+
+.status-pill.pending,
+.status-pill.builtin {
+  background: var(--bg-active);
+  color: var(--text-secondary);
 }
 
 /* -------- Prompt list rows -------- */
 
 .prompt-list-row {
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
   cursor: pointer;
 }
 
 .prompt-list-row:hover {
-  background: var(--bg-2);
+  background: var(--bg-secondary);
 }
 
 .prompt-list-row.active {
-  background: var(--bg-2);
+  background: var(--bg-active);
 }
 
 /* -------- Meeting picker (RunAgainstMeetingModal) -------- */
@@ -551,9 +694,10 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius);
   padding: 6px;
+  background: var(--bg-secondary);
 }
 
 .meeting-picker-row {
@@ -570,11 +714,11 @@ a:hover {
 }
 
 .meeting-picker-row:hover {
-  background: var(--bg-2);
+  background: var(--bg-hover);
 }
 
 .meeting-picker-row.selected {
-  background: var(--bg-2);
+  background: var(--bg-active);
   border-color: var(--accent);
 }
 
@@ -585,7 +729,7 @@ a:hover {
 }
 
 .meeting-picker-title {
-  color: var(--text-0);
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -600,19 +744,20 @@ a:hover {
 }
 
 .overview-section {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   padding: 18px 22px;
   display: flex;
   flex-direction: column;
   gap: 10px;
+  box-shadow: var(--shadow-sm);
 }
 
 .overview-section-title {
   font-size: 13px;
   font-weight: 600;
-  color: var(--text-1);
+  color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 6px;
@@ -627,7 +772,7 @@ a:hover {
 .overview-label {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-2);
+  color: var(--text-tertiary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   width: 110px;
@@ -636,7 +781,7 @@ a:hover {
 
 .overview-value {
   font-size: 14px;
-  color: var(--text-0);
+  color: var(--text-primary);
 }
 
 .overview-description {
@@ -649,8 +794,8 @@ a:hover {
 }
 
 .overview-description:hover {
-  background: var(--bg-2);
-  border-color: var(--border);
+  background: var(--bg-secondary);
+  border-color: var(--border-default);
 }
 
 .chip-row {
@@ -660,12 +805,12 @@ a:hover {
 }
 
 .chip {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
   border-radius: 999px;
   padding: 2px 10px;
   font-size: 12px;
-  color: var(--text-1);
+  color: var(--text-secondary);
 }
 
 .overview-sections-list,
@@ -701,9 +846,9 @@ a:hover {
 }
 
 .prompts-tab-nav {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   padding: 8px;
   display: flex;
   flex-direction: column;
@@ -712,7 +857,7 @@ a:hover {
 
 .prompts-tab-nav-header {
   padding: 4px 4px 8px 4px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 4px;
 }
 
@@ -725,17 +870,18 @@ a:hover {
   border: none;
   border-radius: 6px;
   padding: 8px 10px;
-  color: var(--text-1);
+  color: var(--text-secondary);
   width: 100%;
+  box-shadow: none;
 }
 
 .prompts-tab-nav-item:hover {
-  background: var(--bg-2);
+  background: var(--bg-hover);
 }
 
 .prompts-tab-nav-item.active {
-  background: var(--bg-2);
-  color: var(--text-0);
+  background: var(--bg-active);
+  color: var(--text-primary);
 }
 
 .prompts-tab-nav-label {
@@ -752,11 +898,12 @@ a:hover {
 /* -------- Markdown view -------- */
 
 .markdown-view {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   padding: 28px 36px;
   line-height: 1.65;
+  box-shadow: var(--shadow-sm);
 }
 
 .markdown-view h1,
@@ -771,7 +918,7 @@ a:hover {
 }
 
 .markdown-view code {
-  background: var(--bg-3);
+  background: var(--bg-tertiary);
   padding: 2px 6px;
   border-radius: 4px;
   font-family: var(--font-mono);
@@ -779,8 +926,8 @@ a:hover {
 }
 
 .markdown-view pre {
-  background: var(--bg-0);
-  border: 1px solid var(--border);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
   border-radius: 6px;
   padding: 14px;
   overflow-x: auto;
@@ -802,7 +949,7 @@ a:hover {
 
 .markdown-view hr {
   border: none;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-default);
   margin: 24px 0;
 }
 
@@ -818,7 +965,8 @@ a:hover {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(30, 51, 34, 0.22);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -826,14 +974,15 @@ a:hover {
 }
 
 .modal {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
   padding: 24px;
   width: 520px;
   max-width: 90vw;
   max-height: 85vh;
   overflow-y: auto;
+  box-shadow: var(--shadow-md);
 }
 
 .modal h2 {
@@ -862,13 +1011,13 @@ a:hover {
 /* -------- Logs / pre view -------- */
 
 .log-view {
-  background: var(--bg-0);
-  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius);
   padding: 14px;
   font-family: var(--font-mono);
   font-size: 12px;
-  color: var(--text-1);
+  color: var(--text-secondary);
   overflow-x: auto;
   white-space: pre-wrap;
   max-height: 60vh;
@@ -883,7 +1032,9 @@ a:hover {
 .wizard-shell {
   height: 100vh;
   width: 100vw;
-  background: var(--bg-0);
+  background:
+    radial-gradient(circle at top, rgba(45, 107, 63, 0.08), transparent 32%),
+    var(--bg-secondary);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -919,7 +1070,7 @@ a:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-1);
+  color: var(--text-secondary);
   font-size: 13px;
   font-weight: 500;
   margin-bottom: 14px;
@@ -940,11 +1091,12 @@ a:hover {
 }
 
 .wizard-step {
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+  background: var(--bg-primary);
+  border: 1px solid var(--border-default);
+  border-radius: 16px;
   padding: 28px;
   margin-bottom: 16px;
+  box-shadow: var(--shadow-md);
 }
 
 .wizard-step h2 {
@@ -967,7 +1119,7 @@ a:hover {
   align-items: center;
   margin-top: 24px;
   padding-top: 20px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .wizard-step .actions button:first-child:not(.primary) {
@@ -994,8 +1146,8 @@ a:hover {
 }
 
 .chip:hover {
-  background: var(--bg-3);
-  color: var(--text-0);
+  background: var(--bg-hover);
+  color: var(--text-primary);
 }
 
 /* Dependency row inside step 5. Each row lists one tool + status + install. */
@@ -1004,7 +1156,7 @@ a:hover {
   align-items: center;
   gap: 12px;
   padding: 10px 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .dep-row:last-child {
@@ -1037,7 +1189,7 @@ a:hover {
 .wizard-progress-dot {
   height: 4px;
   flex: 1;
-  background: var(--bg-2);
+  background: var(--bg-tertiary);
   border-radius: 2px;
 }
 
@@ -1068,7 +1220,7 @@ a:hover {
   position: absolute;
   cursor: pointer;
   inset: 0;
-  background: var(--bg-3);
+  background: var(--bg-tertiary);
   border-radius: 20px;
   transition: 0.2s;
 }
@@ -1104,7 +1256,7 @@ a:hover {
 .audio-meter-track {
   flex: 1;
   height: 6px;
-  background: var(--bg-3);
+  background: var(--bg-tertiary);
   border-radius: 3px;
   overflow: hidden;
 }
@@ -1130,7 +1282,8 @@ a:hover {
   align-items: center;
   justify-content: center;
   height: 100vh;
-  color: var(--text-2);
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
 }
 
 /* -------- Markdown editor fills parent -------- */
@@ -1141,14 +1294,24 @@ a:hover {
   height: 100%;
 }
 
+.markdown-editor .milkdown,
+.markdown-editor .editor {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.markdown-editor .milkdown .ProseMirror {
+  font-family: var(--font-sans);
+}
+
 /* -------- Spinner (used in PipelineStatus while sections are running) -------- */
 
 .spinner {
   display: inline-block;
   width: 12px;
   height: 12px;
-  border: 2px solid var(--border, #444);
-  border-top-color: var(--accent, #6aa0ff);
+  border: 2px solid var(--border-default);
+  border-top-color: var(--accent);
   border-radius: 50%;
   animation: spinner-rotate 0.8s linear infinite;
   vertical-align: middle;

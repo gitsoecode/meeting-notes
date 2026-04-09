@@ -114,7 +114,7 @@ export function Settings({ config, onChange }: SettingsProps) {
       <h1 className="section-title">Settings</h1>
       <p className="section-subtitle">Every value here takes effect immediately.</p>
 
-      {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+      {error && <div className="muted tone-error">{error}</div>}
 
       {/* --- General --- */}
       <div className="card">
@@ -315,8 +315,8 @@ export function Settings({ config, onChange }: SettingsProps) {
               <button onClick={onSaveOpenaiKey} disabled={!openaiInput}>Save</button>
             </div>
             <div
-              className="muted"
-              style={{ marginTop: 6, color: "var(--warning)", fontSize: 12 }}
+              className="muted tone-warning"
+              style={{ marginTop: 6, fontSize: 12 }}
               title="OpenAI's transcription endpoint enforces a 25 MB per-file upload limit. We transcode to 32 kbps mono Opus to stretch that from ~13 min (PCM) to ~80 min per channel, but beyond that the request will fail. Automatic chunking would lift this ceiling and is on the roadmap."
             >
               ⚠ OpenAI caps uploads at 25 MB per file. Meetings longer than
@@ -517,8 +517,8 @@ function PullLocalModelModal({
           background.
         </p>
         {log.length > 0 && <pre className="log-view">{log.join("\n")}</pre>}
-        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
-        {done && <div className="muted" style={{ color: "var(--success)" }}>Done.</div>}
+        {error && <div className="muted tone-error">{error}</div>}
+        {done && <div className="muted tone-success">Done.</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>
             Close
@@ -566,8 +566,8 @@ function SetupAsrModal({ onClose }: { onClose: () => void }) {
         {log.length > 0 && (
           <pre className="log-view">{log.join("\n")}</pre>
         )}
-        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
-        {done && <div className="muted" style={{ color: "var(--success)" }}>Done.</div>}
+        {error && <div className="muted tone-error">{error}</div>}
+        {done && <div className="muted tone-success">Done.</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>Close</button>
           <button className="primary" onClick={onRun} disabled={running}>

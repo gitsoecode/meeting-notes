@@ -55,11 +55,7 @@ export function NewMeetingModal({ onClose, onStarted }: NewMeetingModalProps) {
           rows={3}
           placeholder="What's this meeting about?"
         />
-        {error && (
-          <div className="muted" style={{ color: "var(--danger)", marginTop: 8 }}>
-            {error}
-          </div>
-        )}
+        {error && <div className="muted tone-error" style={{ marginTop: 8 }}>{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={starting}>
             Cancel

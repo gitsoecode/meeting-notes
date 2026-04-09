@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { Crepe } from "@milkdown/crepe";
 import "@milkdown/crepe/theme/common/style.css";
-import "@milkdown/crepe/theme/frame-dark.css";
+import "@milkdown/crepe/theme/frame.css";
 
 export interface MarkdownEditorProps {
   value: string;

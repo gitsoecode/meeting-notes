@@ -96,7 +96,7 @@ export function PromptsEditor() {
 
   return (
     <>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end" }}>
+      <div className="page-header">
         <div>
           <h1 className="section-title">Prompts</h1>
           <p className="section-subtitle">
@@ -104,13 +104,13 @@ export function PromptsEditor() {
             manual prompts only run when you trigger them.
           </p>
         </div>
-        <div className="row">
+        <div className="page-actions">
           <button onClick={() => setNewOpen(true)}>New prompt</button>
           <button onClick={onOpenFinder}>Open in Finder</button>
         </div>
       </div>
 
-      {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+      {error && <div className="muted tone-error">{error}</div>}
       {loading ? (
         <div className="muted">Loading…</div>
       ) : (
@@ -362,7 +362,7 @@ function RunAgainstMeetingModal({
             Show all {sortedFiltered.length}
           </button>
         )}
-        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+        {error && <div className="muted tone-error">{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>Cancel</button>
           <button
@@ -429,7 +429,7 @@ function NewPromptModal({
           rows={6}
           style={{ fontFamily: "var(--font-mono)" }}
         />
-        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+        {error && <div className="muted tone-error">{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={creating}>Cancel</button>
           <button className="primary" onClick={onCreate} disabled={creating}>
