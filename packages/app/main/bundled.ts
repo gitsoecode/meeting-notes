@@ -10,9 +10,9 @@ const __dirname = path.dirname(__filename);
  * Resolves a binary that ships inside `packages/app/resources/bin/<name>`
  * (dev) or `Contents/Resources/bin/<name>` (packaged). Returns the absolute
  * path even if the file does not exist on disk — callers should verify
- * with `fs.existsSync` if they care, since on Apple Silicon dev machines
- * the bundled binaries are committed to the repo and on CI they're built
- * before packaging.
+ * with `fs.existsSync` if they care. In normal development these files may
+ * be absent entirely; release packaging injects them out of band before
+ * electron-builder runs.
  *
  * Naming this `bundledBin` (rather than e.g. `binPath`) on purpose so it's
  * obvious in the call site that this resource is shipped *inside* the app

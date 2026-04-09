@@ -6,9 +6,8 @@
  *
  * Local model picks (Ollama) are intentionally biased toward transcript
  * work: action-item extraction, structured outputs, agentic prompts.
- * Sizes are approximate — replace with values from `ollama show <tag>`
- * before shipping. The exact tags should be verified against
- * https://ollama.com/library before relying on them.
+ * Sizes are approximate and should be refreshed from `ollama show <tag>`
+ * when the catalog changes.
  */
 export type LlmProviderKind = "claude" | "ollama";
 
@@ -45,9 +44,6 @@ export const LLM_MODELS: LlmModelEntry[] = [
     blurb: "Cheapest and quickest cloud option.",
   },
   // ---- Local (Ollama) ----
-  // NOTE: tag strings below need to be verified against ollama.com/library
-  // before merging — they are the best names I know of right now and may
-  // need adjusting once published.
   {
     id: "qwen3.5:9b",
     label: "Qwen 3.5 9B (recommended)",

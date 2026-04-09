@@ -79,10 +79,10 @@ Meeting Notes can summarize meetings either with **Anthropic Claude** (cloud, fa
 
 ### Local mode (Ollama)
 
-The desktop app ships with the Ollama binary inside the `.app` bundle, so you don't need to install anything separately. On startup, Meeting Notes will:
+In development, Meeting Notes will prefer a system `ollama` on `PATH` if you already have one installed. For packaged macOS releases, we bundle the Ollama binary into the `.app` so end users don't need to install anything separately. On startup, Meeting Notes will:
 
 1. **Reuse a system Ollama daemon** if one is already running on `localhost:11434`. We just talk to it — no second daemon, no duplicate models.
-2. Otherwise, **spawn a daemon ourselves** — preferring a system `ollama` binary on `PATH` if one exists, falling back to the bundled binary — and stop it cleanly when you quit.
+2. Otherwise, **spawn a daemon ourselves** — preferring a system `ollama` binary on `PATH` if one exists, falling back to the bundled binary in packaged builds — and stop it cleanly when you quit.
 
 Models live in the standard `~/.ollama/models` directory regardless of which daemon ends up serving them. That means any models you've already pulled with Ollama are picked up automatically with **no duplicate downloads**, and anything you pull from inside Meeting Notes is also visible to a system Ollama install if you ever set one up.
 
