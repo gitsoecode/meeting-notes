@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../ipc-client";
-import type { RunSummary, PromptRow } from "../../../shared/ipc";
+import type { RunSummary, PromptRow, BulkReprocessResult } from "../../../shared/ipc";
 
 interface MeetingsListProps {
   onOpen: (runFolder: string) => void;
@@ -132,7 +132,9 @@ export function MeetingsList({ onOpen }: MeetingsListProps) {
 
       {bulkOpen && (
         <BulkRunPromptModal
-          runFolders={Array.from(selected)}
+          runs={runs
+            .filter((run) => selected.has(run.folder_path))
+            .map((run) => ({ runFolder: run.folder_path, title: run.title }))}
           onClose={() => setBulkOpen(false)}
           onDone={() => {
             setBulkOpen(false);
@@ -146,16 +148,17 @@ export function MeetingsList({ onOpen }: MeetingsListProps) {
 }
 
 interface BulkRunPromptModalProps {
-  runFolders: string[];
+  runs: Array<{ runFolder: string; title: string }>;
   onClose: () => void;
   onDone: () => void;
 }
 
-function BulkRunPromptModal({ runFolders, onClose, onDone }: BulkRunPromptModalProps) {
+function BulkRunPromptModal({ runs, onClose, onDone }: BulkRunPromptModalProps) {
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
   const [selectedPromptId, setSelectedPromptId] = useState<string>("");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [results, setResults] = useState<BulkReprocessResult[] | null>(null);
 
   useEffect(() => {
     api.prompts.list().then((list) => {
@@ -168,11 +171,11 @@ function BulkRunPromptModal({ runFolders, onClose, onDone }: BulkRunPromptModalP
     if (!selectedPromptId) return;
     setRunning(true);
     try {
-      await api.runs.bulkReprocess({
-        runFolders,
+      const response = await api.runs.bulkReprocess({
+        runFolders: runs.map((run) => run.runFolder),
         onlyIds: [selectedPromptId],
       });
-      onDone();
+      setResults(response);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -180,29 +183,66 @@ function BulkRunPromptModal({ runFolders, onClose, onDone }: BulkRunPromptModalP
     }
   };
 
+  const completedCount = results?.filter((result) => !result.error).length ?? 0;
+  const failedCount = results?.filter((result) => result.error).length ?? 0;
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Run prompt on {runFolders.length} meetings</h2>
-        <label>Prompt</label>
-        <select
-          value={selectedPromptId}
-          onChange={(e) => setSelectedPromptId(e.target.value)}
-        >
-          {prompts.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label} {p.builtin ? "(builtin)" : ""}
-            </option>
-          ))}
-        </select>
+        <h2>Run prompt on {runs.length} meetings</h2>
+        {!results && (
+          <>
+            <label>Prompt</label>
+            <select
+              value={selectedPromptId}
+              onChange={(e) => setSelectedPromptId(e.target.value)}
+            >
+              {prompts.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label} {p.builtin ? "(builtin)" : ""}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
         {error && <div className="muted tone-error" style={{ marginTop: 12 }}>{error}</div>}
+        {results && (
+          <div style={{ marginTop: 16 }}>
+            <div className="muted" style={{ marginBottom: 12 }}>
+              Completed {completedCount} meeting{completedCount === 1 ? "" : "s"}
+              {failedCount > 0 ? `, ${failedCount} failed.` : "."}
+            </div>
+            <div className="column" style={{ gap: 8, maxHeight: 220, overflow: "auto" }}>
+              {results.map((result) => {
+                const run = runs.find((item) => item.runFolder === result.runFolder);
+                return (
+                  <div key={result.runFolder} className="card" style={{ padding: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                      <strong>{run?.title ?? result.runFolder}</strong>
+                      <span className={`status-pill ${result.error ? "error" : "complete"}`}>
+                        {result.error ? "failed" : "complete"}
+                      </span>
+                    </div>
+                    <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                      {result.error
+                        ? result.error
+                        : `${result.succeeded.length} prompt section${result.succeeded.length === 1 ? "" : "s"} completed`}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div className="actions">
-          <button onClick={onClose} disabled={running}>
-            Cancel
+          <button onClick={results ? onDone : onClose} disabled={running}>
+            {results ? "Done" : "Cancel"}
           </button>
-          <button className="primary" onClick={onRun} disabled={running || !selectedPromptId}>
-            {running ? "Running…" : "Run"}
-          </button>
+          {!results && (
+            <button className="primary" onClick={onRun} disabled={running || !selectedPromptId}>
+              {running ? "Running…" : "Run"}
+            </button>
+          )}
         </div>
       </div>
     </div>

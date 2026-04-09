@@ -21,7 +21,7 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("config:set-obsidian-enabled", enabled),
     setObsidianVault: (vaultPath) =>
       ipcRenderer.invoke("config:set-obsidian-vault", vaultPath),
-    openInFinder: (p) => ipcRenderer.invoke("config:open-in-finder", p),
+    openDataDirectory: () => ipcRenderer.invoke("config:open-data-directory"),
     pickDirectory: (opts) => ipcRenderer.invoke("config:pick-directory", opts),
     pickAudioFile: () => ipcRenderer.invoke("config:pick-audio-file"),
   },
@@ -34,15 +34,17 @@ const api: MeetingNotesApi = {
   runs: {
     list: () => ipcRenderer.invoke("runs:list"),
     get: (runFolder) => ipcRenderer.invoke("runs:get", runFolder),
-    readFile: (filePath) => ipcRenderer.invoke("runs:read-file", filePath),
-    writeFile: (filePath, content) =>
-      ipcRenderer.invoke("runs:write-file", filePath, content),
+    readDocument: (runFolder, fileName) =>
+      ipcRenderer.invoke("runs:read-document", runFolder, fileName),
+    writeNotes: (runFolder, content) =>
+      ipcRenderer.invoke("runs:write-notes", runFolder, content),
     reprocess: (req: ReprocessRequest) => ipcRenderer.invoke("runs:reprocess", req),
     bulkReprocess: (req: BulkReprocessRequest) =>
       ipcRenderer.invoke("runs:bulk-reprocess", req),
     processAudio: (audioPath, title) =>
       ipcRenderer.invoke("runs:process-audio", audioPath, title),
-    openInObsidian: (filePath) => ipcRenderer.invoke("runs:open-in-obsidian", filePath),
+    openInObsidian: (runFolder, fileName) =>
+      ipcRenderer.invoke("runs:open-in-obsidian", runFolder, fileName),
     openInFinder: (runFolder) => ipcRenderer.invoke("runs:open-in-finder", runFolder),
     deleteRun: (runFolder) => ipcRenderer.invoke("runs:delete", runFolder),
     updateMeta: (req) => ipcRenderer.invoke("runs:update-meta", req),

@@ -204,7 +204,7 @@ export function OverviewPanel({ detail, runFolder, onUpdated }: OverviewPanelPro
           <div className="overview-section-title">Files</div>
           <ul className="overview-files-list">
             {detail.files.map((f) => (
-              <li key={f.path}>
+              <li key={f.name}>
                 <span>{f.name}</span>
                 <span className="muted">{fmtBytes(f.size)}</span>
               </li>

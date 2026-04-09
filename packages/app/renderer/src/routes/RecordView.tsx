@@ -36,7 +36,6 @@ export function RecordView({
   const [error, setError] = useState<string | null>(null);
 
   const [notes, setNotes] = useState("");
-  const [notesPath, setNotesPath] = useState<string | null>(null);
   const saveTimer = useRef<number | null>(null);
 
   const [sections, setSections] = useState<SectionStatus[]>([]);
@@ -48,13 +47,10 @@ export function RecordView({
     const folder = recording.run_folder;
     if (!recording.active || !folder) {
       setNotes("");
-      setNotesPath(null);
       return;
     }
-    const p = `${folder}/notes.md`;
-    setNotesPath(p);
     api.runs
-      .readFile(p)
+      .readDocument(folder, "notes.md")
       .then((content) => {
         if (!cancelled) setNotes(content);
       })
@@ -136,8 +132,8 @@ export function RecordView({
     setStopping(true);
     try {
       // Flush notes.md before the pipeline reads it.
-      if (notesPath) {
-        await api.runs.writeFile(notesPath, notes).catch(() => {});
+      if (recording.run_folder) {
+        await api.runs.writeNotes(recording.run_folder, notes).catch(() => {});
       }
       const result = await api.recording.stop();
       if (result?.run_folder && onMeetingStopped) {
@@ -152,18 +148,18 @@ export function RecordView({
 
   const onNotesChange = (value: string) => {
     setNotes(value);
-    if (!notesPath) return;
+    if (!recording.run_folder) return;
     if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
     saveTimer.current = window.setTimeout(() => {
-      api.runs.writeFile(notesPath, value).catch((err) => {
+      api.runs.writeNotes(recording.run_folder!, value).catch((err) => {
         console.warn("notes write failed", err);
       });
     }, 400);
   };
 
   const onNotesBlur = () => {
-    if (!notesPath) return;
-    api.runs.writeFile(notesPath, notes).catch(() => {});
+    if (!recording.run_folder) return;
+    api.runs.writeNotes(recording.run_folder, notes).catch(() => {});
   };
 
   const elapsedLabel = useMemo(() => {

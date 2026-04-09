@@ -10,22 +10,18 @@ import {
   saveConfig,
   getConfigDir,
   getAppLogPath,
+  resolveBasePath,
   resolveRunsPath,
   initProject as engineInitProject,
   moveDataDirectory,
   loadRunManifest,
-  runPipeline,
   loadAllPrompts,
   updatePromptFrontmatter,
   resetDefaultPrompts,
   getPromptsDir,
   DEFAULT_PROMPTS_DIR,
   FfmpegRecorder,
-  ClaudeProvider,
-  OllamaProvider,
-  classifyModel,
   openInObsidian,
-  createRunLogger,
   createAppLogger,
   setupAsr,
   setupLlm,
@@ -51,6 +47,8 @@ import type {
   RunDetail,
   ReprocessRequest,
   BulkReprocessRequest,
+  ReprocessResult,
+  BulkReprocessResult,
   PromptRow,
   StartRecordingRequest,
   PipelineProgressEvent as AppPipelineProgressEvent,
@@ -65,6 +63,14 @@ import {
   stopRecording,
   stopActiveRecording as stopActive,
 } from "./recording.js";
+import {
+  resolveRunDocumentPath,
+  resolveRunFolderPath,
+  RUN_LOG_FILE,
+  RUN_NOTES_FILE,
+} from "./run-access.js";
+import { bulkReprocessRuns, reprocessRun } from "./runs-service.js";
+import { syncToggleRecordingShortcut } from "./shortcuts.js";
 
 export { stopActive as stopActiveRecording };
 
@@ -182,6 +188,19 @@ function forwardProgress(runFolder: string, event: PipelineProgressEvent): void 
   broadcastToAll("pipeline:progress", translated);
 }
 
+async function handleReprocess(req: ReprocessRequest): Promise<ReprocessResult> {
+  const result = await reprocessRun(req, (event: PipelineProgressEvent) =>
+    forwardProgress(req.runFolder, event)
+  );
+  broadcastToAll("pipeline:progress", {
+    type: "run-complete",
+    runFolder: result.runFolder,
+    succeeded: result.succeeded,
+    failed: result.failed,
+  } satisfies AppPipelineProgressEvent);
+  return result;
+}
+
 // ---- Handler registration ----
 
 export function registerIpcHandlers(): void {
@@ -192,7 +211,18 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("config:save", async (_e, dto: AppConfigDTO) => {
-    saveConfig(dtoToConfig(dto));
+    const nextConfig = dtoToConfig(dto);
+    const currentConfig = safeLoadConfig();
+    if (currentConfig?.shortcuts.toggle_recording !== nextConfig.shortcuts.toggle_recording) {
+      const shortcutResult = syncToggleRecordingShortcut(nextConfig.shortcuts.toggle_recording);
+      if (!shortcutResult.ok) {
+        throw new Error(
+          `Could not register shortcut "${nextConfig.shortcuts.toggle_recording}". ` +
+            `Choose a different combination and try again.`
+        );
+      }
+    }
+    saveConfig(nextConfig);
   });
 
   ipcMain.handle("config:init", async (_e, req: InitConfigRequest) => {
@@ -242,6 +272,7 @@ export function registerIpcHandlers(): void {
     if (req.claude_api_key) await setSecret("claude", req.claude_api_key);
     if (req.openai_api_key) await setSecret("openai", req.openai_api_key);
     engineInitProject(config);
+    syncToggleRecordingShortcut(config.shortcuts.toggle_recording);
   });
 
   ipcMain.handle("config:set-data-path", async (_e, newPath: string) => {
@@ -270,8 +301,9 @@ export function registerIpcHandlers(): void {
     saveConfig(config);
   });
 
-  ipcMain.handle("config:open-in-finder", async (_e, p: string) => {
-    shell.showItemInFolder(p);
+  ipcMain.handle("config:open-data-directory", async () => {
+    const config = loadConfig();
+    shell.showItemInFolder(resolveBasePath(config));
   });
 
   ipcMain.handle("config:pick-directory", async (_e, opts?: { defaultPath?: string }) => {
@@ -344,116 +376,63 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("runs:get", async (_e, runFolder: string): Promise<RunDetail> => {
-    const manifest = loadRunManifest(runFolder);
-    const entries = fs.readdirSync(runFolder, { withFileTypes: true });
-    const files: Array<{ name: string; path: string; size: number }> = [];
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    const manifest = loadRunManifest(validatedRunFolder);
+    const entries = fs.readdirSync(validatedRunFolder, { withFileTypes: true });
+    const files: Array<{ name: string; size: number }> = [];
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       if (!entry.name.endsWith(".md") && entry.name !== "run.log") continue;
-      const fullPath = path.join(runFolder, entry.name);
+      const fullPath = path.join(validatedRunFolder, entry.name);
       const stat = fs.statSync(fullPath);
-      files.push({ name: entry.name, path: fullPath, size: stat.size });
+      files.push({ name: entry.name, size: stat.size });
     }
     return {
-      ...toRunSummary(manifest, runFolder),
+      ...toRunSummary(manifest, validatedRunFolder),
       manifest,
       files,
     };
   });
 
-  ipcMain.handle("runs:read-file", async (_e, filePath: string) => {
+  ipcMain.handle("runs:read-document", async (_e, runFolder: string, fileName: string) => {
+    const config = loadConfig();
+    const filePath = resolveRunDocumentPath(runFolder, fileName, config);
     return fs.readFileSync(filePath, "utf-8");
   });
 
-  ipcMain.handle("runs:write-file", async (_e, filePath: string, content: string) => {
+  ipcMain.handle("runs:write-notes", async (_e, runFolder: string, content: string) => {
+    const config = loadConfig();
+    const filePath = resolveRunDocumentPath(runFolder, RUN_NOTES_FILE, config);
     fs.writeFileSync(filePath, content, "utf-8");
   });
 
   ipcMain.handle("runs:reprocess", async (_e, req: ReprocessRequest) => {
-    const config = loadConfig();
-    const manifest = loadRunManifest(req.runFolder);
-    const defaultModel =
-      config.llm_provider === "ollama" ? config.ollama.model : config.claude.model;
-    const apiKey = await getSecret("claude");
-    // Only require an Anthropic key if the default provider is Claude. With
-    // ollama as default, prompts can still target Claude per-frontmatter; the
-    // factory below throws lazily for those, leaving local prompts working.
-    if (config.llm_provider === "claude" && !apiKey) {
-      throw new Error("No Anthropic API key in Keychain — set one in Settings.");
+    try {
+      return await handleReprocess(req);
+    } catch (err) {
+      broadcastToAll("pipeline:progress", {
+        type: "run-failed",
+        runFolder: req.runFolder,
+        error: err instanceof Error ? err.message : String(err),
+      } satisfies AppPipelineProgressEvent);
+      throw err;
     }
-    const claudeCache: Record<string, ClaudeProvider> = {};
-    const ollamaCache: Record<string, OllamaProvider> = {};
-    const llmFactory = (model?: string): LlmProvider => {
-      const id = model && model.trim() ? model : defaultModel;
-      if (classifyModel(id) === "claude") {
-        if (!apiKey) {
-          throw new Error(
-            `Prompt requested Claude model "${id}" but no Anthropic API key is set in Settings.`
-          );
-        }
-        return (claudeCache[id] ??= new ClaudeProvider(apiKey, id));
-      }
-      return (ollamaCache[id] ??= new OllamaProvider(config.ollama.base_url, id));
-    };
-    const logger = createRunLogger(path.join(req.runFolder, "run.log"), false);
-
-    const transcriptPath = path.join(req.runFolder, "transcript.md");
-    const notesPath = path.join(req.runFolder, "notes.md");
-    const transcript = fs.existsSync(transcriptPath)
-      ? matter(fs.readFileSync(transcriptPath, "utf-8")).content
-      : "";
-    const notes = fs.existsSync(notesPath) ? fs.readFileSync(notesPath, "utf-8") : "";
-
-    await runPipeline(
-      config,
-      req.runFolder,
-      {
-        transcript,
-        manualNotes: notes,
-        title: manifest.title,
-        date: manifest.date,
-        meExcerpts: "",
-        othersExcerpts: "",
-      },
-      (sys, usr, model) => llmFactory(model).call(sys, usr, model),
-      logger,
-      {
-        onlyIds: req.onlyIds,
-        onlyFailed: req.onlyFailed,
-        skipComplete: req.skipComplete,
-        autoOnly: req.autoOnly,
-        onProgress: (event) => forwardProgress(req.runFolder, event),
-      }
-    );
-    broadcastToAll("pipeline:progress", {
-      type: "run-complete",
-      runFolder: req.runFolder,
-      succeeded: [],
-      failed: [],
-    } satisfies AppPipelineProgressEvent);
   });
 
-  ipcMain.handle("runs:bulk-reprocess", async (_e, req: BulkReprocessRequest) => {
-    // Serial for now; each run streams its own progress events.
-    for (const runFolder of req.runFolders) {
+  ipcMain.handle("runs:bulk-reprocess", async (_e, req: BulkReprocessRequest): Promise<BulkReprocessResult[]> => {
+    return bulkReprocessRuns(req, async (singleReq) => {
       try {
-        await new Promise<void>((resolve) => {
-          // Reuse the single-run handler by calling its body directly.
-          ipcMain.emit(
-            "runs:reprocess",
-            undefined as unknown as Electron.IpcMainInvokeEvent,
-            { runFolder, onlyIds: req.onlyIds }
-          );
-          resolve();
-        });
+        return await handleReprocess(singleReq);
       } catch (err) {
         broadcastToAll("pipeline:progress", {
           type: "run-failed",
-          runFolder,
+          runFolder: singleReq.runFolder,
           error: err instanceof Error ? err.message : String(err),
         } satisfies AppPipelineProgressEvent);
+        throw err;
       }
-    }
+    });
   });
 
   ipcMain.handle(
@@ -491,17 +470,22 @@ export function registerIpcHandlers(): void {
     }
   );
 
-  ipcMain.handle("runs:open-in-obsidian", async (_e, filePath: string) => {
+  ipcMain.handle("runs:open-in-obsidian", async (_e, runFolder: string, fileName: string) => {
     const config = loadConfig();
+    const filePath = resolveRunDocumentPath(runFolder, fileName, config);
     await openInObsidian(config, filePath);
   });
 
   ipcMain.handle("runs:open-in-finder", async (_e, runFolder: string) => {
-    shell.showItemInFolder(path.join(runFolder, "index.md"));
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    shell.showItemInFolder(path.join(validatedRunFolder, "index.md"));
   });
 
   ipcMain.handle("runs:delete", async (_e, runFolder: string) => {
-    fs.rmSync(runFolder, { recursive: true, force: true });
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    fs.rmSync(validatedRunFolder, { recursive: true, force: true });
   });
 
   ipcMain.handle(
@@ -510,8 +494,10 @@ export function registerIpcHandlers(): void {
       _e,
       req: { runFolder: string; title?: string; description?: string | null }
     ) => {
+      const config = loadConfig();
       const { updateRunStatus } = await import("@meeting-notes/engine");
-      const manifest = loadRunManifest(req.runFolder);
+      const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
+      const manifest = loadRunManifest(validatedRunFolder);
       const updates: Partial<RunManifest> = {};
       if (typeof req.title === "string" && req.title.trim()) {
         updates.title = req.title.trim();
@@ -520,7 +506,7 @@ export function registerIpcHandlers(): void {
         updates.description = req.description && req.description.trim() ? req.description.trim() : null;
       }
       // Re-write the manifest while preserving status.
-      updateRunStatus(req.runFolder, manifest.status, updates);
+      updateRunStatus(validatedRunFolder, manifest.status, updates);
     }
   );
 
@@ -767,7 +753,9 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("logs:tail-run", async (_e, runFolder: string, lines: number) => {
-    return tailFile(path.join(runFolder, "run.log"), lines);
+    const config = loadConfig();
+    const logPath = resolveRunDocumentPath(runFolder, RUN_LOG_FILE, config);
+    return tailFile(logPath, lines);
   });
 
   ipcMain.handle("logs:app-path", async () => getAppLogPath());

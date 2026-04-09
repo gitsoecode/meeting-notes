@@ -16,6 +16,7 @@ import {
   type PipelineProgressEvent,
 } from "@meeting-notes/engine";
 import type { RecordingStatus } from "../shared/ipc.js";
+import { buildInterruptedRunUpdate } from "./recording-lifecycle.js";
 
 export interface ActiveRecordingState {
   session: RecordingSession;
@@ -204,10 +205,19 @@ export async function stopRecording(
 /** Used during `before-quit` to ensure nothing is left running. */
 export async function stopActiveRecording(_reason: string): Promise<void> {
   if (!active) return;
+  const state = active;
   try {
-    await active.session.stop();
+    await state.session.stop();
   } catch {
     // Best effort.
+  }
+  if (_reason === "app-quit") {
+    const endedAt = new Date().toISOString();
+    updateRunStatus(state.runFolder, "aborted", buildInterruptedRunUpdate(state.startedAt, endedAt));
+    state.logger.warn("Recording aborted during app quit", {
+      run_folder: state.runFolder,
+      endedAt,
+    });
   }
   clearActiveRecording();
   active = null;

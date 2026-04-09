@@ -31,7 +31,7 @@ interface TabDef {
 interface PromptOutput {
   id: string;
   label: string;
-  filePath: string;
+  fileName: string;
   status?: string;
 }
 
@@ -96,22 +96,22 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
       out.push({
         id,
         label: sec.label ?? id,
-        filePath: `${runFolder}/${sec.filename}`,
+        fileName: sec.filename,
         status: sec.status,
       });
     }
 
     // Catch any extra .md files on disk not declared in the manifest.
-    const seen = new Set(out.map((p) => p.filePath));
+    const seen = new Set(out.map((p) => p.fileName));
     for (const f of detail.files) {
-      if (seen.has(f.path)) continue;
+      if (seen.has(f.name)) continue;
       if (!f.name.endsWith(".md")) continue;
       if (baseFilenames.has(f.name)) continue;
       const id = f.name.replace(/\.md$/, "");
       out.push({
         id,
         label: id.charAt(0).toUpperCase() + id.slice(1),
-        filePath: f.path,
+        fileName: f.name,
       });
     }
     return out;
@@ -143,24 +143,23 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
     let filePath: string | null = null;
     let cacheKey: string | null = null;
     if (activeTabId === "notes") {
-      filePath = `${runFolder}/notes.md`;
+      filePath = "notes.md";
       cacheKey = "notes";
     } else if (activeTabId === "transcript") {
-      filePath = `${runFolder}/transcript.md`;
+      filePath = "transcript.md";
       cacheKey = "transcript";
     } else if (activeTabId === "prompts" && activePromptId) {
       const p = promptOutputs.find((x) => x.id === activePromptId);
       if (p) {
-        filePath = p.filePath;
+        filePath = p.fileName;
         cacheKey = `prompt:${p.id}`;
       }
     }
     if (!filePath || !cacheKey) return;
     if (tabContents[cacheKey] != null) return;
     const key = cacheKey;
-    const path = filePath;
     api.runs
-      .readFile(path)
+      .readDocument(runFolder, filePath)
       .then((content) => setTabContents((prev) => ({ ...prev, [key]: content })))
       .catch(() =>
         setTabContents((prev) => ({ ...prev, [key]: "_(file not found)_" }))
@@ -174,7 +173,7 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
   const onNotesBlur = () => {
     const notes = tabContents.notes;
     if (notes == null) return;
-    api.runs.writeFile(`${runFolder}/notes.md`, notes).catch(() => {});
+    api.runs.writeNotes(runFolder, notes).catch(() => {});
   };
 
   const onOpenFinder = () => api.runs.openInFinder(runFolder);
@@ -199,11 +198,11 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
 
   const obsidianTargetPath =
     activeTabId === "notes"
-      ? `${runFolder}/notes.md`
+      ? "notes.md"
       : activeTabId === "transcript"
-      ? `${runFolder}/transcript.md`
+      ? "transcript.md"
       : activeTabId === "prompts" && activePrompt
-      ? activePrompt.filePath
+      ? activePrompt.fileName
       : null;
 
   return (
@@ -319,7 +318,7 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
         <div style={{ marginTop: 12 }}>
           <button
             onClick={() =>
-              api.runs.openInObsidian(obsidianTargetPath).catch(() => {})
+              api.runs.openInObsidian(runFolder, obsidianTargetPath).catch(() => {})
             }
           >
             Open in Obsidian

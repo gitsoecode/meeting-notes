@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import { registerIpcHandlers, broadcastRecordingStatus, stopActiveRecording } from "./ipc.js";
 import { setupTray } from "./tray.js";
 import { ensureOllamaDaemon, stopOllamaDaemon } from "./ollama-daemon.js";
-import { loadConfig } from "@meeting-notes/engine";
+import { DEFAULT_CONFIG, loadConfig } from "@meeting-notes/engine";
+import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -30,7 +31,7 @@ function createMainWindow(): BrowserWindow {
       preload: path.resolve(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -78,6 +79,11 @@ app.whenReady().then(() => {
   // Kick an initial status broadcast so the renderer can sync.
   broadcastRecordingStatus();
 
+  setToggleRecordingHandler(() => {
+    const win = ensureMainWindow();
+    win.webContents.send("shortcut:toggle-recording");
+  });
+
   // If the user has chosen the local LLM provider, bring the Ollama daemon
   // up eagerly so the first reprocess after launch isn't paying the cold-
   // start cost. Cloud-only users skip this entirely. Failure here is
@@ -94,13 +100,12 @@ app.whenReady().then(() => {
     // No config yet (first run) — wizard will start the daemon at finish.
   }
 
-  // Global shortcut to toggle recording. The default is overridable in
-  // Settings, but we start with Cmd+Shift+M.
-  const shortcut = "CommandOrControl+Shift+M";
-  globalShortcut.register(shortcut, () => {
-    const win = ensureMainWindow();
-    win.webContents.send("shortcut:toggle-recording");
-  });
+  const shortcut =
+    safeLoadShortcut() ?? DEFAULT_CONFIG.shortcuts.toggle_recording;
+  const shortcutResult = syncToggleRecordingShortcut(shortcut);
+  if (!shortcutResult.ok) {
+    console.warn(`Failed to register global shortcut: ${shortcut}`);
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -130,3 +135,11 @@ app.on("before-quit", async (event) => {
   globalShortcut.unregisterAll();
   app.exit(0);
 });
+
+function safeLoadShortcut(): string | null {
+  try {
+    return loadConfig().shortcuts.toggle_recording;
+  } catch {
+    return null;
+  }
+}

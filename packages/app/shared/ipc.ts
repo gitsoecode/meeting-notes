@@ -27,7 +27,7 @@ export interface RunSummary {
 
 export interface RunDetail extends RunSummary {
   manifest: unknown; // RunManifest from engine
-  files: Array<{ name: string; path: string; size: number }>;
+  files: Array<{ name: string; size: number }>;
 }
 
 export interface PromptRow {
@@ -65,6 +65,16 @@ export interface ReprocessRequest {
 export interface BulkReprocessRequest {
   runFolders: string[];
   onlyIds?: string[];
+}
+
+export interface ReprocessResult {
+  runFolder: string;
+  succeeded: string[];
+  failed: string[];
+}
+
+export interface BulkReprocessResult extends ReprocessResult {
+  error?: string;
 }
 
 export type PipelineProgressEvent =
@@ -231,7 +241,7 @@ export interface MeetingNotesApi {
     setDataPath: (newPath: string) => Promise<{ from: string; to: string }>;
     setObsidianEnabled: (enabled: boolean) => Promise<void>;
     setObsidianVault: (vaultPath: string) => Promise<void>;
-    openInFinder: (path: string) => Promise<void>;
+    openDataDirectory: () => Promise<void>;
     pickDirectory: (opts?: { defaultPath?: string }) => Promise<string | null>;
     pickAudioFile: () => Promise<string | null>;
   };
@@ -246,12 +256,12 @@ export interface MeetingNotesApi {
   runs: {
     list: () => Promise<RunSummary[]>;
     get: (runFolder: string) => Promise<RunDetail>;
-    readFile: (filePath: string) => Promise<string>;
-    writeFile: (filePath: string, content: string) => Promise<void>;
-    reprocess: (req: ReprocessRequest) => Promise<void>;
-    bulkReprocess: (req: BulkReprocessRequest) => Promise<void>;
+    readDocument: (runFolder: string, fileName: string) => Promise<string>;
+    writeNotes: (runFolder: string, content: string) => Promise<void>;
+    reprocess: (req: ReprocessRequest) => Promise<ReprocessResult>;
+    bulkReprocess: (req: BulkReprocessRequest) => Promise<BulkReprocessResult[]>;
     processAudio: (audioPath: string, title: string) => Promise<{ run_folder: string }>;
-    openInObsidian: (filePath: string) => Promise<void>;
+    openInObsidian: (runFolder: string, fileName: string) => Promise<void>;
     openInFinder: (runFolder: string) => Promise<void>;
     deleteRun: (runFolder: string) => Promise<void>;
     updateMeta: (req: UpdateMetaRequest) => Promise<void>;

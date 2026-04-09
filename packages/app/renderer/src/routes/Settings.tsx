@@ -161,7 +161,7 @@ export function Settings({ config, onChange }: SettingsProps) {
           <button onClick={onChangeDataDir} disabled={busy === "data-path"}>
             Change…
           </button>
-          <button onClick={() => api.config.openInFinder(config.data_path)}>
+          <button onClick={() => api.config.openDataDirectory()}>
             Open in Finder
           </button>
         </div>
