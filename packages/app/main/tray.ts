@@ -8,6 +8,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 let tray: Tray | null = null;
+let idleIcon: Electron.NativeImage | null = null;
+let recordingIcon: Electron.NativeImage | null = null;
 
 function buildMenu(): Menu {
   return Menu.buildFromTemplate([
@@ -41,14 +43,18 @@ function buildMenu(): Menu {
 
 export function setupTray(): void {
   if (tray) return;
-  // Minimal template icon — 16x16 transparent PNG. In production, swap for
-  // an actual design-team-provided tray icon.
-  const icon = nativeImage.createFromPath(
-    path.resolve(__dirname, "../assets/tray-idle.png")
+  idleIcon = nativeImage.createFromPath(
+    path.resolve(__dirname, "../assets/tray-idleTemplate.png")
   );
-  // Fall back to an empty image if the asset isn't present yet.
-  const image = icon.isEmpty() ? nativeImage.createEmpty() : icon;
-  tray = new Tray(image);
+  recordingIcon = nativeImage.createFromPath(
+    path.resolve(__dirname, "../assets/tray-recordingTemplate.png")
+  );
+  if (idleIcon.isEmpty()) {
+    throw new Error(
+      "tray-idleTemplate.png missing from dist/assets — run `npm run build:assets`"
+    );
+  }
+  tray = new Tray(idleIcon);
   tray.setToolTip("Meeting Notes");
   tray.setContextMenu(buildMenu());
 }
@@ -57,4 +63,7 @@ export function refreshTray(): void {
   if (!tray) return;
   tray.setContextMenu(buildMenu());
   tray.setToolTip(isRecording() ? "Meeting Notes — Recording" : "Meeting Notes");
+  if (idleIcon && recordingIcon) {
+    tray.setImage(isRecording() ? recordingIcon : idleIcon);
+  }
 }

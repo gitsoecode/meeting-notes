@@ -15,7 +15,7 @@ import { Logger } from "../logging/logger.js";
  * CLI ignores it (its logs already tell the same story).
  */
 export type PipelineProgressEvent =
-  | { type: "section-start"; sectionId: string; label: string; filename: string }
+  | { type: "section-start"; sectionId: string; label: string; filename: string; model?: string }
   | {
       type: "section-complete";
       sectionId: string;
@@ -35,7 +35,8 @@ export type PipelineProgressEvent =
 
 export type LlmCallFn = (
   systemPrompt: string,
-  userMessage: string
+  userMessage: string,
+  model?: string
 ) => Promise<{ content: string; tokensUsed?: number }>;
 
 export interface PipelineInput {
@@ -89,6 +90,8 @@ export interface ResolvedPrompt {
   enabled: boolean;
   auto: boolean;
   builtin: boolean;
+  /** Optional per-prompt model override; null falls back to config.claude.model. */
+  model: string | null;
   /** Absolute path to the source .md file */
   sourcePath: string;
 }
@@ -134,6 +137,7 @@ interface PromptFrontmatter {
   enabled?: unknown;
   auto?: unknown;
   builtin?: unknown;
+  model?: unknown;
 }
 
 function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | null {
@@ -192,6 +196,7 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
     enabled,
     auto,
     builtin,
+    model: typeof fm.model === "string" && fm.model.trim() ? fm.model.trim() : null,
     sourcePath: filePath,
   };
 }
@@ -397,18 +402,19 @@ function isRetryableError(err: unknown): boolean {
 }
 
 async function callWithRetry(
-  llmCall: (systemPrompt: string, userMessage: string) => Promise<{ content: string; tokensUsed?: number }>,
+  llmCall: LlmCallFn,
   systemPrompt: string,
   userMessage: string,
   maxAttempts: number,
   logger: Logger,
-  sectionId: string
+  sectionId: string,
+  model?: string
 ): Promise<{ content: string; tokensUsed?: number; attempts: number }> {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const response = await llmCall(systemPrompt, userMessage);
+      const response = await llmCall(systemPrompt, userMessage, model);
       return { ...response, attempts: attempt };
     } catch (err) {
       lastError = err;
@@ -493,6 +499,7 @@ export async function runPipeline(
       sectionId: prompt.id,
       label: prompt.label,
       filename: prompt.filename,
+      model: prompt.model ?? undefined,
     });
   }
 
@@ -512,7 +519,8 @@ export async function runPipeline(
           userMessage,
           maxAttempts,
           logger,
-          prompt.id
+          prompt.id,
+          prompt.model ?? undefined
         );
         const latencyMs = Date.now() - start;
 

@@ -12,6 +12,7 @@ export {
   DEFAULT_CONFIG,
   type AppConfig,
   type ObsidianIntegrationConfig,
+  type OllamaConfig,
 } from "./core/config.js";
 
 export {
@@ -78,6 +79,8 @@ export { openInObsidian } from "./core/obsidian.js";
 
 export { setupAsr } from "./core/setup-asr.js";
 
+export { setupLlm, checkOllama, type SetupLlmOptions } from "./core/setup-llm.js";
+
 export { moveDataDirectory } from "./core/data-path.js";
 
 export { migrateVaultPromptsToHome } from "./core/migrate-prompts.js";
@@ -91,6 +94,15 @@ export type {
 } from "./adapters/recording/recorder.js";
 
 export { ClaudeProvider } from "./adapters/llm/claude.js";
+export {
+  OllamaProvider,
+  pingOllama,
+  listOllamaModels,
+  pullOllamaModel,
+  deleteOllamaModel,
+  type OllamaTag,
+} from "./adapters/llm/ollama.js";
+export { classifyModel, type LlmKind } from "./adapters/llm/resolve.js";
 export type { LlmProvider, LlmResponse } from "./adapters/llm/provider.js";
 
 export { createAppLogger, createRunLogger, type Logger } from "./logging/logger.js";

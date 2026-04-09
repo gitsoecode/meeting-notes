@@ -13,6 +13,7 @@ export interface RecordingStatus {
 export interface RunSummary {
   run_id: string;
   title: string;
+  description: string | null;
   date: string;
   started: string;
   ended: string | null;
@@ -36,12 +37,21 @@ export interface PromptRow {
   enabled: boolean;
   auto: boolean;
   builtin: boolean;
+  /** Per-prompt model override; null falls back to config.claude.model. */
+  model: string | null;
   source_path: string;
   body: string;
 }
 
 export interface StartRecordingRequest {
   title: string;
+  description?: string | null;
+}
+
+export interface UpdateMetaRequest {
+  runFolder: string;
+  title?: string;
+  description?: string | null;
 }
 
 export interface ReprocessRequest {
@@ -64,6 +74,8 @@ export type PipelineProgressEvent =
       sectionId: string;
       label: string;
       filename: string;
+      /** Model id this section will run against; lets the UI label local vs cloud. */
+      model?: string;
     }
   | {
       type: "section-complete";
@@ -99,12 +111,61 @@ export interface AudioDevice {
   name: string;
 }
 
+/**
+ * Tri-state for BlackHole detection. macOS sometimes has the HAL driver
+ * file on disk but `coreaudiod` hasn't picked it up yet (common right
+ * after `brew install --cask blackhole-2ch`), so a single boolean isn't
+ * enough — we need to distinguish "missing" from "installed but not
+ * loaded" so the wizard can offer a restart-audio recovery instead of
+ * just saying "not installed".
+ */
+export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
+
 export interface DepsCheckResult {
   ffmpeg: string | null;
-  blackhole: boolean;
+  blackhole: BlackHoleStatus;
   python: string | null;
   /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
   parakeet: string | null;
+  /**
+   * Local-LLM (Ollama) status. The daemon is owned by the main process; we
+   * always have a binary (bundled or system), so the only useful question
+   * the renderer needs to ask is "is it answering?" plus the list of
+   * already-installed models so we can avoid duplicate downloads.
+   */
+  ollama: {
+    daemon: boolean;
+    source?: "system-running" | "system-spawned" | "bundled-spawned";
+    installedModels: string[];
+  };
+}
+
+export interface HardwareInfoDTO {
+  arch: string;
+  platform: string;
+  totalRamGb: number;
+  chip?: string;
+  appleSilicon: boolean;
+}
+
+/**
+ * Dependencies the Setup Wizard can install via Homebrew on the user's
+ * behalf. Keep this union in sync with the `deps:install` handler in
+ * `main/ipc.ts` — adding a new target requires both sides to agree.
+ */
+export type DepsInstallTarget = "ffmpeg" | "blackhole";
+
+export interface DepsInstallResult {
+  ok: boolean;
+  /** Set when brew is missing from PATH — renderer shows a targeted fallback. */
+  brewMissing?: boolean;
+  /** Error message from the brew process if !ok. */
+  error?: string;
+}
+
+export interface DetectedVault {
+  path: string;
+  name: string;
 }
 
 export interface AppConfigDTO {
@@ -115,7 +176,7 @@ export interface AppConfigDTO {
     vault_path?: string;
   };
   asr_provider: "whisper-local" | "openai" | "parakeet-mlx";
-  llm_provider: "claude";
+  llm_provider: "claude" | "ollama";
   whisper_local: {
     binary_path: string;
     model_path: string;
@@ -125,6 +186,10 @@ export interface AppConfigDTO {
     model: string;
   };
   claude: {
+    model: string;
+  };
+  ollama: {
+    base_url: string;
     model: string;
   };
   recording: {
@@ -144,6 +209,10 @@ export interface InitConfigRequest {
     vault_path?: string;
   };
   asr_provider: AppConfigDTO["asr_provider"];
+  /** Defaults to "claude". When "ollama", we won't require an Anthropic key. */
+  llm_provider?: AppConfigDTO["llm_provider"];
+  /** Required when llm_provider === "ollama". Ollama tag (e.g. "qwen2.5:7b"). */
+  ollama_model?: string;
   recording: { mic_device: string; system_device: string };
   claude_api_key?: string;
   openai_api_key?: string;
@@ -185,6 +254,7 @@ export interface MeetingNotesApi {
     openInObsidian: (filePath: string) => Promise<void>;
     openInFinder: (runFolder: string) => Promise<void>;
     deleteRun: (runFolder: string) => Promise<void>;
+    updateMeta: (req: UpdateMetaRequest) => Promise<void>;
   };
   // Prompts
   prompts: {
@@ -204,6 +274,20 @@ export interface MeetingNotesApi {
   };
   // ASR setup
   setupAsr: (opts: { force?: boolean }) => Promise<void>;
+  // Local LLM (Ollama)
+  llm: {
+    /** Ensure the Ollama daemon is running and report installed models. */
+    check: () => Promise<DepsCheckResult["ollama"]>;
+    /** Pull a model and stream progress via setup-llm:log. */
+    setup: (opts: { model: string; force?: boolean }) => Promise<void>;
+    /** List installed model tags. */
+    listInstalled: () => Promise<string[]>;
+    /** Delete an installed model. */
+    remove: (model: string) => Promise<void>;
+  };
+  system: {
+    detectHardware: () => Promise<HardwareInfoDTO>;
+  };
   // Logs
   logs: {
     tailApp: (lines: number) => Promise<string>;
@@ -212,11 +296,24 @@ export interface MeetingNotesApi {
   };
   // Deps check
   depsCheck: () => Promise<DepsCheckResult>;
+  // Dependency install (Homebrew wrapper)
+  deps: {
+    install: (target: DepsInstallTarget) => Promise<DepsInstallResult>;
+    checkBrew: () => Promise<boolean>;
+    /** Restart macOS coreaudiod via osascript. Triggers a sudo dialog. */
+    restartAudio: () => Promise<{ ok: boolean; error?: string }>;
+  };
+  // Obsidian vault detection (scans ~/Obsidian and ~/Documents)
+  obsidian: {
+    detectVaults: () => Promise<DetectedVault[]>;
+  };
   // Events (subscribe)
   on: {
     recordingStatus: (cb: (status: RecordingStatus) => void) => () => void;
     pipelineProgress: (cb: (event: PipelineProgressEvent) => void) => () => void;
     setupAsrLog: (cb: (line: string) => void) => () => void;
+    setupLlmLog: (cb: (line: string) => void) => () => void;
+    depsInstallLog: (cb: (line: string) => void) => () => void;
     shortcutTriggered: (cb: () => void) => () => void;
   };
 }

@@ -23,6 +23,7 @@ export interface SectionState {
 export interface RunManifest {
   run_id: string;
   title: string;
+  description: string | null;
   date: string;
   started: string;
   ended: string | null;
@@ -79,6 +80,7 @@ export function manifestToFrontmatter(manifest: RunManifest): Record<string, unk
     type: "meeting-run",
     run_id: manifest.run_id,
     title: manifest.title,
+    description: manifest.description,
     date: manifest.date,
     started: manifest.started,
     ended: manifest.ended,
@@ -120,7 +122,8 @@ function writeManifest(folderPath: string, manifest: RunManifest): void {
 export function createRun(
   config: AppConfig,
   title: string,
-  sourceModeOrOptions: "both" | "mic" | "file" | CreateRunOptions = "both"
+  sourceModeOrOptions: "both" | "mic" | "file" | CreateRunOptions = "both",
+  description: string | null = null
 ): RunContext {
   const opts: CreateRunOptions =
     typeof sourceModeOrOptions === "string"
@@ -139,6 +142,7 @@ export function createRun(
   const manifest: RunManifest = {
     run_id: runId,
     title,
+    description,
     date: now.toISOString().split("T")[0],
     started: now.toISOString(),
     ended: null,
@@ -177,9 +181,22 @@ export function loadRunManifest(folderPath: string): RunManifest {
     throw new Error(`Invalid run manifest at ${indexPath}: missing run_id or title`);
   }
 
+  // Backfill duration_minutes for legacy runs that completed before the
+  // engine started writing this field. Computed from started/ended only —
+  // we don't persist it here, so the next status update will catch it.
+  let duration = data.duration_minutes ?? null;
+  if (duration == null && data.started && data.ended) {
+    const startMs = Date.parse(data.started);
+    const endMs = Date.parse(data.ended);
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+      duration = (endMs - startMs) / 60000;
+    }
+  }
+
   return {
     run_id: data.run_id,
     title: data.title,
+    description: data.description ?? null,
     date: data.date ?? "",
     started: data.started ?? "",
     ended: data.ended ?? null,
@@ -187,7 +204,7 @@ export function loadRunManifest(folderPath: string): RunManifest {
     source_mode: (data.source_mode as "both" | "mic" | "file") ?? "file",
     tags: data.tags ?? [],
     participants: data.participants ?? [],
-    duration_minutes: data.duration_minutes ?? null,
+    duration_minutes: duration,
     asr_provider: data.asr_provider ?? "",
     llm_provider: data.llm_provider ?? "",
     sections: data.sections ?? {},

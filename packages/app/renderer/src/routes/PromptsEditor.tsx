@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../ipc-client";
 import type { PromptRow, RunSummary } from "../../../shared/ipc";
 import { MarkdownEditor } from "../components/MarkdownEditor";
+import { LLM_MODELS, relativeDateLabel } from "../constants";
+import { ModelDropdown } from "../components/ModelDropdown";
 
 export function PromptsEditor() {
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
@@ -10,6 +12,7 @@ export function PromptsEditor() {
   const [draftBody, setDraftBody] = useState("");
   const [draftLabel, setDraftLabel] = useState("");
   const [draftFilename, setDraftFilename] = useState("");
+  const [draftModel, setDraftModel] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runAgainstOpen, setRunAgainstOpen] = useState(false);
@@ -20,18 +23,16 @@ export function PromptsEditor() {
     try {
       const list = await api.prompts.list();
       setPrompts(list);
-      if (list.length > 0 && activeId == null) {
-        setActiveId(list[0].id);
-        setDraftBody(list[0].body);
-        setDraftLabel(list[0].label);
-        setDraftFilename(list[0].filename);
-      } else if (activeId != null) {
-        const found = list.find((p) => p.id === activeId);
-        if (found) {
-          setDraftBody(found.body);
-          setDraftLabel(found.label);
-          setDraftFilename(found.filename);
-        }
+      const target =
+        activeId != null
+          ? list.find((p) => p.id === activeId) ?? list[0] ?? null
+          : list[0] ?? null;
+      if (target) {
+        setActiveId(target.id);
+        setDraftBody(target.body);
+        setDraftLabel(target.label);
+        setDraftFilename(target.filename);
+        setDraftModel(target.model);
       }
       setError(null);
     } catch (err) {
@@ -43,6 +44,7 @@ export function PromptsEditor() {
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const active = prompts.find((p) => p.id === activeId) ?? null;
@@ -52,6 +54,7 @@ export function PromptsEditor() {
     setDraftBody(p.body);
     setDraftLabel(p.label);
     setDraftFilename(p.filename);
+    setDraftModel(p.model);
   };
 
   const onSave = async () => {
@@ -61,6 +64,7 @@ export function PromptsEditor() {
       await api.prompts.save(active.id, draftBody, {
         label: draftLabel,
         filename: draftFilename,
+        model: draftModel,
       });
       await refresh();
     } catch (err) {
@@ -75,8 +79,9 @@ export function PromptsEditor() {
     refresh();
   };
 
-  const onToggleAuto = async (p: PromptRow) => {
-    await api.prompts.setAuto(p.id, !p.auto);
+  const onSetAuto = async (p: PromptRow, auto: boolean) => {
+    if (p.auto === auto) return;
+    await api.prompts.setAuto(p.id, auto);
     refresh();
   };
 
@@ -109,18 +114,13 @@ export function PromptsEditor() {
       {loading ? (
         <div className="muted">Loading…</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "340px 1fr", gap: 20 }}>
           <div className="card" style={{ padding: 0 }}>
             {prompts.map((p) => (
               <div
                 key={p.id}
                 onClick={() => onSelect(p)}
-                style={{
-                  padding: "12px 16px",
-                  borderBottom: "1px solid var(--border)",
-                  cursor: "pointer",
-                  background: activeId === p.id ? "var(--bg-2)" : "transparent",
-                }}
+                className={`prompt-list-row ${activeId === p.id ? "active" : ""}`}
               >
                 <div style={{ display: "flex", justifyContent: "space-between" }}>
                   <strong>{p.label}</strong>
@@ -129,7 +129,7 @@ export function PromptsEditor() {
                 <div className="muted" style={{ fontSize: 11 }}>
                   {p.id} · {p.filename}
                 </div>
-                <div className="row" style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
+                <div className="row" style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
                   <label className="switch">
                     <input
                       type="checkbox"
@@ -141,15 +141,31 @@ export function PromptsEditor() {
                   <span className="muted" style={{ fontSize: 11 }}>
                     {p.enabled ? "enabled" : "disabled"}
                   </span>
-                  <span className="muted" style={{ fontSize: 11, marginLeft: "auto" }}>
-                    {p.auto ? "auto" : "manual"}
-                  </span>
+                </div>
+                <div
+                  className="segmented"
+                  style={{ marginTop: 8 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <button
-                    style={{ padding: "2px 8px", fontSize: 11 }}
-                    onClick={() => onToggleAuto(p)}
+                    type="button"
+                    className={p.auto ? "active" : ""}
+                    onClick={() => onSetAuto(p, true)}
                   >
-                    toggle
+                    Auto
                   </button>
+                  <button
+                    type="button"
+                    className={!p.auto ? "active" : ""}
+                    onClick={() => onSetAuto(p, false)}
+                  >
+                    Manual
+                  </button>
+                </div>
+                <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                  {p.auto
+                    ? "Runs after every meeting"
+                    : "Only runs when you trigger it"}
                 </div>
               </div>
             ))}
@@ -167,6 +183,12 @@ export function PromptsEditor() {
                   value={draftFilename}
                   onChange={(e) => setDraftFilename(e.target.value)}
                 />
+                <label style={{ marginTop: 12 }}>Model</label>
+                <ModelSelect value={draftModel} onChange={setDraftModel} />
+                <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+                  Pick "Default" to use the model from Settings. Override per-prompt
+                  if you want a smarter or faster model just for this output.
+                </div>
               </div>
               <div className="card" style={{ padding: 0, height: 400 }}>
                 <MarkdownEditor value={draftBody} onChange={setDraftBody} />
@@ -205,6 +227,37 @@ export function PromptsEditor() {
   );
 }
 
+/**
+ * Per-prompt model picker. `null` means "fall back to the default in
+ * Settings" — represented in the dropdown as the first option. Anything
+ * else is a concrete model id (cloud or local) handled by the shared
+ * ModelDropdown.
+ */
+function ModelSelect({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (next: string | null) => void;
+}) {
+  const useDefault = value == null;
+  return (
+    <div>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+        <input
+          type="checkbox"
+          checked={useDefault}
+          onChange={(e) => onChange(e.target.checked ? null : LLM_MODELS[0].id)}
+        />
+        <span>Use default model from Settings</span>
+      </label>
+      {!useDefault && (
+        <ModelDropdown value={value ?? ""} onChange={(next) => onChange(next || null)} />
+      )}
+    </div>
+  );
+}
+
 function RunAgainstMeetingModal({
   promptId,
   promptLabel,
@@ -218,10 +271,28 @@ function RunAgainstMeetingModal({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
     api.runs.list().then(setRuns);
   }, []);
+
+  const sortedFiltered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    const filtered = s
+      ? runs.filter((r) => r.title.toLowerCase().includes(s))
+      : runs;
+    const sorted = [...filtered].sort((a, b) => {
+      const ta = Date.parse(a.started || a.date) || 0;
+      const tb = Date.parse(b.started || b.date) || 0;
+      return tb - ta;
+    });
+    return sorted;
+  }, [runs, search]);
+
+  const visibleRuns =
+    search || showAll ? sortedFiltered : sortedFiltered.slice(0, 10);
 
   const toggle = (folder: string) => {
     setSelected((prev) => {
@@ -251,20 +322,46 @@ function RunAgainstMeetingModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 640 }}>
         <h2>Run "{promptLabel}" against meetings</h2>
-        <div style={{ maxHeight: 360, overflowY: "auto", marginBottom: 12 }}>
-          {runs.map((r) => (
-            <div key={r.folder_path} className="checkbox-row">
-              <input
-                type="checkbox"
-                checked={selected.has(r.folder_path)}
-                onChange={() => toggle(r.folder_path)}
-              />
-              <span>
-                {r.title} <span className="muted">({new Date(r.started || r.date).toLocaleDateString()})</span>
-              </span>
-            </div>
-          ))}
+        <input
+          placeholder="Search titles…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ marginBottom: 10 }}
+        />
+        <div className="meeting-picker">
+          {visibleRuns.length === 0 ? (
+            <div className="muted">No meetings match.</div>
+          ) : (
+            visibleRuns.map((r) => {
+              const isSelected = selected.has(r.folder_path);
+              return (
+                <button
+                  type="button"
+                  key={r.folder_path}
+                  className={`meeting-picker-row ${isSelected ? "selected" : ""}`}
+                  onClick={() => toggle(r.folder_path)}
+                >
+                  <span className="meeting-picker-check">
+                    {isSelected ? "✓" : ""}
+                  </span>
+                  <span className="meeting-picker-title">{r.title}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {relativeDateLabel(r.started || r.date)}
+                  </span>
+                  <span className={`status-pill ${r.status}`}>{r.status}</span>
+                </button>
+              );
+            })
+          )}
         </div>
+        {!search && !showAll && sortedFiltered.length > 10 && (
+          <button
+            onClick={() => setShowAll(true)}
+            style={{ marginTop: 8 }}
+          >
+            Show all {sortedFiltered.length}
+          </button>
+        )}
         {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
         <div className="actions">
           <button onClick={onClose} disabled={running}>Cancel</button>

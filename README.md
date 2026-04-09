@@ -73,6 +73,40 @@ Open the vault you configured, enable the **Dataview** plugin, and open `Meeting
 
 ---
 
+## LLM provider: cloud or local
+
+Meeting Notes can summarize meetings either with **Anthropic Claude** (cloud, fastest, costs API credits) or with a **local LLM via Ollama** (free, fully offline, slower per section). You can switch providers in **Settings → LLM** at any time, and individual prompts can override the default — useful if you want most outputs local but one specific prompt to use Claude.
+
+### Local mode (Ollama)
+
+The desktop app ships with the Ollama binary inside the `.app` bundle, so you don't need to install anything separately. On startup, Meeting Notes will:
+
+1. **Reuse a system Ollama daemon** if one is already running on `localhost:11434`. We just talk to it — no second daemon, no duplicate models.
+2. Otherwise, **spawn a daemon ourselves** — preferring a system `ollama` binary on `PATH` if one exists, falling back to the bundled binary — and stop it cleanly when you quit.
+
+Models live in the standard `~/.ollama/models` directory regardless of which daemon ends up serving them. That means any models you've already pulled with Ollama are picked up automatically with **no duplicate downloads**, and anything you pull from inside Meeting Notes is also visible to a system Ollama install if you ever set one up.
+
+**Picking a model.** The Settings → LLM dropdown lists a curated set of models chosen for transcript-style work (action items, structured outputs, agentic prompts). Defaults are filtered by your machine's RAM:
+
+| Model | Size | Min RAM |
+| --- | --- | --- |
+| Qwen 3.5 9B *(recommended)* | ~5.5 GB | 16 GB |
+| Gemma 4 E4B | ~4 GB | 16 GB |
+| Qwen 3 8B | ~5 GB | 16 GB |
+| Gemma 3 12B | ~7.5 GB | 24 GB |
+
+The **Custom…** option lets you type any tag from [ollama.com/library](https://ollama.com/library), so you're not locked into the curated list — useful when a new model drops between releases.
+
+**Speed expectations.** On a 16 GB Apple Silicon machine, a typical 30-minute meeting summary takes 30 s – 2 min per prompt with a 7B–9B model. The Meeting Detail page shows a live spinner and elapsed-seconds counter for each running section, plus a "Running locally" hint after 20 s, so you can see something is happening even on long sections.
+
+**Anthropic API key.** When you run in local-only mode you don't need a Claude API key at all — leave the Anthropic field blank in the wizard and in Settings. You can add a key later if you want a specific prompt to use Claude.
+
+### Local mode (Parakeet, transcription)
+
+Transcription is a separate path. Meeting Notes uses **Parakeet** (Apple Silicon MLX) for fully local transcription. Parakeet is installed during the Setup Wizard's dependencies step into a Python venv at `~/.meeting-notes/parakeet-venv` — the wizard handles this end-to-end, no Homebrew needed. If you'd rather use OpenAI's cloud transcription instead, switch the provider in **Settings → Transcription**.
+
+---
+
 ## Updating after code changes
 
 `npm link` is just a symlink to `dist/cli/index.js`, so you only need to rebuild — not relink.

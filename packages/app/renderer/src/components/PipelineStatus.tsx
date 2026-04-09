@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import type { PipelineProgressEvent } from "../../../shared/ipc";
+import { classifyModelClient } from "../constants";
 
 export type SectionState = "pending" | "running" | "complete" | "failed";
 
@@ -8,6 +10,10 @@ export interface SectionStatus {
   state: SectionState;
   latencyMs?: number;
   error?: string;
+  /** Wall-clock ms timestamp when this section last entered "running". */
+  startedAt?: number;
+  /** Model id this section runs against — drives the local-vs-cloud chip. */
+  model?: string;
 }
 
 export interface PipelineStatusProps {
@@ -16,6 +22,17 @@ export interface PipelineStatusProps {
 }
 
 export function PipelineStatus({ sections, title = "Pipeline" }: PipelineStatusProps) {
+  // Drive a 1 Hz repaint while *any* section is running so the elapsed
+  // counters move. The interval is torn down as soon as nothing is
+  // running anymore — no wasted work for stale meetings.
+  const anyRunning = sections.some((s) => s.state === "running");
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (!anyRunning) return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [anyRunning]);
+
   return (
     <div className="card">
       <div className="card-header">
@@ -25,17 +42,35 @@ export function PipelineStatus({ sections, title = "Pipeline" }: PipelineStatusP
         {sections.length === 0 && (
           <div className="muted">No pipeline runs yet.</div>
         )}
-        {sections.map((s) => (
-          <div key={s.id} className="pipeline-row">
-            <span>{s.label}</span>
-            <span className={`state ${s.state}`}>
-              {s.state}
-              {s.latencyMs != null && s.state === "complete"
-                ? ` · ${(s.latencyMs / 1000).toFixed(1)}s`
-                : ""}
-            </span>
-          </div>
-        ))}
+        {sections.map((s) => {
+          const elapsedSec =
+            s.state === "running" && s.startedAt
+              ? Math.floor((Date.now() - s.startedAt) / 1000)
+              : null;
+          const isLocal = s.model ? classifyModelClient(s.model) === "ollama" : false;
+          return (
+            <div key={s.id} className="pipeline-row">
+              <span>{s.label}</span>
+              <span className={`state ${s.state}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {s.state === "running" && <span className="spinner" aria-hidden="true" />}
+                {s.state}
+                {s.state === "running" && elapsedSec != null && (
+                  <span className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
+                    {elapsedSec}s
+                  </span>
+                )}
+                {s.state === "running" && isLocal && elapsedSec != null && elapsedSec > 20 && (
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    Running locally — this can take a few minutes
+                  </span>
+                )}
+                {s.latencyMs != null && s.state === "complete"
+                  ? ` · ${(s.latencyMs / 1000).toFixed(1)}s`
+                  : ""}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -52,11 +87,17 @@ export function applyProgress(
 ): SectionStatus[] {
   switch (event.type) {
     case "section-start": {
+      const startedAt = Date.now();
       const existing = prev.find((s) => s.id === event.sectionId);
       if (existing) {
         return prev.map((s) =>
           s.id === event.sectionId
-            ? { ...s, state: "running" as SectionState }
+            ? {
+                ...s,
+                state: "running" as SectionState,
+                startedAt,
+                model: event.model,
+              }
             : s
         );
       }
@@ -66,6 +107,8 @@ export function applyProgress(
           id: event.sectionId,
           label: event.label,
           state: "running",
+          startedAt,
+          model: event.model,
         },
       ];
     }

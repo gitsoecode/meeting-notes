@@ -45,6 +45,7 @@ const api: MeetingNotesApi = {
     openInObsidian: (filePath) => ipcRenderer.invoke("runs:open-in-obsidian", filePath),
     openInFinder: (runFolder) => ipcRenderer.invoke("runs:open-in-finder", runFolder),
     deleteRun: (runFolder) => ipcRenderer.invoke("runs:delete", runFolder),
+    updateMeta: (req) => ipcRenderer.invoke("runs:update-meta", req),
   },
   prompts: {
     list: () => ipcRenderer.invoke("prompts:list"),
@@ -63,6 +64,15 @@ const api: MeetingNotesApi = {
     set: (name, value) => ipcRenderer.invoke("secrets:set", name, value),
   },
   setupAsr: (opts) => ipcRenderer.invoke("setup-asr", opts),
+  llm: {
+    check: () => ipcRenderer.invoke("llm:check"),
+    setup: (opts) => ipcRenderer.invoke("llm:setup", opts),
+    listInstalled: () => ipcRenderer.invoke("llm:list-installed"),
+    remove: (model) => ipcRenderer.invoke("llm:remove", model),
+  },
+  system: {
+    detectHardware: () => ipcRenderer.invoke("system:detect-hardware"),
+  },
   logs: {
     tailApp: (lines) => ipcRenderer.invoke("logs:tail-app", lines),
     tailRun: (runFolder, lines) =>
@@ -70,6 +80,14 @@ const api: MeetingNotesApi = {
     appPath: () => ipcRenderer.invoke("logs:app-path"),
   },
   depsCheck: () => ipcRenderer.invoke("deps:check"),
+  deps: {
+    install: (target) => ipcRenderer.invoke("deps:install", target),
+    checkBrew: () => ipcRenderer.invoke("deps:check-brew"),
+    restartAudio: () => ipcRenderer.invoke("deps:restart-audio"),
+  },
+  obsidian: {
+    detectVaults: () => ipcRenderer.invoke("obsidian:detect-vaults"),
+  },
   on: {
     recordingStatus: (cb: (s: RecordingStatus) => void) => {
       const handler = (_e: unknown, status: RecordingStatus) => cb(status);
@@ -85,6 +103,16 @@ const api: MeetingNotesApi = {
       const handler = (_e: unknown, line: string) => cb(line);
       ipcRenderer.on("setup-asr:log", handler);
       return () => ipcRenderer.removeListener("setup-asr:log", handler);
+    },
+    setupLlmLog: (cb: (line: string) => void) => {
+      const handler = (_e: unknown, line: string) => cb(line);
+      ipcRenderer.on("setup-llm:log", handler);
+      return () => ipcRenderer.removeListener("setup-llm:log", handler);
+    },
+    depsInstallLog: (cb: (line: string) => void) => {
+      const handler = (_e: unknown, line: string) => cb(line);
+      ipcRenderer.on("deps-install:log", handler);
+      return () => ipcRenderer.removeListener("deps-install:log", handler);
     },
     shortcutTriggered: (cb: () => void) => {
       const handler = () => cb();

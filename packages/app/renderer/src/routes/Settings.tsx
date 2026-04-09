@@ -5,6 +5,11 @@ import type {
   AudioDevice,
   DepsCheckResult,
 } from "../../../shared/ipc";
+import { classifyModelClient } from "../constants";
+import { ShortcutRecorder } from "../components/ShortcutRecorder";
+import { ModelDropdown } from "../components/ModelDropdown";
+
+const SYSTEM_DEFAULT_DEVICE = "";
 
 interface SettingsProps {
   config: AppConfigDTO;
@@ -21,12 +26,23 @@ export function Settings({ config, onChange }: SettingsProps) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [setupAsrOpen, setSetupAsrOpen] = useState(false);
+  const [installedLocal, setInstalledLocal] = useState<string[]>([]);
+  const [pullModel, setPullModel] = useState("");
+  const [pullOpen, setPullOpen] = useState(false);
+
+  const refreshInstalledLocal = () => {
+    api.llm
+      .listInstalled()
+      .then(setInstalledLocal)
+      .catch(() => setInstalledLocal([]));
+  };
 
   useEffect(() => {
     api.recording.listAudioDevices().then(setDevices).catch(() => {});
     api.secrets.has("claude").then(setHasClaude).catch(() => {});
     api.secrets.has("openai").then(setHasOpenai).catch(() => {});
     api.depsCheck().then(setDeps).catch(() => {});
+    refreshInstalledLocal();
   }, []);
 
   const save = async (next: AppConfigDTO) => {
@@ -164,13 +180,19 @@ export function Settings({ config, onChange }: SettingsProps) {
             })
           }
         >
+          <option value={SYSTEM_DEFAULT_DEVICE}>System default (auto-resolve)</option>
           {devices.map((d) => (
             <option key={d.name} value={d.name}>{d.name}</option>
           ))}
-          {devices.find((d) => d.name === config.recording.mic_device) ? null : (
+          {config.recording.mic_device &&
+          !devices.find((d) => d.name === config.recording.mic_device) ? (
             <option value={config.recording.mic_device}>{config.recording.mic_device}</option>
-          )}
+          ) : null}
         </select>
+        <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+          "System default" picks the current default input each time you start
+          recording, so swapping headphones mid-day still works.
+        </div>
         <label style={{ marginTop: 12 }}>System audio device</label>
         <select
           value={config.recording.system_device}
@@ -217,21 +239,69 @@ export function Settings({ config, onChange }: SettingsProps) {
       {/* --- LLM --- */}
       <div className="card">
         <div className="card-header">LLM</div>
-        <label>Model</label>
-        <input
-          value={config.claude.model}
-          onChange={(e) => save({ ...config, claude: { ...config.claude, model: e.target.value } })}
+        <label>Default model</label>
+        <ModelDropdown
+          value={
+            config.llm_provider === "ollama"
+              ? config.ollama.model
+              : config.claude.model
+          }
+          installedLocalModels={installedLocal}
+          onChange={(next) => {
+            if (!next) return;
+            const kind = classifyModelClient(next);
+            if (kind === "claude") {
+              save({
+                ...config,
+                llm_provider: "claude",
+                claude: { ...config.claude, model: next },
+              });
+            } else {
+              save({
+                ...config,
+                llm_provider: "ollama",
+                ollama: { ...config.ollama, model: next },
+              });
+            }
+          }}
         />
-        <label style={{ marginTop: 12 }}>Anthropic API key</label>
-        <div className="row">
-          <input
-            type="password"
-            value={claudeInput}
-            onChange={(e) => setClaudeInput(e.target.value)}
-            placeholder={hasClaude ? "••••• stored in Keychain" : "paste key to set"}
-          />
-          <button onClick={onSaveClaudeKey} disabled={!claudeInput}>Save</button>
+        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+          Cloud (Claude) is fast but uses API credits. Local (Ollama) is free
+          and offline but slower per section. Individual prompts can override
+          this default in the Prompts editor.
         </div>
+
+        <label style={{ marginTop: 16 }}>Anthropic API key</label>
+        {config.llm_provider === "ollama" ? (
+          <div
+            className="muted"
+            style={{ fontSize: 12, marginTop: 4 }}
+            title="Local mode is selected — no Claude key required unless you add a per-prompt Claude override."
+          >
+            {hasClaude
+              ? "Stored in Keychain (optional in local mode)."
+              : "Optional — only needed if a prompt targets a Claude model."}
+            <div className="row" style={{ marginTop: 6 }}>
+              <input
+                type="password"
+                value={claudeInput}
+                onChange={(e) => setClaudeInput(e.target.value)}
+                placeholder={hasClaude ? "••••• stored in Keychain" : "paste key to set (optional)"}
+              />
+              <button onClick={onSaveClaudeKey} disabled={!claudeInput}>Save</button>
+            </div>
+          </div>
+        ) : (
+          <div className="row">
+            <input
+              type="password"
+              value={claudeInput}
+              onChange={(e) => setClaudeInput(e.target.value)}
+              placeholder={hasClaude ? "••••• stored in Keychain" : "paste key to set"}
+            />
+            <button onClick={onSaveClaudeKey} disabled={!claudeInput}>Save</button>
+          </div>
+        )}
         {config.asr_provider === "openai" && (
           <>
             <label style={{ marginTop: 12 }}>OpenAI API key (for transcription)</label>
@@ -257,22 +327,75 @@ export function Settings({ config, onChange }: SettingsProps) {
         )}
       </div>
 
+      {/* --- Local models (Ollama) --- */}
+      <div className="card">
+        <div className="card-header">Local models</div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+          Models pulled via Ollama. Stored in <code>~/.ollama/models</code> so
+          they're shared with any other Ollama install on your machine — no
+          duplicate downloads.
+        </div>
+        {installedLocal.length === 0 ? (
+          <div className="muted">No local models installed yet.</div>
+        ) : (
+          <div className="column">
+            {installedLocal.map((m) => (
+              <div key={m} className="row" style={{ alignItems: "center" }}>
+                <span style={{ flex: 1 }}>{m}</span>
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Remove ${m}? You can re-pull anytime.`)) return;
+                    try {
+                      await api.llm.remove(m);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : String(err));
+                    }
+                    refreshInstalledLocal();
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="row" style={{ marginTop: 12 }}>
+          <input
+            value={pullModel}
+            onChange={(e) => setPullModel(e.target.value)}
+            placeholder="Pull a model — e.g. qwen3.5:9b or llama3.1:8b"
+          />
+          <button
+            disabled={!pullModel.trim() || pullOpen}
+            onClick={() => setPullOpen(true)}
+          >
+            Pull
+          </button>
+        </div>
+        <div className="muted" style={{ marginTop: 4, fontSize: 12 }}>
+          Browse the full library at{" "}
+          <a href="https://ollama.com/library" target="_blank" rel="noreferrer">
+            ollama.com/library
+          </a>
+          .
+        </div>
+      </div>
+
       {/* --- Shortcuts --- */}
       <div className="card">
         <div className="card-header">Shortcuts</div>
         <label>Toggle recording</label>
-        <input
+        <ShortcutRecorder
           value={config.shortcuts.toggle_recording}
-          onChange={(e) =>
+          onChange={(next) =>
             save({
               ...config,
-              shortcuts: { ...config.shortcuts, toggle_recording: e.target.value },
+              shortcuts: { ...config.shortcuts, toggle_recording: next },
             })
           }
         />
         <div className="muted" style={{ marginTop: 4 }}>
-          Requires restart to apply. Use Electron accelerator syntax, e.g.
-          <span className="mono"> CommandOrControl+Shift+M</span>
+          Click the button and press your shortcut. Requires restart to apply.
         </div>
       </div>
 
@@ -291,8 +414,12 @@ export function Settings({ config, onChange }: SettingsProps) {
             </div>
             <div className="row">
               <span>BlackHole (2ch):</span>
-              <span className={deps.blackhole ? "" : "muted"}>
-                {deps.blackhole ? "installed" : "not found — brew install --cask blackhole-2ch"}
+              <span className={deps.blackhole === "loaded" ? "" : "muted"}>
+                {deps.blackhole === "loaded"
+                  ? "loaded"
+                  : deps.blackhole === "installed-not-loaded"
+                    ? "installed but not loaded — restart audio (sudo killall coreaudiod) or log out/in"
+                    : "not found — brew install --cask blackhole-2ch"}
               </span>
             </div>
             <div className="row">
@@ -305,6 +432,14 @@ export function Settings({ config, onChange }: SettingsProps) {
               <span>Parakeet:</span>
               <span className={deps.parakeet ? "" : "muted"}>
                 {deps.parakeet ?? "not installed — use Install button above"}
+              </span>
+            </div>
+            <div className="row">
+              <span>Ollama daemon:</span>
+              <span className={deps.ollama.daemon ? "" : "muted"}>
+                {deps.ollama.daemon
+                  ? `running (${deps.ollama.source ?? "unknown"})`
+                  : "not running — bundled binary will start it on demand"}
               </span>
             </div>
           </div>
@@ -320,7 +455,77 @@ export function Settings({ config, onChange }: SettingsProps) {
           }}
         />
       )}
+
+      {pullOpen && (
+        <PullLocalModelModal
+          model={pullModel.trim()}
+          onClose={() => {
+            setPullOpen(false);
+            setPullModel("");
+            refreshInstalledLocal();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function PullLocalModelModal({
+  model,
+  onClose,
+}: {
+  model: string;
+  onClose: () => void;
+}) {
+  const [log, setLog] = useState<string[]>([]);
+  const [running, setRunning] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = api.on.setupLlmLog((line) => setLog((prev) => [...prev, line]));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRunning(true);
+    setLog([]);
+    setError(null);
+    api.llm
+      .setup({ model })
+      .then(() => {
+        if (!cancelled) setDone(true);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (!cancelled) setRunning(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [model]);
+
+  return (
+    <div className="modal-backdrop" onClick={() => !running && onClose()}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 700 }}>
+        <h2>Pulling {model}</h2>
+        <p className="muted">
+          Downloads to <code>~/.ollama/models</code>. Safe to leave open in the
+          background.
+        </p>
+        {log.length > 0 && <pre className="log-view">{log.join("\n")}</pre>}
+        {error && <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>}
+        {done && <div className="muted" style={{ color: "var(--success)" }}>Done.</div>}
+        <div className="actions">
+          <button onClick={onClose} disabled={running}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -10,9 +10,10 @@ export class ClaudeProvider implements LlmProvider {
     this.model = model;
   }
 
-  async call(systemPrompt: string, userMessage: string): Promise<LlmResponse> {
+  async call(systemPrompt: string, userMessage: string, modelOverride?: string): Promise<LlmResponse> {
+    const model = modelOverride && modelOverride.trim() ? modelOverride : this.model;
     const response = await this.client.messages.create({
-      model: this.model,
+      model,
       max_tokens: 16384,
       thinking: {
         type: "enabled",
@@ -29,7 +30,7 @@ export class ClaudeProvider implements LlmProvider {
     return {
       content,
       tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
-      model: this.model,
+      model,
     };
   }
 }

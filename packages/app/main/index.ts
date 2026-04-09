@@ -1,8 +1,10 @@
-import { app, BrowserWindow, globalShortcut } from "electron";
+import { app, BrowserWindow, globalShortcut, nativeImage } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerIpcHandlers, broadcastRecordingStatus, stopActiveRecording } from "./ipc.js";
 import { setupTray } from "./tray.js";
+import { ensureOllamaDaemon, stopOllamaDaemon } from "./ollama-daemon.js";
+import { loadConfig } from "@meeting-notes/engine";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,12 +64,35 @@ export function ensureMainWindow(): BrowserWindow {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === "darwin" && app.dock) {
+    const dockIcon = nativeImage.createFromPath(
+      path.resolve(__dirname, "../assets/app-icon.png")
+    );
+    if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+  }
+
   mainWindow = createMainWindow();
   registerIpcHandlers();
   setupTray();
 
   // Kick an initial status broadcast so the renderer can sync.
   broadcastRecordingStatus();
+
+  // If the user has chosen the local LLM provider, bring the Ollama daemon
+  // up eagerly so the first reprocess after launch isn't paying the cold-
+  // start cost. Cloud-only users skip this entirely. Failure here is
+  // non-fatal — the renderer will surface a clear error when it tries to
+  // call the LLM.
+  try {
+    const config = loadConfig();
+    if (config.llm_provider === "ollama") {
+      void ensureOllamaDaemon().catch(() => {
+        // Logged to ~/.meeting-notes/ollama.log; nothing more to do here.
+      });
+    }
+  } catch {
+    // No config yet (first run) — wizard will start the daemon at finish.
+  }
 
   // Global shortcut to toggle recording. The default is overridable in
   // Settings, but we start with Cmd+Shift+M.
@@ -94,6 +119,11 @@ app.on("before-quit", async (event) => {
   event.preventDefault();
   try {
     await stopActiveRecording("app-quit");
+  } catch {
+    // Best effort.
+  }
+  try {
+    await stopOllamaDaemon();
   } catch {
     // Best effort.
   }

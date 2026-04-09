@@ -10,20 +10,19 @@ export function formatTranscriptMarkdown(result: TranscriptResult): string {
 
   for (const seg of result.segments) {
     const timestamp = formatTimestamp(seg.start_ms);
-    const speakerLabel = seg.speaker !== "unknown" ? `**${seg.speaker}**` : "";
 
     if (seg.speaker !== currentSpeaker && seg.speaker !== "unknown") {
       // Add speaker header when speaker changes
-      lines.push("");
+      if (lines.length > 0) lines.push("");
       lines.push(`### ${seg.speaker === "me" ? "Me" : "Others"}`);
+      lines.push("");
       currentSpeaker = seg.speaker;
     }
 
-    if (speakerLabel) {
-      lines.push(`\`${timestamp}\` ${seg.text}`);
-    } else {
-      lines.push(`\`${timestamp}\` ${seg.text}`);
-    }
+    // Each segment is its own paragraph so the renderer breaks between
+    // timecodes instead of collapsing them into a single soft-wrapped block.
+    lines.push(`\`${timestamp}\` ${seg.text}`);
+    lines.push("");
   }
 
   return lines.join("\n").trim();

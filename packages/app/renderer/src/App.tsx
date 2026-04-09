@@ -8,6 +8,7 @@ import { PromptsEditor } from "./routes/PromptsEditor";
 import { Settings } from "./routes/Settings";
 import { SetupWizard } from "./routes/SetupWizard";
 import { LogsView } from "./routes/LogsView";
+import { NewMeetingModal } from "./components/NewMeetingModal";
 
 type Route =
   | { name: "record" }
@@ -21,6 +22,7 @@ export function App() {
   const [config, setConfig] = useState<AppConfigDTO | null | undefined>(undefined);
   const [recording, setRecording] = useState<RecordingStatus>({ active: false });
   const [route, setRoute] = useState<Route>({ name: "record" });
+  const [newMeetingOpen, setNewMeetingOpen] = useState(false);
 
   // Load config on mount (null means needs setup wizard).
   useEffect(() => {
@@ -43,14 +45,17 @@ export function App() {
     };
   }, []);
 
-  // Global shortcut: flip recording on/off from anywhere.
+  // Global shortcut: stop a recording, or open the New Meeting modal.
   useEffect(() => {
     const unsub = api.on.shortcutTriggered(async () => {
       const status = await api.recording.getStatus();
       if (status.active) {
-        await api.recording.stop();
+        const result = await api.recording.stop();
+        if (result?.run_folder) {
+          setRoute({ name: "meeting", runFolder: result.run_folder });
+        }
       } else {
-        await api.recording.start({ title: "Untitled Meeting" });
+        setNewMeetingOpen(true);
       }
     });
     return () => unsub();
@@ -71,8 +76,20 @@ export function App() {
     );
   }
 
+  // Note: the SetupWizard owns its own .wizard-shell + .wizard-titlebar
+  // wrapper so it can draw the drag region itself.
+
   return (
     <div className="app">
+      <div className="app-titlebar">
+        <button
+          type="button"
+          className="titlebar-button"
+          onClick={() => setNewMeetingOpen(true)}
+        >
+          + New meeting
+        </button>
+      </div>
       <aside className="sidebar">
         <div className="sidebar-header">
           {recording.active ? <span className="sidebar-rec-dot" /> : null}
@@ -82,7 +99,7 @@ export function App() {
           className={`nav-item ${route.name === "record" ? "active" : ""}`}
           onClick={() => setRoute({ name: "record" })}
         >
-          Record
+          Home
         </button>
         <button
           className={`nav-item ${route.name === "meetings" || route.name === "meeting" ? "active" : ""}`}
@@ -111,7 +128,12 @@ export function App() {
       </aside>
       <main className="main">
         {route.name === "record" && (
-          <RecordView recording={recording} config={config} />
+          <RecordView
+            recording={recording}
+            config={config}
+            onMeetingStopped={(runFolder) => setRoute({ name: "meeting", runFolder })}
+            onOpenMeeting={(runFolder) => setRoute({ name: "meeting", runFolder })}
+          />
         )}
         {route.name === "meetings" && (
           <MeetingsList
@@ -134,6 +156,12 @@ export function App() {
         )}
         {route.name === "logs" && <LogsView />}
       </main>
+      {newMeetingOpen && (
+        <NewMeetingModal
+          onClose={() => setNewMeetingOpen(false)}
+          onStarted={() => setRoute({ name: "record" })}
+        />
+      )}
     </div>
   );
 }

@@ -120,11 +120,49 @@ a:hover {
 .app {
   display: grid;
   grid-template-columns: 220px 1fr;
+  grid-template-rows: 32px 1fr;
+  grid-template-areas:
+    "titlebar titlebar"
+    "sidebar  main";
   height: 100vh;
   width: 100vw;
 }
 
+/*
+ * Persistent drag region across the top of the window. Without this,
+ * scrolling inside the sidebar or main area used to leave nowhere to
+ * grab the window from. Buttons mounted inside this strip must declare
+ * `-webkit-app-region: no-drag` so clicks still work.
+ */
+.app-titlebar {
+  grid-area: titlebar;
+  background: var(--bg-0);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 14px 0 84px; /* 84px clears the macOS traffic lights */
+  gap: 8px;
+}
+
+.app-titlebar .titlebar-button {
+  -webkit-app-region: no-drag;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.app-titlebar .titlebar-button:hover {
+  filter: brightness(1.1);
+}
+
 .sidebar {
+  grid-area: sidebar;
   background: var(--bg-1);
   border-right: 1px solid var(--border);
   padding: 20px 0;
@@ -132,7 +170,6 @@ a:hover {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
-  -webkit-app-region: drag;
 }
 
 .sidebar-header {
@@ -220,6 +257,13 @@ a:hover {
   display: flex;
   gap: 12px;
   align-items: center;
+}
+
+/* Buttons inside input+button rows should keep their label intact even when
+   the input wants all the horizontal space. Fixes the "Pick…" clip. */
+.row > button {
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .column {
@@ -406,6 +450,305 @@ a:hover {
   border-bottom-color: var(--accent);
 }
 
+/* -------- Home: recent meetings grid -------- */
+
+.start-meeting-card {
+  max-width: 720px;
+}
+
+.recent-meetings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.recent-meeting-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color 0.1s;
+}
+
+.recent-meeting-card:hover {
+  border-color: var(--accent);
+}
+
+.recent-meeting-title {
+  font-weight: 600;
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-meeting-desc {
+  color: var(--text-2);
+  font-size: 12px;
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* -------- Segmented control -------- */
+
+.segmented {
+  display: inline-flex;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+  gap: 0;
+}
+
+.segmented button {
+  background: transparent;
+  border: none;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-2);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.segmented button:hover:not(.active) {
+  color: var(--text-0);
+}
+
+/* -------- Prompt list rows -------- */
+
+.prompt-list-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.prompt-list-row:hover {
+  background: var(--bg-2);
+}
+
+.prompt-list-row.active {
+  background: var(--bg-2);
+}
+
+/* -------- Meeting picker (RunAgainstMeetingModal) -------- */
+
+.meeting-picker {
+  max-height: 360px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+}
+
+.meeting-picker-row {
+  display: grid;
+  grid-template-columns: 24px 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.meeting-picker-row:hover {
+  background: var(--bg-2);
+}
+
+.meeting-picker-row.selected {
+  background: var(--bg-2);
+  border-color: var(--accent);
+}
+
+.meeting-picker-check {
+  color: var(--accent);
+  font-weight: 700;
+  text-align: center;
+}
+
+.meeting-picker-title {
+  color: var(--text-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* -------- Overview panel -------- */
+
+.overview-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.overview-section {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.overview-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.overview-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.overview-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  width: 110px;
+  flex-shrink: 0;
+}
+
+.overview-value {
+  font-size: 14px;
+  color: var(--text-0);
+}
+
+.overview-description {
+  white-space: pre-wrap;
+  cursor: text;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  min-height: 24px;
+}
+
+.overview-description:hover {
+  background: var(--bg-2);
+  border-color: var(--border);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chip {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: var(--text-1);
+}
+
+.overview-sections-list,
+.overview-files-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.overview-sections-list li {
+  display: flex;
+  align-items: center;
+  font-size: 13px;
+}
+
+.overview-files-list li {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+
+/* -------- Prompts tab (sub-nav) -------- */
+
+.prompts-tab {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  min-height: 60vh;
+}
+
+.prompts-tab-nav {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.prompts-tab-nav-header {
+  padding: 4px 4px 8px 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+}
+
+.prompts-tab-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  color: var(--text-1);
+  width: 100%;
+}
+
+.prompts-tab-nav-item:hover {
+  background: var(--bg-2);
+}
+
+.prompts-tab-nav-item.active {
+  background: var(--bg-2);
+  color: var(--text-0);
+}
+
+.prompts-tab-nav-label {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.prompts-tab-content {
+  min-width: 0;
+}
+
 /* -------- Markdown view -------- */
 
 .markdown-view {
@@ -534,9 +877,66 @@ a:hover {
 
 /* -------- Wizard -------- */
 
+/* Outer shell: fills the window. The shell itself does NOT scroll —
+   scrolling happens inside .wizard-body — so the titlebar drag region
+   stays pinned to the top no matter how tall the wizard step gets. */
+.wizard-shell {
+  height: 100vh;
+  width: 100vw;
+  background: var(--bg-0);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Empty strip at the top of the wizard that macOS treats as a window drag
+   handle. padding-left keeps the traffic lights clear. flex-shrink keeps
+   it from being squeezed when the body wants more room. */
+.wizard-titlebar {
+  height: 32px;
+  flex-shrink: 0;
+  -webkit-app-region: drag;
+  padding-left: 80px;
+}
+
+/* The body is the scrolling region. Long wizard steps scroll inside
+   this element while the titlebar above stays pinned. min-height: 0 is
+   the canonical fix for "flex child won't shrink below content size". */
+.wizard-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 20px 24px 40px;
+}
+
+/* Small brand strip above the progress dots so the wizard doesn't read as
+   "one black card floating in a black room". */
+.wizard-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+
+.wizard-brand::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
 .wizard {
+  width: 100%;
   max-width: 560px;
-  margin: 40px auto;
 }
 
 .wizard-step {
@@ -548,7 +948,84 @@ a:hover {
 }
 
 .wizard-step h2 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.wizard-step > p.muted:first-of-type {
+  margin-top: 0;
+  margin-bottom: 18px;
+}
+
+/* Consistent action row at the bottom of every wizard step: divider above,
+   Back floats left, primary Next hugs right. */
+.wizard-step .actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.wizard-step .actions button:first-child:not(.primary) {
+  margin-right: auto;
+}
+
+/* Quick-pick chips (used for auto-detected Obsidian vaults). */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.chip {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.chip:hover {
+  background: var(--bg-3);
+  color: var(--text-0);
+}
+
+/* Dependency row inside step 5. Each row lists one tool + status + install. */
+.dep-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.dep-row:last-child {
+  border-bottom: none;
+}
+
+.dep-row .dep-name {
+  width: 120px;
+  font-weight: 500;
+}
+
+.dep-row .dep-status {
+  width: 18px;
+  text-align: center;
+}
+
+.dep-row .dep-status.ok { color: var(--success); }
+.dep-row .dep-status.missing { color: var(--danger); }
+
+.dep-row .dep-spacer {
+  flex: 1;
 }
 
 .wizard-progress {
@@ -662,4 +1139,21 @@ a:hover {
 .markdown-editor > div,
 .markdown-editor .cm-editor {
   height: 100%;
+}
+
+/* -------- Spinner (used in PipelineStatus while sections are running) -------- */
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border, #444);
+  border-top-color: var(--accent, #6aa0ff);
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+  vertical-align: middle;
+}
+
+@keyframes spinner-rotate {
+  to { transform: rotate(360deg); }
 }

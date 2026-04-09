@@ -73,12 +73,15 @@ export async function getStatus(): Promise<RecordingStatus> {
   return { active: false };
 }
 
-export async function startRecording(title: string): Promise<{ run_folder: string; run_id: string }> {
+export async function startRecording(
+  title: string,
+  description: string | null = null
+): Promise<{ run_folder: string; run_id: string }> {
   if (active) {
     throw new Error("A recording is already in progress. Stop it first.");
   }
   const config = loadConfig();
-  const runContext = createRun(config, title, { sourceMode: "both", quiet: true });
+  const runContext = createRun(config, title, { sourceMode: "both", quiet: true }, description);
   const { folderPath, manifest, logger } = runContext;
 
   const recorder = new FfmpegRecorder();

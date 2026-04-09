@@ -1,0 +1,13 @@
+# Bundled binaries (downloaded out-of-band, not checked in)
+#
+# Drop the universal macOS Ollama binary here as `ollama` before building
+# the .app bundle. The build picks it up via electron-builder's
+# extraResources, lands it at `process.resourcesPath/bin/ollama`, and
+# packages/app/main/bundled.ts resolves it from there at runtime.
+#
+# Download:
+#   curl -L https://github.com/ollama/ollama/releases/latest/download/ollama-darwin -o ollama
+#   chmod +x ollama
+#
+# This file exists only to keep the directory tracked in git. Do not check
+# in the binary itself — large, signed artifacts belong out of band.

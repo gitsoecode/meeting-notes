@@ -22,6 +22,11 @@ export interface ClaudeConfig {
   model: string;
 }
 
+export interface OllamaConfig {
+  base_url: string;
+  model: string;
+}
+
 /**
  * Obsidian is an optional viewer layer, not a mode. The on-disk layout is
  * identical regardless of whether Obsidian is involved; this object only
@@ -48,10 +53,17 @@ export interface AppConfig {
   data_path: string;
   obsidian_integration: ObsidianIntegrationConfig;
   asr_provider: "whisper-local" | "openai" | "parakeet-mlx";
-  llm_provider: "claude";
+  /**
+   * Default LLM provider for prompts that don't specify their own model.
+   * Per-prompt frontmatter can still override this on a call-by-call basis,
+   * so a "claude" default does not preclude using local models for individual
+   * prompts and vice versa.
+   */
+  llm_provider: "claude" | "ollama";
   whisper_local: WhisperLocalConfig;
   parakeet_mlx: ParakeetMlxConfig;
   claude: ClaudeConfig;
+  ollama: OllamaConfig;
   recording: RecordingConfig;
   shortcuts: ShortcutsConfig;
 }
@@ -81,6 +93,10 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   claude: {
     model: "claude-sonnet-4-6",
+  },
+  ollama: {
+    base_url: "http://127.0.0.1:11434",
+    model: "qwen3.5:9b",
   },
   recording: {
     mic_device: "default",
@@ -152,6 +168,7 @@ export function loadConfig(): AppConfig {
     whisper_local: { ...DEFAULT_CONFIG.whisper_local, ...migrated.whisper_local },
     parakeet_mlx: { ...DEFAULT_CONFIG.parakeet_mlx, ...migrated.parakeet_mlx },
     claude: { ...DEFAULT_CONFIG.claude, ...migrated.claude },
+    ollama: { ...DEFAULT_CONFIG.ollama, ...migrated.ollama },
     recording: { ...DEFAULT_CONFIG.recording, ...migrated.recording },
     shortcuts: { ...DEFAULT_CONFIG.shortcuts, ...migrated.shortcuts },
   };

@@ -1,0 +1,172 @@
+import type { LlmProvider, LlmResponse } from "./provider.js";
+
+export interface OllamaTag {
+  name: string;
+  size: number;
+  modified_at?: string;
+}
+
+interface OllamaChatResponse {
+  message?: { role: string; content: string };
+  eval_count?: number;
+  prompt_eval_count?: number;
+  done: boolean;
+}
+
+interface OllamaPullChunk {
+  status?: string;
+  digest?: string;
+  total?: number;
+  completed?: number;
+  error?: string;
+}
+
+const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
+const DEFAULT_MODEL = "qwen2.5:7b";
+
+/**
+ * LlmProvider implementation backed by an Ollama HTTP daemon. The daemon
+ * itself is owned by the Electron main process (see ollama-daemon.ts) —
+ * this class only speaks the REST API.
+ */
+export class OllamaProvider implements LlmProvider {
+  private readonly baseUrl: string;
+  private readonly model: string;
+
+  constructor(baseUrl: string = DEFAULT_BASE_URL, model: string = DEFAULT_MODEL) {
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.model = model;
+  }
+
+  async call(
+    systemPrompt: string,
+    userMessage: string,
+    modelOverride?: string
+  ): Promise<LlmResponse> {
+    const model = modelOverride && modelOverride.trim() ? modelOverride : this.model;
+    const res = await fetch(`${this.baseUrl}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage },
+        ],
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`Ollama /api/chat ${res.status}: ${text || res.statusText}`);
+    }
+    const data = (await res.json()) as OllamaChatResponse;
+    const content = data.message?.content ?? "";
+    const tokensUsed =
+      (data.eval_count ?? 0) + (data.prompt_eval_count ?? 0) || undefined;
+    return { content, tokensUsed, model };
+  }
+}
+
+// ---- Helpers used by the main process / setup flow ----
+
+export async function pingOllama(baseUrl: string = DEFAULT_BASE_URL): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/version`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function listOllamaModels(
+  baseUrl: string = DEFAULT_BASE_URL
+): Promise<OllamaTag[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/tags`);
+  if (!res.ok) throw new Error(`Ollama /api/tags ${res.status}`);
+  const data = (await res.json()) as { models?: OllamaTag[] };
+  return data.models ?? [];
+}
+
+/**
+ * Stream a model pull, forwarding human-readable status lines to onLog.
+ * Resolves when the pull finishes; rejects on any chunk-level error.
+ */
+export async function pullOllamaModel(
+  model: string,
+  opts: { baseUrl?: string; onLog?: (line: string) => void } = {}
+): Promise<void> {
+  const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
+  const onLog = opts.onLog;
+  const res = await fetch(`${baseUrl}/api/pull`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model, stream: true }),
+  });
+  if (!res.ok || !res.body) {
+    throw new Error(`Ollama /api/pull ${res.status}: ${res.statusText}`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let lastStatus = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (!line) continue;
+      let chunk: OllamaPullChunk;
+      try {
+        chunk = JSON.parse(line) as OllamaPullChunk;
+      } catch {
+        continue;
+      }
+      if (chunk.error) {
+        throw new Error(`Ollama pull failed: ${chunk.error}`);
+      }
+      // Compress the firehose: only emit when status changes, plus a single
+      // percent line per status if size info is present.
+      if (chunk.status && chunk.status !== lastStatus) {
+        lastStatus = chunk.status;
+        onLog?.(chunk.status);
+      }
+      if (
+        chunk.status === "downloading" &&
+        chunk.total &&
+        chunk.completed != null
+      ) {
+        const pct = Math.floor((chunk.completed / chunk.total) * 100);
+        onLog?.(`  ${pct}% (${formatBytes(chunk.completed)}/${formatBytes(chunk.total)})`);
+      }
+    }
+  }
+}
+
+export async function deleteOllamaModel(
+  model: string,
+  baseUrl: string = DEFAULT_BASE_URL
+): Promise<void> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/delete`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model }),
+  });
+  if (!res.ok) {
+    throw new Error(`Ollama /api/delete ${res.status}: ${res.statusText}`);
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}

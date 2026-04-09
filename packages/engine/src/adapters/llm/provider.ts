@@ -5,5 +5,15 @@ export interface LlmResponse {
 }
 
 export interface LlmProvider {
-  call(systemPrompt: string, userMessage: string): Promise<LlmResponse>;
+  /**
+   * `modelOverride` lets the pipeline ask a single provider instance to
+   * fulfill a call against a different model than its default — used by
+   * the per-prompt-model override path. Implementations should fall back
+   * to their constructor-time default when undefined or empty.
+   */
+  call(
+    systemPrompt: string,
+    userMessage: string,
+    modelOverride?: string
+  ): Promise<LlmResponse>;
 }

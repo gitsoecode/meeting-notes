@@ -8,6 +8,7 @@ import type {
 } from "../../../shared/ipc";
 import { MarkdownView } from "../components/MarkdownView";
 import { MarkdownEditor } from "../components/MarkdownEditor";
+import { OverviewPanel } from "../components/OverviewPanel";
 import {
   PipelineStatus,
   applyProgress,
@@ -20,19 +21,27 @@ interface MeetingDetailProps {
   onBack: () => void;
 }
 
+type TabKind = "overview" | "notes" | "transcript" | "prompts";
+
 interface TabDef {
+  id: TabKind;
+  label: string;
+}
+
+interface PromptOutput {
   id: string;
   label: string;
   filePath: string;
-  editable: boolean;
+  status?: string;
 }
 
 export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [activeTabId, setActiveTabId] = useState<TabKind>("overview");
   const [tabContents, setTabContents] = useState<Record<string, string>>({});
+  const [activePromptId, setActivePromptId] = useState<string | null>(null);
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [runPromptOpen, setRunPromptOpen] = useState(false);
   const [sections, setSections] = useState<SectionStatus[]>([]);
@@ -53,7 +62,8 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
   useEffect(() => {
     refresh();
     setTabContents({});
-    setActiveTabId(null);
+    setActiveTabId("overview");
+    setActivePromptId(null);
     setSections([]);
   }, [runFolder]);
 
@@ -69,50 +79,93 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
     return () => unsub();
   }, [runFolder]);
 
-  const tabs: TabDef[] = useMemo(() => {
+  const promptOutputs: PromptOutput[] = useMemo(() => {
     if (!detail) return [];
-    const base: TabDef[] = [
-      { id: "overview", label: "Overview", filePath: `${runFolder}/index.md`, editable: false },
-      { id: "notes", label: "Notes", filePath: `${runFolder}/notes.md`, editable: true },
-      { id: "transcript", label: "Transcript", filePath: `${runFolder}/transcript.md`, editable: false },
-    ];
-    const seen = new Set(base.map((t) => t.filePath));
+    const manifest = (detail.manifest ?? {}) as {
+      sections?: Record<string, { filename?: string; label?: string; status?: string; builtin?: boolean }>;
+    };
+    const sections = manifest.sections ?? {};
+    const baseFilenames = new Set(["notes.md", "transcript.md", "index.md", "Dashboard.md"]);
+    const out: PromptOutput[] = [];
+
+    // First, anything declared in manifest.sections that isn't a base file.
+    for (const [id, sec] of Object.entries(sections)) {
+      if (!sec.filename) continue;
+      if (baseFilenames.has(sec.filename)) continue;
+      if (!sec.filename.endsWith(".md")) continue;
+      out.push({
+        id,
+        label: sec.label ?? id,
+        filePath: `${runFolder}/${sec.filename}`,
+        status: sec.status,
+      });
+    }
+
+    // Catch any extra .md files on disk not declared in the manifest.
+    const seen = new Set(out.map((p) => p.filePath));
     for (const f of detail.files) {
       if (seen.has(f.path)) continue;
       if (!f.name.endsWith(".md")) continue;
-      if (f.name === "Dashboard.md") continue;
+      if (baseFilenames.has(f.name)) continue;
       const id = f.name.replace(/\.md$/, "");
-      base.push({
+      out.push({
         id,
         label: id.charAt(0).toUpperCase() + id.slice(1),
         filePath: f.path,
-        editable: false,
       });
     }
-    return base;
+    return out;
   }, [detail, runFolder]);
 
-  useEffect(() => {
-    if (!activeTabId && tabs.length > 0) {
-      setActiveTabId(tabs[0].id);
+  const tabs: TabDef[] = useMemo(() => {
+    const base: TabDef[] = [
+      { id: "overview", label: "Overview" },
+      { id: "notes", label: "Notes" },
+      { id: "transcript", label: "Transcript" },
+    ];
+    if (promptOutputs.length > 0) {
+      base.push({ id: "prompts", label: "Prompts" });
     }
-  }, [tabs, activeTabId]);
+    return base;
+  }, [promptOutputs]);
 
-  // Load content for the active tab lazily.
+  // Default to the first prompt when entering the Prompts tab.
   useEffect(() => {
-    if (!activeTabId) return;
-    const tab = tabs.find((t) => t.id === activeTabId);
-    if (!tab) return;
-    if (tabContents[tab.id] != null) return;
+    if (activeTabId !== "prompts") return;
+    if (activePromptId && promptOutputs.some((p) => p.id === activePromptId)) return;
+    const firstComplete = promptOutputs.find((p) => p.status === "complete") ?? promptOutputs[0];
+    setActivePromptId(firstComplete?.id ?? null);
+  }, [activeTabId, promptOutputs, activePromptId]);
+
+  // Lazily load file contents for whichever document the user is viewing.
+  useEffect(() => {
+    if (!detail) return;
+    let filePath: string | null = null;
+    let cacheKey: string | null = null;
+    if (activeTabId === "notes") {
+      filePath = `${runFolder}/notes.md`;
+      cacheKey = "notes";
+    } else if (activeTabId === "transcript") {
+      filePath = `${runFolder}/transcript.md`;
+      cacheKey = "transcript";
+    } else if (activeTabId === "prompts" && activePromptId) {
+      const p = promptOutputs.find((x) => x.id === activePromptId);
+      if (p) {
+        filePath = p.filePath;
+        cacheKey = `prompt:${p.id}`;
+      }
+    }
+    if (!filePath || !cacheKey) return;
+    if (tabContents[cacheKey] != null) return;
+    const key = cacheKey;
+    const path = filePath;
     api.runs
-      .readFile(tab.filePath)
-      .then((content) =>
-        setTabContents((prev) => ({ ...prev, [tab.id]: content }))
-      )
+      .readFile(path)
+      .then((content) => setTabContents((prev) => ({ ...prev, [key]: content })))
       .catch(() =>
-        setTabContents((prev) => ({ ...prev, [tab.id]: "_(file not found)_" }))
+        setTabContents((prev) => ({ ...prev, [key]: "_(file not found)_" }))
       );
-  }, [activeTabId, tabs, tabContents]);
+  }, [activeTabId, activePromptId, detail, promptOutputs, runFolder, tabContents]);
 
   const onNotesChange = (value: string) => {
     setTabContents((prev) => ({ ...prev, notes: value }));
@@ -135,8 +188,23 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
   if (error) return <div className="muted" style={{ color: "var(--danger)" }}>{error}</div>;
   if (!detail) return <div className="muted">Meeting not found.</div>;
 
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-  const content = activeTab ? tabContents[activeTab.id] ?? "" : "";
+  const notesContent = tabContents.notes ?? "";
+  const transcriptContent = tabContents.transcript ?? "";
+  const activePrompt = activePromptId
+    ? promptOutputs.find((p) => p.id === activePromptId) ?? null
+    : null;
+  const promptContent = activePromptId
+    ? tabContents[`prompt:${activePromptId}`] ?? ""
+    : "";
+
+  const obsidianTargetPath =
+    activeTabId === "notes"
+      ? `${runFolder}/notes.md`
+      : activeTabId === "transcript"
+      ? `${runFolder}/transcript.md`
+      : activeTabId === "prompts" && activePrompt
+      ? activePrompt.filePath
+      : null;
 
   return (
     <>
@@ -161,7 +229,25 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
       </div>
 
       {sections.length > 0 && (
-        <PipelineStatus sections={sections} title="Live processing" />
+        <>
+          {config.llm_provider === "ollama" &&
+            sections.some((s) => s.state === "running") && (
+              <div
+                className="card"
+                style={{ borderColor: "var(--accent, #6aa0ff)", marginBottom: 8 }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span className="spinner" aria-hidden="true" />
+                  <strong>Processing locally with {config.ollama.model}</strong>
+                </div>
+                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Stay in the app — local models are slower per section than
+                  cloud LLMs but never leave your machine.
+                </div>
+              </div>
+            )}
+          <PipelineStatus sections={sections} title="Live processing" />
+        </>
       )}
 
       <div className="tabs">
@@ -176,22 +262,65 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
         ))}
       </div>
 
-      {activeTab?.editable ? (
+      {activeTabId === "overview" && (
+        <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={refresh} />
+      )}
+
+      {activeTabId === "notes" && (
         <div style={{ height: "60vh" }}>
           <MarkdownEditor
-            value={content}
+            value={notesContent}
             onChange={onNotesChange}
             onBlur={onNotesBlur}
           />
         </div>
-      ) : (
-        <MarkdownView source={content} />
       )}
 
-      {config.obsidian_integration.enabled && activeTab && (
+      {activeTabId === "transcript" && <MarkdownView source={transcriptContent} />}
+
+      {activeTabId === "prompts" && (
+        <div className="prompts-tab">
+          <aside className="prompts-tab-nav">
+            <div className="prompts-tab-nav-header">
+              <button onClick={() => setRunPromptOpen(true)}>Run prompt…</button>
+            </div>
+            {promptOutputs.length === 0 ? (
+              <div className="muted" style={{ padding: 12 }}>
+                No prompt outputs yet.
+              </div>
+            ) : (
+              promptOutputs.map((p) => (
+                <button
+                  key={p.id}
+                  className={`prompts-tab-nav-item ${
+                    activePromptId === p.id ? "active" : ""
+                  }`}
+                  onClick={() => setActivePromptId(p.id)}
+                >
+                  <span className={`status-pill ${p.status ?? "pending"}`}>
+                    {p.status ?? "—"}
+                  </span>
+                  <span className="prompts-tab-nav-label">{p.label}</span>
+                </button>
+              ))
+            )}
+          </aside>
+          <div className="prompts-tab-content">
+            {activePrompt ? (
+              <MarkdownView source={promptContent} />
+            ) : (
+              <div className="muted">Select a prompt to view its output.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {config.obsidian_integration.enabled && obsidianTargetPath && (
         <div style={{ marginTop: 12 }}>
           <button
-            onClick={() => api.runs.openInObsidian(activeTab.filePath).catch(() => {})}
+            onClick={() =>
+              api.runs.openInObsidian(obsidianTargetPath).catch(() => {})
+            }
           >
             Open in Obsidian
           </button>

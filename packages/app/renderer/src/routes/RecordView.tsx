@@ -4,6 +4,7 @@ import type {
   AppConfigDTO,
   RecordingStatus,
   PipelineProgressEvent,
+  RunSummary,
 } from "../../../shared/ipc";
 import { MarkdownEditor } from "../components/MarkdownEditor";
 import {
@@ -12,14 +13,24 @@ import {
   type SectionStatus,
 } from "../components/PipelineStatus";
 import { AudioMeter } from "../components/AudioMeter";
+import { relativeDateLabel } from "../constants";
 
 interface RecordViewProps {
   recording: RecordingStatus;
   config: AppConfigDTO;
+  onMeetingStopped?: (runFolder: string) => void;
+  onOpenMeeting?: (runFolder: string) => void;
 }
 
-export function RecordView({ recording, config: _config }: RecordViewProps) {
+export function RecordView({
+  recording,
+  config: _config,
+  onMeetingStopped,
+  onOpenMeeting,
+}: RecordViewProps) {
   const [title, setTitle] = useState("Untitled Meeting");
+  const [description, setDescription] = useState("");
+  const [recentRuns, setRecentRuns] = useState<RunSummary[]>([]);
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -83,11 +94,36 @@ export function RecordView({ recording, config: _config }: RecordViewProps) {
     if (recording.active) setSections([]);
   }, [recording.run_folder]);
 
+  // Load recent meetings to show on Home when not recording.
+  useEffect(() => {
+    if (recording.active) return;
+    let cancelled = false;
+    api.runs
+      .list()
+      .then((list) => {
+        if (cancelled) return;
+        const sorted = [...list].sort(
+          (a, b) =>
+            (Date.parse(b.started || b.date) || 0) -
+            (Date.parse(a.started || a.date) || 0)
+        );
+        setRecentRuns(sorted.slice(0, 6));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [recording.active]);
+
   const onStart = async () => {
     setError(null);
     setStarting(true);
     try {
-      await api.recording.start({ title: title.trim() || "Untitled Meeting" });
+      await api.recording.start({
+        title: title.trim() || "Untitled Meeting",
+        description: description.trim() || null,
+      });
+      setDescription("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -103,7 +139,10 @@ export function RecordView({ recording, config: _config }: RecordViewProps) {
       if (notesPath) {
         await api.runs.writeFile(notesPath, notes).catch(() => {});
       }
-      await api.recording.stop();
+      const result = await api.recording.stop();
+      if (result?.run_folder && onMeetingStopped) {
+        onMeetingStopped(result.run_folder);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -137,29 +176,79 @@ export function RecordView({ recording, config: _config }: RecordViewProps) {
 
   return (
     <>
-      <h1 className="section-title">Record</h1>
+      <h1 className="section-title">Home</h1>
       <p className="section-subtitle">
         {recording.active
           ? `Recording "${recording.title ?? "Untitled Meeting"}"`
-          : "Type a title, hit start, take notes while the call runs."}
+          : "Start a new meeting or jump back into a recent one."}
       </p>
 
       {!recording.active && (
-        <div className="card">
-          <label htmlFor="title">Meeting title</label>
-          <input
-            id="title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="Untitled Meeting"
-          />
-          <div style={{ marginTop: 16 }}>
-            <button className="primary big" onClick={onStart} disabled={starting}>
-              {starting ? "Starting…" : "Start recording"}
-            </button>
+        <>
+          <div className="card start-meeting-card">
+            <label htmlFor="title">Meeting title</label>
+            <input
+              id="title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="Untitled Meeting"
+            />
+            <label htmlFor="description" style={{ marginTop: 12 }}>
+              Description (optional)
+            </label>
+            <textarea
+              id="description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={3}
+              placeholder="What's this meeting about?"
+            />
+            <div style={{ marginTop: 16 }}>
+              <button className="primary big" onClick={onStart} disabled={starting}>
+                {starting ? "Starting…" : "Start recording"}
+              </button>
+            </div>
+            {error && (
+              <div className="muted" style={{ color: "var(--danger)", marginTop: 12 }}>
+                {error}
+              </div>
+            )}
           </div>
-          {error && <div className="muted" style={{ color: "var(--danger)", marginTop: 12 }}>{error}</div>}
-        </div>
+
+          {recentRuns.length > 0 && (
+            <div style={{ marginTop: 28 }}>
+              <h2 className="section-title" style={{ fontSize: 18, marginBottom: 12 }}>
+                Recent meetings
+              </h2>
+              <div className="recent-meetings-grid">
+                {recentRuns.map((r) => (
+                  <button
+                    key={r.folder_path}
+                    type="button"
+                    className="recent-meeting-card"
+                    onClick={() => onOpenMeeting?.(r.folder_path)}
+                  >
+                    <div className="recent-meeting-title">{r.title}</div>
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {relativeDateLabel(r.started || r.date)}
+                      {r.duration_minutes != null
+                        ? ` · ${r.duration_minutes.toFixed(1)}m`
+                        : ""}
+                    </div>
+                    {r.description && (
+                      <div className="recent-meeting-desc">
+                        {r.description.split("\n")[0]}
+                      </div>
+                    )}
+                    <div style={{ marginTop: 8 }}>
+                      <span className={`status-pill ${r.status}`}>{r.status}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {recording.active && (

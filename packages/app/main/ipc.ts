@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { BrowserWindow, ipcMain, dialog, shell } from "electron";
 import matter from "gray-matter";
@@ -22,18 +22,27 @@ import {
   DEFAULT_PROMPTS_DIR,
   FfmpegRecorder,
   ClaudeProvider,
+  OllamaProvider,
+  classifyModel,
   openInObsidian,
   createRunLogger,
   createAppLogger,
   setupAsr,
+  setupLlm,
+  checkOllama,
+  listOllamaModels,
+  deleteOllamaModel,
   processRun,
   getSecret,
   setSecret,
   hasSecret,
   type AppConfig,
+  type LlmProvider,
   type PipelineProgressEvent,
   type RunManifest,
 } from "@meeting-notes/engine";
+import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
+import { detectHardware } from "./system.js";
 import type {
   AppConfigDTO,
   InitConfigRequest,
@@ -46,6 +55,9 @@ import type {
   StartRecordingRequest,
   PipelineProgressEvent as AppPipelineProgressEvent,
   DepsCheckResult,
+  DepsInstallResult,
+  DepsInstallTarget,
+  DetectedVault,
 } from "../shared/ipc.js";
 import {
   getStatus as getRecordingStatus,
@@ -73,6 +85,7 @@ function configToDto(config: AppConfig): AppConfigDTO {
     whisper_local: config.whisper_local,
     parakeet_mlx: config.parakeet_mlx,
     claude: config.claude,
+    ollama: config.ollama,
     recording: config.recording,
     shortcuts: config.shortcuts,
   };
@@ -91,6 +104,7 @@ function dtoToConfig(dto: AppConfigDTO): AppConfig {
     whisper_local: dto.whisper_local,
     parakeet_mlx: dto.parakeet_mlx,
     claude: dto.claude,
+    ollama: dto.ollama,
     recording: dto.recording,
     shortcuts: dto.shortcuts,
   };
@@ -108,6 +122,7 @@ function toRunSummary(manifest: RunManifest, folderPath: string): RunSummary {
   return {
     run_id: manifest.run_id,
     title: manifest.title,
+    description: manifest.description ?? null,
     date: manifest.date,
     started: manifest.started,
     ended: manifest.ended,
@@ -181,11 +196,33 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("config:init", async (_e, req: InitConfigRequest) => {
+    // The wizard no longer asks about audio devices — fill in sensible
+    // defaults here so the user can always record, and let them tweak in
+    // Settings if needed. Mic = first AVFoundation input; system = first
+    // device whose name contains "blackhole" (the only loopback path on
+    // macOS). If BlackHole isn't installed yet, system_device stays empty
+    // and FfmpegRecorder gracefully degrades to mic-only.
+    let micDevice = req.recording.mic_device;
+    let systemDevice = req.recording.system_device;
+    if (!micDevice || !systemDevice) {
+      try {
+        const recorder = new FfmpegRecorder();
+        const devices = await recorder.listAudioDevices();
+        if (!micDevice) micDevice = devices[0] ?? "";
+        if (!systemDevice) {
+          systemDevice = devices.find((d) => /blackhole/i.test(d)) ?? "";
+        }
+      } catch {
+        // ffmpeg missing — leave fields empty; deps step will flag ffmpeg.
+      }
+    }
+
+    const llmProvider = req.llm_provider ?? "claude";
     const config: AppConfig = {
       data_path: req.data_path.replace(/^~/, os.homedir()),
       obsidian_integration: req.obsidian_integration,
       asr_provider: req.asr_provider,
-      llm_provider: "claude",
+      llm_provider: llmProvider,
       whisper_local: {
         binary_path: "whisper-cli",
         model_path: "",
@@ -195,7 +232,11 @@ export function registerIpcHandlers(): void {
         model: "mlx-community/parakeet-tdt-0.6b-v2",
       },
       claude: { model: "claude-sonnet-4-6" },
-      recording: req.recording,
+      ollama: {
+        base_url: "http://127.0.0.1:11434",
+        model: req.ollama_model ?? "qwen3.5:9b",
+      },
+      recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },
     };
     if (req.claude_api_key) await setSecret("claude", req.claude_api_key);
@@ -259,7 +300,7 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("recording:start", async (_e, req: StartRecordingRequest) => {
-    const result = await startRecording(req.title);
+    const result = await startRecording(req.title, req.description ?? null);
     broadcastRecordingStatus();
     return result;
   });
@@ -331,9 +372,29 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("runs:reprocess", async (_e, req: ReprocessRequest) => {
     const config = loadConfig();
     const manifest = loadRunManifest(req.runFolder);
+    const defaultModel =
+      config.llm_provider === "ollama" ? config.ollama.model : config.claude.model;
     const apiKey = await getSecret("claude");
-    if (!apiKey) throw new Error("No Anthropic API key in Keychain — set one in Settings.");
-    const claude = new ClaudeProvider(apiKey, config.claude.model);
+    // Only require an Anthropic key if the default provider is Claude. With
+    // ollama as default, prompts can still target Claude per-frontmatter; the
+    // factory below throws lazily for those, leaving local prompts working.
+    if (config.llm_provider === "claude" && !apiKey) {
+      throw new Error("No Anthropic API key in Keychain — set one in Settings.");
+    }
+    const claudeCache: Record<string, ClaudeProvider> = {};
+    const ollamaCache: Record<string, OllamaProvider> = {};
+    const llmFactory = (model?: string): LlmProvider => {
+      const id = model && model.trim() ? model : defaultModel;
+      if (classifyModel(id) === "claude") {
+        if (!apiKey) {
+          throw new Error(
+            `Prompt requested Claude model "${id}" but no Anthropic API key is set in Settings.`
+          );
+        }
+        return (claudeCache[id] ??= new ClaudeProvider(apiKey, id));
+      }
+      return (ollamaCache[id] ??= new OllamaProvider(config.ollama.base_url, id));
+    };
     const logger = createRunLogger(path.join(req.runFolder, "run.log"), false);
 
     const transcriptPath = path.join(req.runFolder, "transcript.md");
@@ -354,7 +415,7 @@ export function registerIpcHandlers(): void {
         meExcerpts: "",
         othersExcerpts: "",
       },
-      (sys, usr) => claude.call(sys, usr),
+      (sys, usr, model) => llmFactory(model).call(sys, usr, model),
       logger,
       {
         onlyIds: req.onlyIds,
@@ -443,6 +504,26 @@ export function registerIpcHandlers(): void {
     fs.rmSync(runFolder, { recursive: true, force: true });
   });
 
+  ipcMain.handle(
+    "runs:update-meta",
+    async (
+      _e,
+      req: { runFolder: string; title?: string; description?: string | null }
+    ) => {
+      const { updateRunStatus } = await import("@meeting-notes/engine");
+      const manifest = loadRunManifest(req.runFolder);
+      const updates: Partial<RunManifest> = {};
+      if (typeof req.title === "string" && req.title.trim()) {
+        updates.title = req.title.trim();
+      }
+      if ("description" in req) {
+        updates.description = req.description && req.description.trim() ? req.description.trim() : null;
+      }
+      // Re-write the manifest while preserving status.
+      updateRunStatus(req.runFolder, manifest.status, updates);
+    }
+  );
+
   // ---- prompts ----
   ipcMain.handle("prompts:list", async (): Promise<PromptRow[]> => {
     const config = safeLoadConfig();
@@ -454,6 +535,7 @@ export function registerIpcHandlers(): void {
       enabled: p.enabled,
       auto: p.auto,
       builtin: p.builtin,
+      model: p.model,
       source_path: p.sourcePath,
       body: p.prompt,
     }));
@@ -476,6 +558,16 @@ export function registerIpcHandlers(): void {
         ...("enabled" in patch ? { enabled: patch.enabled } : {}),
         ...("auto" in patch ? { auto: patch.auto } : {}),
       };
+      if ("model" in patch) {
+        // Empty string / null means "fall back to the default in Settings",
+        // which we represent on disk by deleting the key entirely so the
+        // frontmatter stays clean.
+        if (patch.model && String(patch.model).trim()) {
+          mergedFrontmatter.model = String(patch.model).trim();
+        } else {
+          delete mergedFrontmatter.model;
+        }
+      }
       const rewritten = matter.stringify(`\n${body.trim()}\n`, mergedFrontmatter);
       fs.writeFileSync(existing.sourcePath, rewritten, "utf-8");
     }
@@ -542,6 +634,133 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  // ---- dep install (brew wrapper) ----
+  //
+  // The Parakeet installer already streams logs via setup-asr:log. This
+  // mirrors that pattern for ffmpeg + BlackHole via Homebrew so the wizard
+  // can offer one-click installs without ever dropping the user into a
+  // terminal. We deliberately don't try to install Homebrew itself — that
+  // requires interactive sudo and an internet redirect dance that's
+  // much safer to hand off to the user.
+  ipcMain.handle("deps:check-brew", async (): Promise<boolean> => {
+    const brew = await whichCmd("brew");
+    return brew !== null;
+  });
+
+  ipcMain.handle(
+    "deps:install",
+    async (_e, target: DepsInstallTarget): Promise<DepsInstallResult> => {
+      const brew = await whichCmd("brew");
+      if (!brew) {
+        return { ok: false, brewMissing: true };
+      }
+
+      const args =
+        target === "ffmpeg"
+          ? ["install", "ffmpeg"]
+          : ["install", "--cask", "blackhole-2ch"];
+
+      broadcastToAll("deps-install:log", `$ brew ${args.join(" ")}`);
+
+      return await new Promise<DepsInstallResult>((resolve) => {
+        const child = spawn(brew, args, {
+          env: { ...process.env },
+          stdio: ["ignore", "pipe", "pipe"],
+        });
+
+        const streamLines = (chunk: Buffer) => {
+          const text = chunk.toString("utf-8");
+          for (const line of text.split(/\r?\n/)) {
+            if (line.trim() !== "") {
+              broadcastToAll("deps-install:log", line);
+            }
+          }
+        };
+        child.stdout?.on("data", streamLines);
+        child.stderr?.on("data", streamLines);
+
+        child.on("error", (err) => {
+          resolve({ ok: false, error: err.message });
+        });
+        child.on("exit", (code) => {
+          if (code === 0) {
+            broadcastToAll("deps-install:log", `✓ ${target} installed`);
+            resolve({ ok: true });
+          } else {
+            resolve({ ok: false, error: `brew exited with code ${code}` });
+          }
+        });
+      });
+    }
+  );
+
+  // ---- Restart macOS audio system ----
+  //
+  // Used after a fresh BlackHole install when CoreAudio hasn't picked up
+  // the new HAL plugin yet. `killall coreaudiod` requires sudo, so we
+  // route it through `osascript ... with administrator privileges` —
+  // macOS shows the standard credentials dialog, the user clicks Allow,
+  // coreaudiod relaunches under launchd, and BlackHole becomes
+  // enumerable in AVFoundation within ~1 second.
+  ipcMain.handle(
+    "deps:restart-audio",
+    async (): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        await execFileAsync("osascript", [
+          "-e",
+          'do shell script "killall coreaudiod" with administrator privileges',
+        ]);
+        return { ok: true };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
+  );
+
+  // ---- Obsidian vault detection ----
+  //
+  // Quick-pick helper for step 1 of the wizard: scan the usual suspects
+  // (~/Obsidian/*, ~/Documents/*) one level deep for directories that
+  // contain a `.obsidian/` subfolder (Obsidian's marker file). Cheap
+  // enough to run on every wizard mount — we stat at most a few dozen
+  // dirs.
+  ipcMain.handle("obsidian:detect-vaults", async (): Promise<DetectedVault[]> => {
+    const home = os.homedir();
+    const scanRoots = [
+      path.join(home, "Obsidian"),
+      path.join(home, "Documents"),
+    ];
+    const found: DetectedVault[] = [];
+    const seen = new Set<string>();
+    for (const root of scanRoots) {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(root, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const vaultPath = path.join(root, entry.name);
+        if (seen.has(vaultPath)) continue;
+        const marker = path.join(vaultPath, ".obsidian");
+        try {
+          const st = fs.statSync(marker);
+          if (st.isDirectory()) {
+            found.push({ path: vaultPath, name: entry.name });
+            seen.add(vaultPath);
+          }
+        } catch {
+          // not a vault
+        }
+      }
+    }
+    return found;
+  });
+
   // ---- logs ----
   ipcMain.handle("logs:tail-app", async (_e, lines: number) => {
     return tailFile(getAppLogPath(), lines);
@@ -557,15 +776,35 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
     const ffmpeg = await whichCmd("ffmpeg");
     const python = (await whichCmd("python3.12")) ?? (await whichCmd("python3.11")) ?? (await whichCmd("python3"));
-    // BlackHole presence: the audio device list contains "BlackHole 2ch".
-    let blackhole = false;
+    // BlackHole detection is two-step. First, is the HAL driver file on
+    // disk? brew puts it at /Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver.
+    // Second, has CoreAudio actually loaded it? We answer that by asking
+    // ffmpeg/AVFoundation to enumerate audio devices. The two can disagree:
+    // immediately after a fresh `brew install --cask blackhole-2ch`, the
+    // driver bundle is on disk but coreaudiod hasn't picked it up yet.
+    // Reporting "installed-not-loaded" lets the wizard offer a Restart
+    // Audio recovery instead of pointlessly telling the user to install
+    // something that's already there.
+    const blackholeDriverPath = "/Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver";
+    let driverPresent = false;
+    try {
+      driverPresent = fs.statSync(blackholeDriverPath).isDirectory();
+    } catch {
+      driverPresent = false;
+    }
+    let avfoundationLoaded = false;
     try {
       const recorder = new FfmpegRecorder();
       const devices = await recorder.listAudioDevices();
-      blackhole = devices.some((d) => d.toLowerCase().includes("blackhole"));
+      avfoundationLoaded = devices.some((d) => d.toLowerCase().includes("blackhole"));
     } catch {
-      blackhole = false;
+      avfoundationLoaded = false;
     }
+    const blackhole: DepsCheckResult["blackhole"] = avfoundationLoaded
+      ? "loaded"
+      : driverPresent
+        ? "installed-not-loaded"
+        : "missing";
     // Parakeet: check the default install path rather than the configured path,
     // because during the Setup Wizard the user hasn't written a config yet and
     // safeLoadConfig() returns null. This default matches DEFAULT_CONFIG in
@@ -588,7 +827,93 @@ export function registerIpcHandlers(): void {
     } catch {
       parakeet = null;
     }
-    return { ffmpeg, python, blackhole, parakeet };
+    // Ollama: ask the daemon module what state it's in (or attempt to ping a
+    // pre-existing system daemon if we haven't started ours yet). We don't
+    // spawn from inside deps:check — that's app-startup's job — so a fully
+    // cloud-only user never pays the cost.
+    let ollamaDaemonUp = false;
+    let ollamaSource: DepsCheckResult["ollama"]["source"] | undefined;
+    let installedModels: string[] = [];
+    try {
+      const state = getOllamaState();
+      if (state) {
+        ollamaSource = state.source;
+        const status = await checkOllama(state.baseUrl);
+        ollamaDaemonUp = status.daemon;
+        installedModels = status.installedModels;
+      } else {
+        const status = await checkOllama();
+        ollamaDaemonUp = status.daemon;
+        installedModels = status.installedModels;
+        if (ollamaDaemonUp) ollamaSource = "system-running";
+      }
+    } catch {
+      ollamaDaemonUp = false;
+    }
+    return {
+      ffmpeg,
+      python,
+      blackhole,
+      parakeet,
+      ollama: {
+        daemon: ollamaDaemonUp,
+        source: ollamaSource,
+        installedModels,
+      },
+    };
+  });
+
+  // ---- llm (Ollama) ----
+  ipcMain.handle("llm:check", async (): Promise<DepsCheckResult["ollama"]> => {
+    try {
+      // Spinning up the daemon here means the wizard's "check" call is also
+      // what brings Ollama online for the first time — saves a separate
+      // "start daemon" UI step.
+      const state = await ensureOllamaDaemon();
+      const status = await checkOllama(state.baseUrl);
+      return {
+        daemon: status.daemon,
+        source: state.source,
+        installedModels: status.installedModels,
+      };
+    } catch {
+      return { daemon: false, installedModels: [] };
+    }
+  });
+
+  ipcMain.handle(
+    "llm:setup",
+    async (_e, opts: { model: string; force?: boolean }) => {
+      // Make sure the daemon is up first; setupLlm pings but won't spawn.
+      const state = await ensureOllamaDaemon();
+      await setupLlm({
+        model: opts.model,
+        baseUrl: state.baseUrl,
+        force: opts.force,
+        onLog: (line) => broadcastToAll("setup-llm:log", line),
+      });
+    }
+  );
+
+  ipcMain.handle("llm:list-installed", async (): Promise<string[]> => {
+    try {
+      const state = getOllamaState();
+      const baseUrl = state?.baseUrl;
+      const tags = await listOllamaModels(baseUrl);
+      return tags.map((t) => t.name);
+    } catch {
+      return [];
+    }
+  });
+
+  ipcMain.handle("llm:remove", async (_e, model: string) => {
+    const state = getOllamaState();
+    await deleteOllamaModel(model, state?.baseUrl);
+  });
+
+  // ---- system ----
+  ipcMain.handle("system:detect-hardware", async () => {
+    return detectHardware();
   });
 
   // Create an app logger on first registration — gives us structured

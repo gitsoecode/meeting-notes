@@ -242,6 +242,7 @@ program
       whisper_local: DEFAULT_CONFIG.whisper_local,
       parakeet_mlx: DEFAULT_CONFIG.parakeet_mlx,
       claude: DEFAULT_CONFIG.claude,
+      ollama: DEFAULT_CONFIG.ollama,
       recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: DEFAULT_CONFIG.shortcuts,
     };
