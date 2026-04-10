@@ -3,3 +3,8 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .claude/settings.local.json
+
+# Build & test artifacts
+packages/app/build/
+packages/app/playwright-report/
+packages/app/test-results/
