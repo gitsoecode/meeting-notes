@@ -18,8 +18,10 @@ test("runs through home, modal, recording, meeting tabs, and prompts workflows",
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("button", { name: "Start recording" }).click();
-  await expect(page.getByRole("button", { name: "End and process" })).toBeVisible();
-  await page.getByRole("button", { name: "End and process" }).click();
+  await expect(page.getByRole("button", { name: "End meeting" })).toBeVisible();
+  await page.getByRole("button", { name: "End meeting" }).click();
+  await expect(page.getByRole("heading", { name: "End meeting" })).toBeVisible();
+  await page.getByRole("button", { name: "End meeting" }).last().click();
 
   await expect(page.getByRole("tab", { name: "Summary" })).toHaveAttribute(
     "data-state",
@@ -29,20 +31,21 @@ test("runs through home, modal, recording, meeting tabs, and prompts workflows",
   await expect(page.getByText("Welcome everyone.")).toBeVisible();
 
   await page.getByRole("tab", { name: "Notes" }).click();
-  await expect(page.getByRole("button", { name: "Edit notes" })).toBeVisible();
-  await page.getByRole("button", { name: "Edit notes" }).click();
-  await expect(page.getByRole("button", { name: "Save notes" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit" }).click();
+  await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
   await page.getByRole("button", { name: "Cancel" }).click();
 
   await page.getByRole("tab", { name: "Analysis" }).click();
-  await page.getByRole("button", { name: "Run prompt" }).click();
-  await expect(page.getByText("Decisions")).toBeVisible();
+  await page.getByRole("button", { name: /Decision Log/ }).click();
+  await page.getByRole("button", { name: "Run prompt", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Decisions" })).toBeVisible();
 
   await page.getByRole("tab", { name: "Metadata" }).click();
   await expect(page.getByText("Run details")).toBeVisible();
 
-  await page.getByRole("button", { name: "Prompt Library" }).click();
-  await expect(page.getByText("Prompt workspace")).toBeVisible();
+  await page.locator("aside").getByRole("button", { name: "Prompt Library" }).click();
+  await expect(page.getByRole("heading", { name: "Prompt Library" })).toBeVisible();
   await page.getByRole("button", { name: "Decision Log" }).click();
   await page.getByRole("switch", { name: "Auto-run" }).click();
   await expect(page.getByRole("switch", { name: "Auto-run" })).toHaveAttribute("aria-checked", "true");
@@ -66,10 +69,10 @@ test("covers meetings list, bulk run, import, settings, logs, and processing sta
   page,
 }) => {
   await page.locator("aside").getByRole("button", { name: "Meetings" }).click();
-  await expect(page.getByText("Recent and imported meetings")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Meetings" })).toBeVisible();
 
   await page.getByPlaceholder("Search meetings").fill("customer");
-  await expect(page.getByRole("button", { name: /Customer call/ }).first()).toBeVisible();
+  await expect(page.getByText("Customer call").first()).toBeVisible();
   await page.getByPlaceholder("Search meetings").fill("");
 
   await page.getByLabel("Select Customer call").first().check({ force: true });
@@ -83,7 +86,7 @@ test("covers meetings list, bulk run, import, settings, logs, and processing sta
   await expect(page.getByRole("heading", { name: "mock meeting" })).toBeVisible();
 
   await page.locator("aside").getByRole("button", { name: "Meetings" }).click();
-  await page.getByRole("button", { name: /Customer call/ }).first().click();
+  await page.getByText("Customer call").first().click();
   await expect(page.getByText("Processing locally with qwen3.5:9b")).toBeVisible();
 
 });

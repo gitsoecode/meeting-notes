@@ -29,9 +29,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Spinner } from "../components/ui/spinner";
 import { Switch } from "../components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
 
 const SYSTEM_DEFAULT_DEVICE = "";
 const SYSTEM_DEFAULT_DEVICE_VALUE = "__system_default__";
+
+const DEFAULT_CHAT_PROMPT =
+  "Below is the full context from a meeting I recorded and processed. " +
+  "Please review it and be ready to answer questions, generate follow-ups, " +
+  "or help me take action on what was discussed.";
 
 interface SettingsProps {
   config: AppConfigDTO;
@@ -590,6 +596,41 @@ export function Settings({ config, onChange }: SettingsProps) {
                     void save({ ...config, shortcuts: { ...config.shortcuts, toggle_recording: next } })
                   }
                 />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="overflow-hidden p-5 md:p-6">
+            <CardHeader className="mb-3">
+              <div className="space-y-1">
+                <CardTitle>Chat Launcher</CardTitle>
+                <CardDescription>
+                  Default prompt used when exporting meeting context to an external AI chat app.
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  Default starting prompt
+                </label>
+                <Textarea
+                  value={config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT}
+                  onChange={(e) =>
+                    void save({
+                      ...config,
+                      chat_launcher: {
+                        ...config.chat_launcher,
+                        default_prompt: e.target.value,
+                      },
+                    })
+                  }
+                  rows={3}
+                  className="resize-none"
+                />
+                <p className="text-xs text-[var(--text-secondary)]">
+                  This prompt is pre-filled in the Launch chat modal on each meeting page. You can edit it per-launch.
+                </p>
               </div>
             </CardContent>
           </Card>

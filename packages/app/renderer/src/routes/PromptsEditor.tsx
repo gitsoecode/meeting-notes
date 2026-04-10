@@ -591,7 +591,7 @@ function PromptSidebarItem({
       type="button"
       onClick={onSelect}
       data-testid={dataTestId}
-      className={`group relative flex w-full items-center justify-between rounded-md px-3 py-2 text-left transition-all ${
+      className={`group relative flex w-full items-center justify-between rounded-md px-3 py-[7px] text-left transition-all ${
         emphasized
           ? active
             ? "bg-[rgba(45,107,63,0.14)] font-semibold text-[var(--text-primary)] shadow-sm ring-1 ring-[rgba(45,107,63,0.18)]"
@@ -602,9 +602,9 @@ function PromptSidebarItem({
       }`}
     >
       <div className="min-w-0">
-        <span className="truncate text-xs">{prompt.label}</span>
+        <span className="block truncate text-xs leading-snug">{prompt.label}</span>
         {emphasized ? (
-          <div className="mt-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--accent)]">
+          <div className="mt-0.5 text-[10px] font-semibold uppercase leading-tight tracking-[0.14em] text-[var(--accent)]">
             Primary prompt
           </div>
         ) : null}
@@ -615,7 +615,7 @@ function PromptSidebarItem({
         )}
       </div>
       {active && (
-        <div className="absolute left-0 top-2 h-4 w-0.5 rounded-full bg-[var(--accent)]" />
+        <div className="absolute inset-y-0 left-0 my-auto h-4 w-0.5 rounded-full bg-[var(--accent)]" />
       )}
     </button>
   );

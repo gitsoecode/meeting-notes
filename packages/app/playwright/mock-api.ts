@@ -175,6 +175,21 @@ export async function installMockApi(page: Page) {
         source_path: "/Users/test/.meeting-notes/prompts/decision-log.md",
         body: "List the decisions made in the meeting.",
       },
+      {
+        id: "follow-up-brief",
+        label: "Follow-up Brief",
+        description: "Draft a short follow-up with next steps and owners.",
+        category: "Operations",
+        sort_order: 50,
+        recommended: false,
+        filename: "follow-up-brief.md",
+        enabled: true,
+        auto: true,
+        builtin: false,
+        model: "claude-sonnet-4-6",
+        source_path: "/Users/test/.meeting-notes/prompts/follow-up-brief.md",
+        body: "Draft a short follow-up with next steps and owners.",
+      },
     ];
 
     const runs = [
@@ -387,6 +402,151 @@ export async function installMockApi(page: Page) {
       return prompt;
     };
 
+    const buildRunComplete = (runFolder, succeeded) => {
+      emit("pipelineProgress", {
+        type: "run-complete",
+        runFolder,
+        succeeded,
+        failed: [],
+      });
+    };
+
+    const processRecordedRun = (req, { background }) => {
+      const run = runs.find((item) => item.folder_path === req.runFolder);
+      const promptIds = req.onlyIds ?? [];
+      const selectedPrompts = promptIds.map((promptId) => getPromptDefinition(promptId));
+      const totalSections = 1 + selectedPrompts.length;
+      const job = {
+        id: `job-${nextJobCounter++}`,
+        kind: "process-recording",
+        status: "running",
+        title: run?.title ?? "Meeting",
+        subtitle: promptIds.length > 0 ? "Processing selected meeting outputs" : "Building transcript",
+        createdAt: new Date().toISOString(),
+        startedAt: new Date().toISOString(),
+        cancelable: true,
+        runFolder: req.runFolder,
+        promptIds,
+        provider: "ollama",
+        model: "qwen3.5:9b",
+        progress: {
+          completedSections: 0,
+          failedSections: 0,
+          totalSections,
+          currentSectionLabel: "Build transcript",
+        },
+      };
+      upsertJob(job);
+
+      const execute = () => {
+        if (run) {
+          run.status = "processing";
+          run.section_ids = promptIds;
+        }
+        manifests[req.runFolder] ??= {
+          description: null,
+          participants: [],
+          tags: [],
+          source_mode: "both",
+          asr_provider: "parakeet-mlx",
+          llm_provider: "ollama",
+          sections: {},
+        };
+        manifests[req.runFolder].sections = {};
+        emit("pipelineProgress", {
+          type: "run-planned",
+          runFolder: req.runFolder,
+          steps: [
+            {
+              sectionId: "__transcript__",
+              label: "Build transcript",
+              filename: "transcript.md",
+              kind: "transcript",
+            },
+            ...selectedPrompts.map((prompt) => ({
+              sectionId: prompt.id,
+              label: prompt.label,
+              filename: prompt.filename,
+              model: prompt.model ?? undefined,
+              kind: "prompt",
+            })),
+          ],
+        });
+        emit("pipelineProgress", {
+          type: "section-start",
+          runFolder: req.runFolder,
+          sectionId: "__transcript__",
+          label: "Build transcript",
+          filename: "transcript.md",
+        });
+        docs[req.runFolder] ??= {};
+        docs[req.runFolder]["transcript.md"] =
+          "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:18` Let's lock the next steps before we wrap.\n";
+        files[req.runFolder] = [
+          ...(files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md"),
+          { name: "transcript.md", size: 120, kind: "document" },
+          ...((files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md")),
+        ].filter((file, index, all) => all.findIndex((candidate) => candidate.name === file.name) === index);
+        emit("pipelineProgress", {
+          type: "section-complete",
+          runFolder: req.runFolder,
+          sectionId: "__transcript__",
+          label: "Build transcript",
+          filename: "transcript.md",
+          latencyMs: 500,
+        });
+
+        selectedPrompts.forEach((prompt) => {
+          ensurePromptSection(req.runFolder, prompt.id, "running");
+          emit("pipelineProgress", {
+            type: "section-start",
+            runFolder: req.runFolder,
+            sectionId: prompt.id,
+            label: prompt.label,
+            filename: prompt.filename,
+            model: prompt.model ?? undefined,
+          });
+          writePromptOutput(req.runFolder, prompt.id);
+          emit("pipelineProgress", {
+            type: "section-complete",
+            runFolder: req.runFolder,
+            sectionId: prompt.id,
+            label: prompt.label,
+            filename: prompt.filename,
+            latencyMs: 800,
+          });
+        });
+
+        if (run) run.status = "complete";
+        buildRunComplete(req.runFolder, promptIds);
+        upsertJob({
+          ...job,
+          status: "completed",
+          cancelable: false,
+          endedAt: new Date().toISOString(),
+          progress: {
+            completedSections: totalSections,
+            failedSections: 0,
+            totalSections,
+            currentSectionLabel:
+              selectedPrompts[selectedPrompts.length - 1]?.label ?? "Build transcript",
+          },
+        });
+      };
+
+      if (background) {
+        setTimeout(execute, 0);
+        return undefined;
+      }
+
+      execute();
+      return {
+        runFolder: req.runFolder,
+        succeeded: promptIds,
+        failed: [],
+      };
+    };
+
     window.__MEETING_NOTES_TEST = {
       emitAppAction(type, source = "tray") {
         emit("appAction", { type, source });
@@ -482,35 +642,26 @@ export async function installMockApi(page: Page) {
             duration_minutes: 30,
             tags: [],
             folder_path: "/runs/live-meeting",
-            section_ids: ["summary"],
+            section_ids: req?.mode === "process" || !req?.mode ? ["summary"] : [],
           };
           runs.unshift(liveRun);
-          manifests["/runs/live-meeting"].sections = {
-            summary: {
-              status: "complete",
-              label: "Summary + Action Items",
-              filename: "summary.md",
-            },
-          };
+          manifests["/runs/live-meeting"].sections = {};
           docs["/runs/live-meeting"]["transcript.md"] =
             "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:18` Let's lock the next steps before we wrap.\n";
-          docs["/runs/live-meeting"]["summary.md"] =
-            "---\nsource: mock\n---\n# Summary\n\n- Captured decisions.\n";
           files["/runs/live-meeting"] = [
             { name: "notes.md", size: 32, kind: "document" },
             { name: "transcript.md", size: 120, kind: "document" },
-            { name: "summary.md", size: 120, kind: "document" },
             { name: "audio/mic.wav", size: 3200000, kind: "media" },
             { name: "audio/system.wav", size: 5200000, kind: "media" },
           ];
           recording = { active: false };
           emit("recordingStatus", clone(recording));
-          emit("pipelineProgress", {
-            type: "run-complete",
-            runFolder: "/runs/live-meeting",
-            succeeded: ["summary"],
-            failed: [],
-          });
+          if (req?.mode === "process" || !req?.mode) {
+            processRecordedRun(
+              { runFolder: "/runs/live-meeting", onlyIds: ["summary"] },
+              { background: true }
+            );
+          }
           return { run_folder: "/runs/live-meeting" };
         },
         async listAudioDevices() {
@@ -542,6 +693,12 @@ export async function installMockApi(page: Page) {
         },
         async writeNotes(runFolder, content) {
           docs[runFolder]["notes.md"] = content;
+        },
+        async startProcessRecording(req) {
+          processRecordedRun(req, { background: true });
+        },
+        async processRecording(req) {
+          return processRecordedRun(req, { background: false });
         },
         async startReprocess(req) {
           const run = runs.find((item) => item.folder_path === req.runFolder);

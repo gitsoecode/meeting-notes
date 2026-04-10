@@ -173,7 +173,7 @@ export async function startRecording(
 }
 
 export interface StopOptions {
-  mode?: "process" | "delete";
+  mode?: "process" | "save" | "delete";
   onProgress?: (runFolder: string, event: PipelineProgressEvent) => void;
 }
 
@@ -199,6 +199,20 @@ export async function stopRecording(
         const validatedRunFolder = resolveRunFolderPath(cli.run_folder, loadConfig());
         fs.rmSync(validatedRunFolder, { recursive: true, force: true });
         return { deleted: true };
+      }
+      if (mode === "save") {
+        const config = loadConfig();
+        const validatedRunFolder = resolveRunFolderPath(cli.run_folder, config);
+        const startedMs = Date.parse(cli.started_at);
+        const endedAt = new Date().toISOString();
+        const endedMs = Date.parse(endedAt);
+        updateRunStatus(validatedRunFolder, "complete", {
+          ended: endedAt,
+          duration_minutes:
+            Number.isFinite(startedMs) && Number.isFinite(endedMs) && endedMs > startedMs
+              ? (endedMs - startedMs) / 60000
+              : null,
+        });
       }
       return { run_folder: cli.run_folder };
     }
@@ -237,6 +251,21 @@ export async function stopRecording(
     updateRunStatus(state.runFolder, "error", { ended: new Date().toISOString() });
     appLogger.error("Recording stopped without captured audio", {
       runFolder: state.runFolder,
+    });
+    return { run_folder: state.runFolder };
+  }
+
+  const endedAt = new Date().toISOString();
+
+  if (mode === "save") {
+    const startedMs = Date.parse(state.startedAt);
+    const endedMs = Date.parse(endedAt);
+    updateRunStatus(state.runFolder, "complete", {
+      ended: endedAt,
+      duration_minutes:
+        Number.isFinite(startedMs) && Number.isFinite(endedMs) && endedMs > startedMs
+          ? (endedMs - startedMs) / 60000
+          : null,
     });
     return { run_folder: state.runFolder };
   }

@@ -11,18 +11,16 @@ auto: false
 builtin: true
 ---
 
-You are drafting a follow-up email after a meeting.
+You are drafting a follow-up email after a meeting. The goal is a message the user can send with minimal editing — professional, concise, and immediately useful to recipients.
 
-Using the transcript and any manual notes, produce:
+### Subject Line
+A short, specific subject line. Prefer "Follow-up: [topic]" or "Next steps: [topic]" over vague subjects like "Meeting recap."
 
-## Subject
-- A short, useful email subject line
+### Email Body
+Write the full email body in a natural, professional tone. Structure it as:
+1. A brief opening (1 sentence — thank attendees or set context, not both)
+2. Key takeaways — the 2-4 most important things discussed or decided, as concise bullets
+3. Next steps — a numbered or bulleted list with owners and timing where known
+4. A brief closing line (e.g., offering to clarify, confirming next meeting)
 
-## Email Draft
-- A polished email body that:
-  - thanks the attendees
-  - briefly summarizes the key discussion points
-  - confirms any decisions made
-  - lists next steps with owners or timing when known
-
-The email should be professional, concise, and ready to send with minimal editing.
+Keep the total length under 250 words. Match a professional but human tone — not stiff, not casual. Avoid filler phrases like "as discussed" or "per our conversation."

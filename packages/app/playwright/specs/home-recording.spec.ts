@@ -11,17 +11,39 @@ test.describe("Home & Recording", () => {
     await expect(recordView.elapsedTimer()).toBeVisible();
   });
 
-  test("end and process navigates to the meeting workspace", async ({
+  test("end meeting dialog can process and navigate to the meeting workspace", async ({
     recordView,
     page,
   }) => {
     await recordView.startRecording("Test Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
 
-    await recordView.endAndProcessButton().click();
+    await recordView.endMeetingButton().click();
+    await expect(recordView.endMeetingDialogTitle()).toBeVisible();
+    await expect(page.getByRole("radio", { name: /Process meeting/ })).toBeChecked();
+    await expect(recordView.transcribeCheckbox()).toBeChecked();
+    await expect(page.getByText("Uses local model qwen3.5:9b")).toBeVisible();
+    await expect(page.getByText("Uses Sonnet 4.6")).toBeVisible();
+    await recordView.confirmEndMeetingButton().click();
 
     // Should navigate to meeting detail
     await expect(page.getByText("Back to meetings")).toBeVisible();
+  });
+
+  test("end meeting dialog can save without processing", async ({
+    recordView,
+    page,
+  }) => {
+    await recordView.startRecording("Saved Meeting");
+    await expect(recordView.recordingLiveBadge()).toBeVisible();
+
+    await recordView.endMeetingButton().click();
+    await recordView.saveMeetingOption().click();
+    await expect(page.getByText("run processing later")).toBeVisible();
+    await recordView.saveMeetingButton().click();
+
+    await expect(page.getByText("Back to meetings")).toBeVisible();
+    await expect(page.getByText("No summary has been generated for this meeting yet.")).toBeVisible();
   });
 
   test("end and delete confirms before discarding the live meeting", async ({
@@ -31,14 +53,18 @@ test.describe("Home & Recording", () => {
     await recordView.startRecording("Throwaway Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
 
-    await recordView.endAndDeleteButton().click();
+    await recordView.endMeetingButton().click();
+    await recordView.deleteMeetingOption().click();
+    await recordView.reviewDeleteButton().click();
     await expect(recordView.deleteDialogTitle()).toBeVisible();
 
-    await recordView.keepRecordingButton().click();
+    await page.getByRole("button", { name: "Keep meeting" }).click();
     await expect(recordView.deleteDialogTitle()).not.toBeVisible();
     await expect(recordView.recordingLiveBadge()).toBeVisible();
 
-    await recordView.endAndDeleteButton().click();
+    await recordView.endMeetingButton().click();
+    await recordView.deleteMeetingOption().click();
+    await recordView.reviewDeleteButton().click();
     await recordView.confirmDeleteButton().click();
 
     await expect(recordView.newRecordingBadge()).toBeVisible();
@@ -70,10 +96,7 @@ test.describe("Home & Recording", () => {
     await recordView.startButton().click();
     // The mock resolves instantly — verify we transition to live view
     await expect(recordView.recordingLiveBadge()).toBeVisible();
-    // End and process button should now be available via the page intro actions
-    await expect(
-      page.getByRole("button", { name: /End and process/ })
-    ).toBeVisible();
+    await expect(page.getByRole("button", { name: /End meeting/ })).toBeVisible();
   });
 
   test("home screen shows new recording and import cards", async ({

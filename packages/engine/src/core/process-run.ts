@@ -137,6 +137,8 @@ interface ProcessRunOptions {
   date: string;
   audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[];
   logger: Logger;
+  /** Explicit prompt ids to run after transcription. Empty array means transcript only. */
+  onlyIds?: string[];
   /**
    * When true (default), only builtin + auto-enabled prompts run.
    * Set false to run every enabled prompt regardless of `auto` frontmatter.
@@ -151,17 +153,33 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   succeeded: string[];
   failed: string[];
 }> {
-  const { config, runFolder, title, date, audioFiles, logger, autoOnly = true, onProgress, signal } = opts;
+  const {
+    config,
+    runFolder,
+    title,
+    date,
+    audioFiles,
+    logger,
+    onlyIds,
+    autoOnly = true,
+    onProgress,
+    signal,
+  } = opts;
   const transcriptStep: PipelinePlannedStep = {
     sectionId: "__transcript__",
     label: "Build transcript",
     filename: "transcript.md",
     kind: "transcript",
   };
+  const hasExplicitPromptSelection = onlyIds !== undefined;
 
   updateRunStatus(runFolder, "processing");
   throwIfAborted(signal);
-  const plannedPrompts = await planPipelineSteps(config, runFolder, logger, { autoOnly });
+  const plannedPrompts = hasExplicitPromptSelection
+    ? onlyIds.length > 0
+      ? await planPipelineSteps(config, runFolder, logger, { onlyIds })
+      : []
+    : await planPipelineSteps(config, runFolder, logger, { autoOnly });
   onProgress?.({
     type: "run-planned",
     steps: [
@@ -334,13 +352,28 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     pipelineSignal?: AbortSignal
   ) => llmFactory(model).call(systemPrompt, userMessage, model, { signal: pipelineSignal });
 
+  if (plannedPrompts.length === 0) {
+    const endedIso = new Date().toISOString();
+    updateRunStatus(runFolder, "complete", {
+      ended: endedIso,
+      duration_minutes: computeDurationMinutes(runFolder, endedIso),
+    });
+    return { succeeded: [], failed: [] };
+  }
+
   const results = await runPipeline(
     config,
     runFolder,
     input,
     llmCall,
     logger,
-    { autoOnly, onProgress, signal, plannedPrompts }
+    {
+      onlyIds: hasExplicitPromptSelection ? onlyIds : undefined,
+      autoOnly: hasExplicitPromptSelection ? undefined : autoOnly,
+      onProgress,
+      signal,
+      plannedPrompts,
+    }
   );
 
   const succeeded = results.filter((r) => r.success).map((r) => r.sectionId);

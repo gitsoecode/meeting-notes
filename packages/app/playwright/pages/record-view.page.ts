@@ -21,16 +21,16 @@ export class RecordViewPage {
     return this.main.getByRole("button", { name: /Start recording/ });
   }
 
-  endAndProcessButton() {
-    return this.main.getByRole("button", { name: /End and process/ });
+  endMeetingButton() {
+    return this.main.getByRole("button", { name: /End meeting/ });
   }
 
-  endAndDeleteButton() {
-    return this.main.getByRole("button", { name: /End and delete/ });
+  endMeetingDialogTitle() {
+    return this.page.getByRole("heading", { name: "End meeting" });
   }
 
   deleteDialogTitle() {
-    return this.page.getByRole("heading", { name: "End and delete recording?" });
+    return this.page.getByRole("heading", { name: "Delete meeting?" });
   }
 
   keepRecordingButton() {
@@ -38,7 +38,39 @@ export class RecordViewPage {
   }
 
   confirmDeleteButton() {
-    return this.page.getByRole("button", { name: "End and delete" }).last();
+    return this.page.getByRole("button", { name: "Delete meeting" }).last();
+  }
+
+  processMeetingOption() {
+    return this.page.locator("label", { hasText: "Process meeting" });
+  }
+
+  saveMeetingOption() {
+    return this.page.locator("label", { hasText: "Save recording without processing" });
+  }
+
+  deleteMeetingOption() {
+    return this.page.locator("label", { hasText: /^Delete meeting/ });
+  }
+
+  transcribeCheckbox() {
+    return this.page.getByRole("checkbox", { name: "Transcribe" });
+  }
+
+  summaryCheckbox() {
+    return this.page.getByRole("checkbox", { name: /Summary \+ Action Items|Summary/ });
+  }
+
+  confirmEndMeetingButton() {
+    return this.page.getByRole("button", { name: "End meeting" }).last();
+  }
+
+  saveMeetingButton() {
+    return this.page.getByRole("button", { name: "Save meeting" }).last();
+  }
+
+  reviewDeleteButton() {
+    return this.page.getByRole("button", { name: "Review delete" }).last();
   }
 
   importButton() {

@@ -7,6 +7,7 @@ import type {
   AppLogQuery,
   ActivityProcess,
   InitConfigRequest,
+  ProcessRecordingRequest,
   StartRecordingRequest,
   StopRecordingRequest,
   ReprocessRequest,
@@ -15,6 +16,7 @@ import type {
   RecordingStatus,
   PipelineProgressEvent,
   JobSummary,
+  LaunchChatRequest,
 } from "../shared/ipc.js";
 
 const api: MeetingNotesApi = {
@@ -50,6 +52,10 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("runs:delete-media", runFolder, fileName),
     writeNotes: (runFolder, content) =>
       ipcRenderer.invoke("runs:write-notes", runFolder, content),
+    startProcessRecording: (req: ProcessRecordingRequest) =>
+      ipcRenderer.invoke("runs:start-process-recording", req),
+    processRecording: (req: ProcessRecordingRequest) =>
+      ipcRenderer.invoke("runs:process-recording", req),
     startReprocess: (req: ReprocessRequest) =>
       ipcRenderer.invoke("runs:start-reprocess", req),
     reprocess: (req: ReprocessRequest) => ipcRenderer.invoke("runs:reprocess", req),
@@ -121,6 +127,10 @@ const api: MeetingNotesApi = {
   },
   obsidian: {
     detectVaults: () => ipcRenderer.invoke("obsidian:detect-vaults"),
+  },
+  chatLauncher: {
+    detectApps: () => ipcRenderer.invoke("chatLauncher:detect-apps"),
+    launch: (req: LaunchChatRequest) => ipcRenderer.invoke("chatLauncher:launch", req),
   },
   on: {
     recordingStatus: (cb: (s: RecordingStatus) => void) => {

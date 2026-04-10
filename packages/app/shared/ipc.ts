@@ -112,12 +112,17 @@ export interface StartRecordingRequest {
 }
 
 export interface StopRecordingRequest {
-  mode?: "process" | "delete";
+  mode?: "process" | "save" | "delete";
 }
 
 export interface StopRecordingResult {
   run_folder?: string;
   deleted?: boolean;
+}
+
+export interface ProcessRecordingRequest {
+  runFolder: string;
+  onlyIds?: string[];
 }
 
 export interface UpdateMetaRequest {
@@ -333,6 +338,30 @@ export interface PickedMediaFile {
   name: string;
 }
 
+// ---- Chat Launcher ----
+
+export type ChatAppId = "chatgpt" | "claude" | "ollama" | "custom";
+
+export interface ChatAppInfo {
+  id: ChatAppId;
+  label: string;
+  installed: boolean;
+}
+
+export interface LaunchChatRequest {
+  appId: ChatAppId;
+  customAppName?: string;
+  runFolder: string;
+  fileNames: string[];
+  startingPrompt: string;
+}
+
+export interface LaunchChatResult {
+  ok: boolean;
+  error?: string;
+  charsCopied?: number;
+}
+
 export interface AppConfigDTO {
   data_path: string;
   obsidian_integration: {
@@ -366,6 +395,9 @@ export interface AppConfigDTO {
   };
   shortcuts: {
     toggle_recording: string;
+  };
+  chat_launcher?: {
+    default_prompt: string;
   };
 }
 
@@ -419,6 +451,8 @@ export interface MeetingNotesApi {
     downloadMedia: (runFolder: string, fileName: string) => Promise<DownloadMediaResult>;
     deleteMedia: (runFolder: string, fileName: string) => Promise<void>;
     writeNotes: (runFolder: string, content: string) => Promise<void>;
+    startProcessRecording: (req: ProcessRecordingRequest) => Promise<void>;
+    processRecording: (req: ProcessRecordingRequest) => Promise<ReprocessResult>;
     startReprocess: (req: ReprocessRequest) => Promise<void>;
     reprocess: (req: ReprocessRequest) => Promise<ReprocessResult>;
     bulkReprocess: (req: BulkReprocessRequest) => Promise<BulkReprocessResult[]>;
@@ -482,6 +516,11 @@ export interface MeetingNotesApi {
       userAgent?: string;
       detail?: string;
     }) => Promise<void>;
+  };
+  // Chat Launcher
+  chatLauncher: {
+    detectApps: () => Promise<ChatAppInfo[]>;
+    launch: (req: LaunchChatRequest) => Promise<LaunchChatResult>;
   };
   // Deps check
   depsCheck: () => Promise<DepsCheckResult>;

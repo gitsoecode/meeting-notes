@@ -71,6 +71,9 @@ export interface AppConfig {
   ollama: OllamaConfig;
   recording: RecordingConfig;
   shortcuts: ShortcutsConfig;
+  chat_launcher?: {
+    default_prompt: string;
+  };
 }
 
 /**

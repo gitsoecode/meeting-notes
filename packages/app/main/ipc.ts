@@ -4,7 +4,7 @@ import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import { pathToFileURL } from "node:url";
-import { ipcMain, dialog, shell } from "electron";
+import { ipcMain, dialog, shell, clipboard } from "electron";
 import matter from "gray-matter";
 import {
   loadConfig,
@@ -48,6 +48,7 @@ import type {
   AppLogQuery,
   AppConfigDTO,
   InitConfigRequest,
+  ProcessRecordingRequest,
   RecordingStatus,
   RunSummary,
   RunDetail,
@@ -65,6 +66,9 @@ import type {
   DetectedVault,
   JobSummary,
   OllamaRuntimeDTO,
+  ChatAppInfo,
+  LaunchChatRequest,
+  LaunchChatResult,
 } from "../shared/ipc.js";
 import {
   getStatus as getRecordingStatus,
@@ -80,7 +84,7 @@ import {
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
 } from "./run-access.js";
-import { bulkReprocessRuns, reprocessRun } from "./runs-service.js";
+import { bulkReprocessRuns, processRecordedRun, reprocessRun } from "./runs-service.js";
 import { getRunStartedSortValue, validatePromptModelSelection } from "./model-validation.js";
 import { syncToggleRecordingShortcut } from "./shortcuts.js";
 import { assertImportMediaPath, type PickedMediaFile } from "./media-import.js";
@@ -111,6 +115,7 @@ function configToDto(config: AppConfig): AppConfigDTO {
     ollama: config.ollama,
     recording: config.recording,
     shortcuts: config.shortcuts,
+    chat_launcher: config.chat_launcher,
   };
 }
 
@@ -131,6 +136,7 @@ function dtoToConfig(dto: AppConfigDTO): AppConfig {
     ollama: dto.ollama,
     recording: dto.recording,
     shortcuts: dto.shortcuts,
+    chat_launcher: dto.chat_launcher,
   };
 }
 
@@ -245,6 +251,53 @@ async function handleReprocess(req: ReprocessRequest): Promise<ReprocessResult> 
 
 function startReprocessInBackground(req: ReprocessRequest): void {
   void handleReprocess(req).catch((err) => {
+    if (isAbortLikeError(err)) return;
+    broadcastToAll("pipeline:progress", {
+      type: "run-failed",
+      runFolder: req.runFolder,
+      error: err instanceof Error ? err.message : String(err),
+    } satisfies AppPipelineProgressEvent);
+  });
+}
+
+async function handleProcessRecording(req: ProcessRecordingRequest): Promise<ReprocessResult> {
+  const config = loadConfig();
+  const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
+  const manifest = loadRunManifest(validatedRunFolder);
+  const subtitle =
+    req.onlyIds && req.onlyIds.length > 0
+      ? "Processing selected meeting outputs"
+      : "Building transcript";
+  return scheduleJob({
+    kind: "process-recording",
+    title: manifest.title,
+    subtitle,
+    runFolder: req.runFolder,
+    promptIds: req.onlyIds,
+    provider: config.llm_provider,
+    model: config.llm_provider === "ollama" ? config.ollama.model : config.claude.model,
+    task: async ({ signal, updateProgress }) => {
+      const result = await processRecordedRun(
+        req,
+        (event: PipelineProgressEvent) => {
+          updateProgress(event);
+          forwardProgress(req.runFolder, event);
+        },
+        signal
+      );
+      broadcastToAll("pipeline:progress", {
+        type: "run-complete",
+        runFolder: result.runFolder,
+        succeeded: result.succeeded,
+        failed: result.failed,
+      } satisfies AppPipelineProgressEvent);
+      return result;
+    },
+  });
+}
+
+function startProcessRecordingInBackground(req: ProcessRecordingRequest): void {
+  void handleProcessRecording(req).catch((err) => {
     if (isAbortLikeError(err)) return;
     broadcastToAll("pipeline:progress", {
       type: "run-failed",
@@ -483,6 +536,26 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     const filePath = resolveRunDocumentPath(runFolder, RUN_NOTES_FILE, config);
     fs.writeFileSync(filePath, content, "utf-8");
+  });
+
+  ipcMain.handle("runs:start-process-recording", async (_e, req: ProcessRecordingRequest) => {
+    startProcessRecordingInBackground(req);
+  });
+
+  ipcMain.handle("runs:process-recording", async (_e, req: ProcessRecordingRequest) => {
+    try {
+      return await handleProcessRecording(req);
+    } catch (err) {
+      if (isAbortLikeError(err)) {
+        throw err;
+      }
+      broadcastToAll("pipeline:progress", {
+        type: "run-failed",
+        runFolder: req.runFolder,
+        error: err instanceof Error ? err.message : String(err),
+      } satisfies AppPipelineProgressEvent);
+      throw err;
+    }
   });
 
   ipcMain.handle("runs:start-reprocess", async (_e, req: ReprocessRequest) => {
@@ -914,6 +987,81 @@ export function registerIpcHandlers(): void {
     }
     return found;
   });
+
+  // ---- Chat Launcher ----
+
+  const CHAT_APPS: { id: "chatgpt" | "claude" | "ollama"; label: string; appName: string }[] = [
+    { id: "chatgpt", label: "ChatGPT", appName: "ChatGPT" },
+    { id: "claude", label: "Claude", appName: "Claude" },
+    { id: "ollama", label: "Ollama", appName: "Ollama" },
+  ];
+
+  ipcMain.handle("chatLauncher:detect-apps", async (): Promise<ChatAppInfo[]> => {
+    const home = os.homedir();
+    const results: ChatAppInfo[] = [];
+    for (const app of CHAT_APPS) {
+      const installed =
+        fs.existsSync(`/Applications/${app.appName}.app`) ||
+        fs.existsSync(path.join(home, "Applications", `${app.appName}.app`));
+      results.push({ id: app.id, label: app.label, installed });
+    }
+    results.push({ id: "custom", label: "Custom", installed: true });
+    return results;
+  });
+
+  ipcMain.handle(
+    "chatLauncher:launch",
+    async (_e, req: LaunchChatRequest): Promise<LaunchChatResult> => {
+      const config = loadConfig();
+      const runFolder = resolveRunFolderPath(req.runFolder, config);
+
+      // Read and assemble selected files
+      const parts: string[] = [];
+      if (req.startingPrompt.trim()) {
+        parts.push(req.startingPrompt.trim());
+      }
+      for (const fileName of req.fileNames) {
+        const filePath = resolveRunDocumentPath(runFolder, fileName, config);
+        try {
+          const content = fs.readFileSync(filePath, "utf-8");
+          parts.push(`---\n## ${fileName}\n\n${content}`);
+        } catch {
+          parts.push(`---\n## ${fileName}\n\n_(file not found)_`);
+        }
+      }
+
+      const assembled = parts.join("\n\n");
+      clipboard.writeText(assembled);
+
+      // Determine app name to launch
+      let appName: string;
+      if (req.appId === "custom") {
+        if (!req.customAppName?.trim()) {
+          return { ok: false, error: "No app name provided." };
+        }
+        appName = req.customAppName.trim();
+      } else {
+        const entry = CHAT_APPS.find((a) => a.id === req.appId);
+        if (!entry) {
+          return { ok: false, error: `Unknown app: ${req.appId}` };
+        }
+        appName = entry.appName;
+      }
+
+      try {
+        await execFileAsync("/usr/bin/open", ["-a", appName]);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          ok: false,
+          error: `Could not launch ${appName}. Is it installed?\n${msg}`,
+          charsCopied: assembled.length,
+        };
+      }
+
+      return { ok: true, charsCopied: assembled.length };
+    }
+  );
 
   // ---- logs ----
   ipcMain.handle("logs:tail-app", async (_e, lines: number) => {

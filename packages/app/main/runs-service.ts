@@ -6,6 +6,7 @@ import {
   loadRunManifest,
   loadAllPrompts,
   planPipelineSteps,
+  processRun,
   runPipeline,
   getSecret,
   ClaudeProvider,
@@ -19,6 +20,7 @@ import {
 import type {
   BulkReprocessRequest,
   BulkReprocessResult,
+  ProcessRecordingRequest,
   ReprocessRequest,
   ReprocessResult,
 } from "../shared/ipc.js";
@@ -135,6 +137,73 @@ export async function reprocessRun(
     runFolder,
     succeeded: results.filter((result) => result.success).map((result) => result.sectionId),
     failed: results.filter((result) => !result.success).map((result) => result.sectionId),
+  };
+}
+
+function collectRunAudioFiles(runFolder: string, sourceMode: string) {
+  const audioDir = path.join(runFolder, "audio");
+  if (!fs.existsSync(audioDir)) return [];
+
+  const micPath = path.join(audioDir, "mic.wav");
+  const systemPath = path.join(audioDir, "system.wav");
+  const audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[] = [];
+
+  if (fs.existsSync(micPath)) audioFiles.push({ path: micPath, speaker: "me" });
+  if (fs.existsSync(systemPath)) audioFiles.push({ path: systemPath, speaker: "others" });
+  if (audioFiles.length > 0) return audioFiles;
+
+  const audioEntries = fs
+    .readdirSync(audioDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => path.join(audioDir, entry.name));
+
+  if (sourceMode === "file" && audioEntries.length > 0) {
+    return [{ path: audioEntries[0], speaker: "unknown" as const }];
+  }
+
+  return audioEntries.map((audioPath) => ({ path: audioPath, speaker: "unknown" as const }));
+}
+
+export async function processRecordedRun(
+  req: ProcessRecordingRequest,
+  onProgress?: (event: PipelineProgressEvent) => void,
+  signal?: AbortSignal
+): Promise<ReprocessResult> {
+  const config = loadConfig();
+  const runFolder = resolveRunFolderPath(req.runFolder, config);
+  const manifest = loadRunManifest(runFolder);
+  const logger = createRunLogger(path.join(runFolder, "run.log"), false);
+  const prompts = loadAllPrompts(config);
+  const requestedPromptIds = req.onlyIds ?? [];
+  const promptsToValidate = prompts.filter((prompt) => requestedPromptIds.includes(prompt.id));
+
+  for (const prompt of promptsToValidate) {
+    await validatePromptModelSelection(prompt.model, {
+      baseUrl: config.ollama.base_url,
+    });
+  }
+
+  const audioFiles = collectRunAudioFiles(runFolder, manifest.source_mode);
+  if (audioFiles.length === 0) {
+    throw new Error("This meeting does not contain a usable audio recording.");
+  }
+
+  const result = await processRun({
+    config,
+    runFolder,
+    title: manifest.title,
+    date: manifest.date,
+    audioFiles,
+    logger,
+    onlyIds: req.onlyIds ?? [],
+    onProgress,
+    signal,
+  });
+
+  return {
+    runFolder,
+    succeeded: result.succeeded,
+    failed: result.failed,
   };
 }
 

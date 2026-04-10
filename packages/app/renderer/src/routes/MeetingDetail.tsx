@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ExternalLink,
   FileOutput,
   MoreHorizontal,
   PlayCircle,
@@ -32,6 +33,7 @@ import {
   type SectionStatus,
 } from "../components/PipelineStatus";
 import { TranscriptView } from "../components/TranscriptView";
+import { ChatLauncherModal } from "../components/ChatLauncherModal";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -142,6 +144,7 @@ export function MeetingDetail({
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
   const [loadingPrompts, setLoadingPrompts] = useState(true);
   const [reprocessOpen, setReprocessOpen] = useState(false);
+  const [chatLauncherOpen, setChatLauncherOpen] = useState(false);
   const [sections, setSections] = useState<SectionStatus[]>([]);
   const [activeJob, setActiveJob] = useState<JobSummary | null>(null);
   const [reprocessStarting, setReprocessStarting] = useState(false);
@@ -718,9 +721,9 @@ export function MeetingDetail({
         }
         actions={
           <>
-            <Button variant="secondary" size="sm" onClick={() => setReprocessOpen(true)}>
-              <RefreshCcw className="h-3.5 w-3.5" />
-              Reprocess
+            <Button variant="secondary" size="sm" onClick={() => setChatLauncherOpen(true)}>
+              <ExternalLink className="h-3.5 w-3.5" />
+              Launch chat
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -729,6 +732,9 @@ export function MeetingDetail({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => setReprocessOpen(true)}>
+                  Reprocess
+                </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => api.runs.openInFinder(runFolder)}>
                   Open folder
                 </DropdownMenuItem>
@@ -1101,6 +1107,15 @@ export function MeetingDetail({
             await startReprocess(request);
             setReprocessOpen(false);
           }}
+        />
+      ) : null}
+
+      {chatLauncherOpen && detail ? (
+        <ChatLauncherModal
+          runFolder={runFolder}
+          detail={detail}
+          config={config}
+          onClose={() => setChatLauncherOpen(false)}
         />
       ) : null}
 

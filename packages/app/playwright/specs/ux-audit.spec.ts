@@ -115,7 +115,8 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     // Start and stop recording
     await page.getByRole("button", { name: /Start recording/ }).click();
     await expect(page.getByText("Recording live").first()).toBeVisible();
-    await page.getByRole("button", { name: /End and process/ }).click();
+    await page.getByRole("button", { name: /End meeting/ }).click();
+    await page.getByRole("button", { name: "End meeting" }).last().click();
 
     // Now on meeting detail
     const analysisTab = page.getByRole("tab", { name: "Analysis" });
