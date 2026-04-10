@@ -12,6 +12,23 @@ export interface AudioInfo {
   format: string;
 }
 
+export async function mediaHasAudioStream(mediaPath: string): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync("ffprobe", [
+      "-v", "quiet",
+      "-select_streams", "a:0",
+      "-show_entries", "stream=index",
+      "-of", "csv=p=0",
+      mediaPath,
+    ]);
+    return stdout.trim().length > 0;
+  } catch {
+    throw new Error(
+      "ffprobe not found. Install ffmpeg:\n  brew install ffmpeg"
+    );
+  }
+}
+
 export async function getAudioInfo(audioPath: string): Promise<AudioInfo> {
   try {
     const { stdout } = await execFileAsync("ffprobe", [

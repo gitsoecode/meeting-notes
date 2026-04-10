@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import type { AsrProvider, TranscriptResult, TranscriptSegment } from "./provider.js";
-
-const execFileAsync = promisify(execFile);
+import type { AsrProvider, TranscriptResult, TranscriptSegment, AsrCallOptions } from "./provider.js";
+import { runCommand } from "../../core/exec.js";
 
 export class WhisperLocalProvider implements AsrProvider {
   private binaryPath: string;
@@ -17,7 +14,8 @@ export class WhisperLocalProvider implements AsrProvider {
 
   async transcribe(
     audioPath: string,
-    speaker: "me" | "others" | "unknown" = "unknown"
+    speaker: "me" | "others" | "unknown" = "unknown",
+    options?: AsrCallOptions
   ): Promise<TranscriptResult> {
     const start = Date.now();
 
@@ -36,7 +34,10 @@ export class WhisperLocalProvider implements AsrProvider {
     }
 
     try {
-      await execFileAsync(this.binaryPath, args, { timeout: 600_000 });
+      await runCommand(this.binaryPath, args, {
+        timeoutMs: 600_000,
+        signal: options?.signal,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       throw new Error(

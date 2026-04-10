@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
 import { api } from "../ipc-client";
 import type {
   AppConfigDTO,
@@ -8,54 +9,65 @@ import type {
   HardwareInfoDTO,
   InitConfigRequest,
 } from "../../../shared/ipc";
-import { LLM_MODELS, recommendLocalModel, findModelEntry } from "../constants";
+import {
+  LLM_MODELS,
+  recommendLocalModel,
+  findModelEntry,
+  localModelIdsMatch,
+} from "../constants";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
+import { Input } from "../components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
+import { Spinner } from "../components/ui/spinner";
+import { Switch } from "../components/ui/switch";
 
 interface SetupWizardProps {
   onComplete: () => void;
 }
 
-// Five visible steps: Welcome → Obsidian → Data dir → Transcription/keys → Deps.
-// The old "Audio devices" step is gone; the main process auto-fills mic and
-// system devices from the AVFoundation device list on finish.
 const TOTAL_STEPS = 5;
+
+function hasInstalledLocalModel(
+  installedLocalModels: readonly string[],
+  modelId: string | null | undefined
+): boolean {
+  return installedLocalModels.some((installedModel) =>
+    localModelIdsMatch(installedModel, modelId)
+  );
+}
 
 export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [step, setStep] = useState(0);
 
-  // ---- Step 1: Obsidian ----
   const [usesObsidian, setUsesObsidian] = useState<boolean>(false);
   const [vaultPath, setVaultPath] = useState<string>("");
   const [detectedVaults, setDetectedVaults] = useState<DetectedVault[]>([]);
 
-  // ---- Step 2: Data directory ----
-  // dataPathTouched gates the auto-default logic: once the user edits, we
-  // stop overwriting their value when they toggle Obsidian on/off.
   const [dataPath, setDataPath] = useState<string>("");
   const [dataPathTouched, setDataPathTouched] = useState(false);
 
-  // ---- Step 3: Transcription + API keys ----
   const [asrProvider, setAsrProvider] =
     useState<AppConfigDTO["asr_provider"]>("parakeet-mlx");
   const [claudeKey, setClaudeKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
-  // Existing-key detection is *deferred* — the Keychain check runs the first
-  // time the user reaches step 3, not on wizard mount. This keeps the macOS
-  // password prompt from firing at the welcome screen with no explanation.
   const [hasClaude, setHasClaude] = useState<boolean>(false);
   const [hasOpenai, setHasOpenai] = useState<boolean>(false);
   const [keysChecked, setKeysChecked] = useState(false);
-  // ---- Local LLM (Ollama) opt-in ----
-  // useLocalLlm flips the wizard from "cloud-by-default" mode to "local-by-
-  // default" mode. The Anthropic key field becomes optional, a model picker
-  // appears under it, and step 4 picks up an extra DepRow that pulls the
-  // selected model into ~/.ollama/models. Hardware detection runs once on
-  // entry to step 3 so we can recommend a model that fits the user's RAM.
-  const [useLocalLlm, setUseLocalLlm] = useState<boolean>(false);
+
+  const [llmProvider, setLlmProvider] = useState<AppConfigDTO["llm_provider"]>("claude");
   const [localLlmModel, setLocalLlmModel] = useState<string>("");
   const [hardware, setHardware] = useState<HardwareInfoDTO | null>(null);
   const [installedLocalModels, setInstalledLocalModels] = useState<string[]>([]);
 
-  // ---- Step 4: Dependencies ----
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [brewAvailable, setBrewAvailable] = useState<boolean | null>(null);
   const [installing, setInstalling] = useState<DepsInstallTarget | "parakeet" | "local-llm" | null>(null);
@@ -65,19 +77,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [restartingAudio, setRestartingAudio] = useState(false);
   const [restartAudioError, setRestartAudioError] = useState<string | null>(null);
 
-  // ---- General ----
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Detect Obsidian vaults once on mount — cheap, no Keychain or network.
   useEffect(() => {
     api.obsidian.detectVaults().then(setDetectedVaults).catch(() => {});
   }, []);
 
-  // Subscribe to dep-install log lines (brew), Parakeet setup-asr lines, and
-  // local-LLM pull lines on the same state buffer so the UI can just show
-  // "whatever is currently installing" without caring which pipe it came
-  // from.
   useEffect(() => {
     const unsub1 = api.on.depsInstallLog((line) =>
       setInstallLog((prev) => [...prev, line])
@@ -95,22 +101,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     };
   }, []);
 
-  // Defer the Keychain check until the user actually reaches step 3.
-  // hasSecret() calls getPassword() under the hood, which triggers the
-  // macOS login-password prompt the first time — we want that to happen
-  // only *after* the "Keys are stored in the macOS Keychain…" disclosure
-  // is visible on screen.
   useEffect(() => {
     if (step === 3 && !keysChecked) {
       setKeysChecked(true);
       api.secrets.has("claude").then(setHasClaude).catch(() => {});
       api.secrets.has("openai").then(setHasOpenai).catch(() => {});
-      // Hardware detection — used to recommend a local LLM that fits the
-      // user's machine. Cheap (synchronous os.* calls in the main process).
       api.system.detectHardware().then(setHardware).catch(() => {});
-      // Probe Ollama once. If a system daemon is already running this also
-      // returns the user's already-pulled models so we can avoid duplicate
-      // downloads later.
       api.llm
         .check()
         .then((res) => setInstalledLocalModels(res.installedModels))
@@ -118,20 +114,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }, [step, keysChecked]);
 
-  // When the user toggles "use local model" or hardware comes back, pick
-  // a default model. Prefer something they already have pulled (zero
-  // download), otherwise the RAM-aware recommendation.
   useEffect(() => {
-    if (!useLocalLlm) return;
+    if (llmProvider !== "ollama") return;
     if (localLlmModel) return;
     if (installedLocalModels.length > 0) {
       setLocalLlmModel(installedLocalModels[0]);
     } else {
       setLocalLlmModel(recommendLocalModel(hardware?.totalRamGb));
     }
-  }, [useLocalLlm, hardware, installedLocalModels, localLlmModel]);
+  }, [llmProvider, hardware, installedLocalModels, localLlmModel]);
 
-  // Refresh deps + brew availability every time we enter the deps step.
   useEffect(() => {
     if (step === 4) {
       api.depsCheck().then(setDeps).catch(() => {});
@@ -139,9 +131,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   }, [step]);
 
-  // Auto-default the data-directory field based on the Obsidian answer.
-  // Runs whenever usesObsidian or vaultPath changes, as long as the user
-  // hasn't manually edited the field yet.
   useEffect(() => {
     if (dataPathTouched) return;
     if (usesObsidian && vaultPath) {
@@ -180,8 +169,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           setInstallError(result.error ?? "Install failed.");
         }
       }
-      // Re-check regardless — a partial failure might still have landed the
-      // binary, and even a clean failure should refresh the UI.
       const fresh = await api.depsCheck();
       setDeps(fresh);
     } finally {
@@ -197,9 +184,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       if (!result.ok) {
         setRestartAudioError(result.error ?? "Failed to restart audio system.");
       } else {
-        // Give coreaudiod ~1.5s to relaunch and re-enumerate HAL plugins
-        // before we re-query AVFoundation. Without the wait the device
-        // list often comes back stale.
         await new Promise((r) => setTimeout(r, 1500));
       }
       const fresh = await api.depsCheck();
@@ -216,7 +200,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setInstallError(null);
     try {
       await api.llm.setup({ model: localLlmModel });
-      // Refresh installed list so the row flips to ✓.
       const res = await api.llm.check();
       setInstalledLocalModels(res.installedModels);
     } catch (err) {
@@ -256,10 +239,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           vault_path: usesObsidian && vaultPath ? vaultPath : undefined,
         },
         asr_provider: asrProvider,
-        llm_provider: useLocalLlm ? "ollama" : "claude",
-        ollama_model: useLocalLlm ? localLlmModel : undefined,
-        // Audio devices auto-filled in the main process from
-        // listAudioDevices(). Leave blank and let config:init pick defaults.
+        llm_provider: llmProvider,
+        ollama_model: llmProvider === "ollama" ? localLlmModel : undefined,
         recording: { mic_device: "", system_device: "" },
         claude_api_key: claudeKey || undefined,
         openai_api_key: openaiKey || undefined,
@@ -273,17 +254,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     }
   };
 
-  // Finish gate: ffmpeg is hard-required; Parakeet is required only when the
-  // user picked parakeet-mlx; BlackHole is soft-required (user can skip).
   const finishDisabled = useMemo(() => {
     if (busy || installing || restartingAudio) return true;
     if (!deps) return true;
     if (!deps.ffmpeg) return true;
     if (asrProvider === "parakeet-mlx" && !deps.parakeet) return true;
     if (deps.blackhole !== "loaded" && !skipBlackhole) return true;
-    if (useLocalLlm) {
+    if (llmProvider === "ollama") {
       if (!localLlmModel) return true;
-      if (!installedLocalModels.includes(localLlmModel)) return true;
+      if (!hasInstalledLocalModel(installedLocalModels, localLlmModel)) return true;
     }
     return false;
   }, [
@@ -293,350 +272,335 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     deps,
     asrProvider,
     skipBlackhole,
-    useLocalLlm,
+    llmProvider,
     localLlmModel,
     installedLocalModels,
   ]);
 
   return (
-    <div className="wizard-shell">
-      <div className="wizard-titlebar" />
-      <div className="wizard-body">
-        <div className="wizard-brand">Meeting Notes setup</div>
-        <div className="wizard">
-          <div className="wizard-progress">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_top,rgba(45,107,63,0.08),transparent_32%),var(--bg-secondary)]">
+      <div className="h-8 shrink-0 pl-20 [-webkit-app-region:drag]" />
+      <div className="flex-1 overflow-y-auto px-6 pb-10 pt-5">
+        <div className="mx-auto flex w-full max-w-[35rem] flex-col gap-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
+            <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
+            Meeting Notes setup
+          </div>
+
+          <div className="flex gap-1.5">
             {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
               <div
                 key={i}
-                className={`wizard-progress-dot ${
-                  i < step ? "done" : i === step ? "active" : ""
-                }`}
+                className={[
+                  "h-1 flex-1 rounded-full bg-[var(--bg-tertiary)]",
+                  i < step ? "bg-[var(--success)]" : "",
+                  i === step ? "bg-[var(--accent)]" : "",
+                ].join(" ")}
               />
             ))}
           </div>
 
           {step === 0 && (
-            <div className="wizard-step">
-              <h2>Welcome to Meeting Notes</h2>
-              <p className="muted">
-                A local-first meeting workspace. Press Start before a call, take
-                notes while you talk, press Stop — and a transcript + summary +
-                any custom outputs land in plain markdown on your disk. Let's
-                get you set up.
-              </p>
-              <div className="actions">
-                <button className="primary" onClick={() => setStep(1)}>
-                  Get started
-                </button>
-              </div>
-            </div>
+            <WizardStep
+              title="Welcome to Meeting Notes"
+              description="A local-first desktop app for meeting notes. Record in the app or import an existing recording, and your transcript, summary, and custom outputs land in editable markdown on disk. Obsidian is optional. Let's get you set up."
+              footer={<Button onClick={() => setStep(1)}>Get started</Button>}
+            />
           )}
 
           {step === 1 && (
-            <div className="wizard-step">
-              <h2>Do you use Obsidian?</h2>
-              <p className="muted">
-                Obsidian is an optional viewer. The app works perfectly without
-                it — it has its own markdown editor and browser. If you already
-                use Obsidian, we can store meetings inside your vault so they
-                show up alongside your other notes.
-              </p>
-              <div className="checkbox-row">
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={usesObsidian}
-                    onChange={(e) => {
-                      setUsesObsidian(e.target.checked);
-                      // Switching answers resets the "I touched the data
-                      // path" flag so the smart default re-applies. Users
-                      // who already picked a custom path keep it.
-                      if (!e.target.checked) {
-                        setVaultPath("");
-                      }
-                    }}
-                  />
-                  <span className="slider" />
-                </label>
-                <span>Yes, I use Obsidian</span>
-              </div>
+            <WizardStep
+              title="Do you use Obsidian?"
+              description="Obsidian is an optional viewer. The app works perfectly without it — it has its own markdown editor and browser. If you already use Obsidian, we can store meetings inside your vault so they show up alongside your other notes."
+              footer={
+                <WizardActions
+                  back={{ label: "Back", onClick: () => setStep(0) }}
+                  primary={{
+                    label: "Next",
+                    onClick: () => setStep(2),
+                    disabled: usesObsidian && !vaultPath,
+                  }}
+                />
+              }
+            >
+              <SettingToggle
+                id="wizard-use-obsidian"
+                checked={usesObsidian}
+                onCheckedChange={(checked) => {
+                  setUsesObsidian(checked);
+                  if (!checked) setVaultPath("");
+                }}
+                title="Yes, I use Obsidian"
+              />
+
               {usesObsidian && (
-                <>
-                  <label style={{ marginTop: 16 }}>Vault path</label>
-                  <div className="row">
-                    <input
-                      value={vaultPath}
-                      onChange={(e) => setVaultPath(e.target.value)}
-                      placeholder="/Users/you/Obsidian/MyVault"
-                    />
-                    <button onClick={pickVault}>Pick…</button>
-                  </div>
+                <div className="space-y-4">
+                  <Field label="Vault path" htmlFor="wizard-vault-path">
+                    <PickerRow>
+                      <Input
+                        id="wizard-vault-path"
+                        value={vaultPath}
+                        onChange={(e) => setVaultPath(e.target.value)}
+                        placeholder="/Users/you/Obsidian/MyVault"
+                      />
+                      <Button variant="secondary" onClick={pickVault}>Pick…</Button>
+                    </PickerRow>
+                  </Field>
+
                   {detectedVaults.length > 0 && (
-                    <>
-                      <div className="muted" style={{ marginTop: 10 }}>
-                        Detected vaults:
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                        Detected vaults
                       </div>
-                      <div className="chip-row">
+                      <div className="flex flex-wrap gap-2">
                         {detectedVaults.map((v) => (
-                          <button
+                          <Button
                             key={v.path}
-                            className="chip"
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="max-w-full"
                             onClick={() => setVaultPath(v.path)}
                             title={v.path}
                           >
-                            {v.name}
-                          </button>
+                            <span className="truncate">{v.name}</span>
+                          </Button>
                         ))}
                       </div>
-                    </>
-                  )}
-                </>
-              )}
-              <div className="actions">
-                <button onClick={() => setStep(0)}>Back</button>
-                <button
-                  className="primary"
-                  onClick={() => setStep(2)}
-                  disabled={usesObsidian && !vaultPath}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 2 && (
-            <div className="wizard-step">
-              <h2>Where should meetings be stored?</h2>
-              <p className="muted">
-                {usesObsidian
-                  ? "This folder lives inside your Obsidian vault — the default is a Meeting-notes subfolder. Every meeting becomes its own markdown file."
-                  : "Pick any folder on your machine. Every meeting becomes a subfolder with plain markdown files. You can change this later."}
-              </p>
-              <label>Data directory</label>
-              <div className="row">
-                <input
-                  value={dataPath}
-                  onChange={(e) => {
-                    setDataPath(e.target.value);
-                    setDataPathTouched(true);
-                  }}
-                  placeholder="/Users/you/Documents/Meeting Notes"
-                />
-                <button onClick={pickDataDir}>Pick…</button>
-              </div>
-              <div className="actions">
-                <button onClick={() => setStep(1)}>Back</button>
-                <button
-                  className="primary"
-                  onClick={() => setStep(3)}
-                  disabled={!dataPath}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
-
-          {step === 3 && (
-            <div className="wizard-step">
-              <h2>Transcription &amp; API keys</h2>
-              <p className="muted">
-                Keys are stored in the macOS Keychain — more secure than config
-                files. macOS may ask for your login password the first time we
-                check for an existing key.
-              </p>
-
-              <label>Transcription provider</label>
-              <select
-                value={asrProvider}
-                onChange={(e) =>
-                  setAsrProvider(e.target.value as AppConfigDTO["asr_provider"])
-                }
-              >
-                <option value="parakeet-mlx">
-                  Parakeet (local, recommended on Apple Silicon)
-                </option>
-                <option value="openai">OpenAI (cloud)</option>
-                <option value="whisper-local">whisper.cpp (local)</option>
-              </select>
-
-              {/* Local-LLM opt-in. When ON, the Anthropic key field
-                  becomes optional and a model picker appears below. */}
-              <div className="checkbox-row" style={{ marginTop: 16 }}>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={useLocalLlm}
-                    onChange={(e) => setUseLocalLlm(e.target.checked)}
-                  />
-                  <span className="slider" />
-                </label>
-                <div>
-                  <strong>Use a local model for summarization</strong>
-                  <div className="muted" style={{ fontSize: 12 }}>
-                    No API key, fully offline. Slower than cloud (30 s – 2 min
-                    per prompt on Apple Silicon). You can switch later in
-                    Settings.
-                  </div>
-                </div>
-              </div>
-
-              {useLocalLlm && (
-                <div style={{ marginTop: 12 }}>
-                  {installedLocalModels.length > 0 && (
-                    <>
-                      <label>Already on this machine</label>
-                      <select
-                        value={
-                          installedLocalModels.includes(localLlmModel)
-                            ? localLlmModel
-                            : ""
-                        }
-                        onChange={(e) => setLocalLlmModel(e.target.value)}
-                      >
-                        <option value="">— pick from below instead —</option>
-                        {installedLocalModels.map((m) => (
-                          <option key={m} value={m}>
-                            ✓ {m}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                        Picking one of these means zero download — we reuse
-                        models you've already pulled with Ollama.
-                      </div>
-                    </>
-                  )}
-                  <label style={{ marginTop: 12 }}>
-                    Recommended for your machine
-                    {hardware?.totalRamGb && (
-                      <span className="muted" style={{ marginLeft: 6, fontSize: 12 }}>
-                        ({hardware.totalRamGb} GB RAM
-                        {hardware.chip ? `, ${hardware.chip}` : ""})
-                      </span>
-                    )}
-                  </label>
-                  <select
-                    value={localLlmModel}
-                    onChange={(e) => setLocalLlmModel(e.target.value)}
-                  >
-                    {LLM_MODELS.filter((m) => m.provider === "ollama").map((m) => {
-                      const tooBig =
-                        typeof hardware?.totalRamGb === "number" &&
-                        typeof m.minRamGb === "number" &&
-                        m.minRamGb > hardware.totalRamGb;
-                      const installed = installedLocalModels.includes(m.id);
-                      const sizeLabel = m.sizeGb ? ` · ${m.sizeGb} GB` : "";
-                      return (
-                        <option key={m.id} value={m.id} disabled={tooBig}>
-                          {installed ? "✓ " : ""}
-                          {m.label}
-                          {sizeLabel}
-                          {tooBig ? ` · needs ${m.minRamGb} GB RAM` : ""}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  {localLlmModel && (
-                    <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-                      {findModelEntry(localLlmModel)?.blurb}
                     </div>
                   )}
                 </div>
               )}
+            </WizardStep>
+          )}
 
-              <label style={{ marginTop: 14 }}>
-                Anthropic API key (for Claude)
-                {useLocalLlm && (
-                  <span className="muted" style={{ marginLeft: 8, fontWeight: 400 }}>
-                    — optional in local mode
-                  </span>
-                )}
-                {hasClaude && (
-                  <span
-                    style={{ color: "var(--success)", marginLeft: 8, fontWeight: 400 }}
-                  >
-                    ✓ already stored in Keychain
-                  </span>
-                )}
-              </label>
-              <input
-                type="password"
-                value={claudeKey}
-                onChange={(e) => setClaudeKey(e.target.value)}
-                placeholder={
-                  hasClaude
-                    ? "leave blank to keep existing key"
-                    : useLocalLlm
-                      ? "optional — only needed for Claude prompts"
-                      : "sk-ant-…"
-                }
-              />
-
-              {asrProvider === "openai" && (
-                <>
-                  <label style={{ marginTop: 14 }}>
-                    OpenAI API key (for transcription)
-                    {hasOpenai && (
-                      <span
-                        style={{ color: "var(--success)", marginLeft: 8, fontWeight: 400 }}
-                      >
-                        ✓ already stored in Keychain
-                      </span>
-                    )}
-                  </label>
-                  <input
-                    type="password"
-                    value={openaiKey}
-                    onChange={(e) => setOpenaiKey(e.target.value)}
-                    placeholder={
-                      hasOpenai ? "leave blank to keep existing key" : "sk-…"
-                    }
+          {step === 2 && (
+            <WizardStep
+              title="Where should meetings be stored?"
+              description={
+                usesObsidian
+                  ? "This folder lives inside your Obsidian vault — the default is a Meeting-notes subfolder. Every meeting becomes its own markdown file."
+                  : "Pick any folder on your machine. Every meeting becomes a subfolder with plain markdown files. You can change this later."
+              }
+              footer={
+                <WizardActions
+                  back={{ label: "Back", onClick: () => setStep(1) }}
+                  primary={{
+                    label: "Next",
+                    onClick: () => setStep(3),
+                    disabled: !dataPath,
+                  }}
+                />
+              }
+            >
+              <Field label="Data directory" htmlFor="wizard-data-path">
+                <PickerRow>
+                  <Input
+                    id="wizard-data-path"
+                    value={dataPath}
+                    onChange={(e) => {
+                      setDataPath(e.target.value);
+                      setDataPathTouched(true);
+                    }}
+                    placeholder="/Users/you/Documents/Meeting Notes"
                   />
-                  <div
-                    className="muted"
-                    style={{ marginTop: 6, color: "var(--warning)", fontSize: 12 }}
-                    title="OpenAI's transcription endpoint enforces a 25 MB per-file upload limit. We transcode to 32 kbps mono Opus to stretch that from ~13 min (PCM) to ~80 min per channel, but beyond that the request will fail. Automatic chunking would lift this ceiling and is on the roadmap."
+                  <Button variant="secondary" onClick={pickDataDir}>Pick…</Button>
+                </PickerRow>
+              </Field>
+            </WizardStep>
+          )}
+
+          {step === 3 && (
+            <WizardStep
+              title="Transcription & Summarization"
+              description="Pick your AI providers. Cloud models are faster and smarter; local models are private and free."
+              footer={
+                <WizardActions
+                  back={{ label: "Back", onClick: () => setStep(2) }}
+                  primary={{
+                    label: "Next",
+                    onClick: () => setStep(4),
+                    disabled:
+                      (llmProvider === "claude" && !(claudeKey || hasClaude)) ||
+                      (llmProvider === "openai" && !(openaiKey || hasOpenai)) ||
+                      (llmProvider === "ollama" && !localLlmModel) ||
+                      (asrProvider === "openai" && !(openaiKey || hasOpenai)),
+                  }}
+                />
+              }
+            >
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label="Transcription (ASR)">
+                  <Select
+                    value={asrProvider}
+                    onValueChange={(value) =>
+                      setAsrProvider(value as AppConfigDTO["asr_provider"])
+                    }
                   >
-                    ⚠ OpenAI caps uploads at 25 MB per file. Meetings longer
-                    than ~80 min per audio channel will fail — use Parakeet
-                    (local) for long recordings. Automatic chunking is on the
-                    roadmap.
-                  </div>
-                </>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="parakeet-mlx">Parakeet (local)</SelectItem>
+                      <SelectItem value="openai">OpenAI (cloud)</SelectItem>
+                      <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                <Field label="Summarization (LLM)">
+                  <Select
+                    value={llmProvider}
+                    onValueChange={(value) =>
+                      setLlmProvider(value as "claude" | "openai" | "ollama")
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="claude">Anthropic Claude</SelectItem>
+                      <SelectItem value="openai">OpenAI ChatGPT</SelectItem>
+                      <SelectItem value="ollama">Local (Ollama)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+
+              {llmProvider === "ollama" && (
+                <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
+                  {installedLocalModels.length > 0 && (
+                    <Field label="Already on this machine">
+                      <Select
+                        value={
+                          hasInstalledLocalModel(installedLocalModels, localLlmModel)
+                            ? localLlmModel
+                            : "__pick__"
+                        }
+                        onValueChange={(value) => {
+                          if (value !== "__pick__") setLocalLlmModel(value);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__pick__">— pick from below instead —</SelectItem>
+                          {installedLocalModels.map((model) => (
+                            <SelectItem key={model} value={model}>✓ {model}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  )}
+
+                  <Field
+                    label="Recommended for your machine"
+                    meta={
+                      hardware?.totalRamGb
+                        ? `${hardware.totalRamGb} GB RAM${hardware.chip ? `, ${hardware.chip}` : ""}`
+                        : undefined
+                    }
+                  >
+                    <Select value={localLlmModel} onValueChange={setLocalLlmModel}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {LLM_MODELS.filter((model) => model.provider === "ollama").map((model) => {
+                          const tooBig =
+                            typeof hardware?.totalRamGb === "number" &&
+                            typeof model.minRamGb === "number" &&
+                            model.minRamGb > hardware.totalRamGb;
+                          const installed = hasInstalledLocalModel(installedLocalModels, model.id);
+                          const sizeLabel = model.sizeGb ? ` · ${model.sizeGb} GB` : "";
+                          return (
+                            <SelectItem key={model.id} value={model.id} disabled={tooBig}>
+                              {installed ? "✓ " : ""}
+                              {model.label}
+                              {sizeLabel}
+                              {tooBig ? ` · needs ${model.minRamGb} GB RAM` : ""}
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                    {localLlmModel && <Hint>{findModelEntry(localLlmModel)?.blurb}</Hint>}
+                  </Field>
+                </div>
               )}
 
-              <div className="actions">
-                <button onClick={() => setStep(2)}>Back</button>
-                <button
-                  className="primary"
-                  onClick={() => setStep(4)}
-                  disabled={
-                    (!useLocalLlm && !(claudeKey || hasClaude)) ||
-                    (asrProvider === "openai" && !(openaiKey || hasOpenai)) ||
-                    (useLocalLlm && !localLlmModel)
-                  }
-                >
-                  Next
-                </button>
+              <div className="space-y-4">
+                {(llmProvider === "claude") && (
+                  <Field
+                    label="Anthropic API key"
+                    status={hasClaude ? "Already stored" : undefined}
+                  >
+                    <Input
+                      type="password"
+                      value={claudeKey}
+                      onChange={(e) => setClaudeKey(e.target.value)}
+                      placeholder={hasClaude ? "leave blank to keep existing" : "sk-ant-…"}
+                    />
+                  </Field>
+                )}
+
+                {(llmProvider === "openai" || asrProvider === "openai") && (
+                  <div className="space-y-3">
+                    <Field
+                      label="OpenAI API key"
+                      status={hasOpenai ? "Already stored" : undefined}
+                    >
+                      <Input
+                        type="password"
+                        value={openaiKey}
+                        onChange={(e) => setOpenaiKey(e.target.value)}
+                        placeholder={hasOpenai ? "leave blank to keep existing" : "sk-…"}
+                      />
+                    </Field>
+
+                    {asrProvider === "openai" && (
+                      <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+                        OpenAI caps uploads at 25 MB. Meetings longer than ~80 min will fail; use Parakeet (local) for longer recordings.
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
+            </WizardStep>
           )}
 
           {step === 4 && (
-            <div className="wizard-step">
-              <h2>Dependencies</h2>
-              <p className="muted">
-                These are the tools Meeting Notes uses to record and transcribe
-                audio. Missing items can be installed for you with Homebrew.
-              </p>
-
+            <WizardStep
+              title="Dependencies"
+              description="These are the tools Meeting Notes uses to record and transcribe audio. Missing items can be installed for you with Homebrew."
+              footer={
+                <WizardActions
+                  back={{ label: "Back", onClick: () => setStep(3), disabled: installing !== null }}
+                  secondary={{
+                    label: "Re-check",
+                    onClick: () => {
+                      api.depsCheck().then(setDeps).catch(() => {});
+                      api.deps.checkBrew().then(setBrewAvailable).catch(() => {});
+                    },
+                    disabled: installing !== null,
+                  }}
+                  primary={{
+                    label: busy ? "Finishing…" : "Finish setup",
+                    onClick: onFinish,
+                    disabled: finishDisabled,
+                  }}
+                />
+              }
+            >
               {deps == null ? (
-                <div className="muted">Checking…</div>
+                <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <Spinner className="h-4 w-4" />
+                  Checking dependencies…
+                </div>
               ) : (
-                <div>
-                  <DepRow
+                <div className="space-y-3">
+                  <DependencyRow
                     name="ffmpeg"
                     ok={!!deps.ffmpeg}
                     value={deps.ffmpeg ?? undefined}
@@ -657,14 +621,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     restartError={restartAudioError}
                   />
                   {asrProvider === "parakeet-mlx" && (
-                    <DepRow
+                    <DependencyRow
                       name="Parakeet"
                       ok={!!deps.parakeet}
                       value={deps.parakeet ?? undefined}
                       installLabel="Install Parakeet"
                       installing={installing === "parakeet"}
                       anyInstalling={installing !== null}
-                      brewAvailable={true /* uses python, not brew */}
+                      brewAvailable={true}
                       onInstall={installParakeet}
                       footerNote={
                         !deps.parakeet
@@ -674,21 +638,21 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     />
                   )}
                   {useLocalLlm && localLlmModel && (
-                    <DepRow
+                    <DependencyRow
                       name={`Model: ${localLlmModel}`}
-                      ok={installedLocalModels.includes(localLlmModel)}
+                      ok={hasInstalledLocalModel(installedLocalModels, localLlmModel)}
                       value={
-                        installedLocalModels.includes(localLlmModel)
+                        hasInstalledLocalModel(installedLocalModels, localLlmModel)
                           ? "ready"
                           : undefined
                       }
                       installLabel={`Download ${localLlmModel}`}
                       installing={installing === "local-llm"}
                       anyInstalling={installing !== null}
-                      brewAvailable={true /* Ollama is bundled, no brew needed */}
+                      brewAvailable={true}
                       onInstall={installLocalLlm}
                       footerNote={
-                        !installedLocalModels.includes(localLlmModel)
+                        !hasInstalledLocalModel(installedLocalModels, localLlmModel)
                           ? `Downloads ${
                               findModelEntry(localLlmModel)?.sizeGb ?? "~5"
                             } GB to ~/.ollama/models. One-time. Shared with any system Ollama install.`
@@ -700,101 +664,54 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               )}
 
               {brewAvailable === false && (
-                <div
-                  className="card"
-                  style={{ marginTop: 12, borderColor: "var(--warning)" }}
-                >
-                  <div style={{ fontWeight: 500, marginBottom: 6 }}>
-                    Homebrew is not installed
-                  </div>
-                  <div className="muted" style={{ marginBottom: 8 }}>
-                    Homebrew is the macOS package manager we use to install
-                    ffmpeg and BlackHole. Open Terminal and run:
-                  </div>
-                  <pre
-                    className="log-view"
-                    style={{ maxHeight: 60, marginBottom: 8, userSelect: "text" }}
-                  >
-                    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                  </pre>
-                  <button
-                    onClick={() => {
-                      api.deps.checkBrew().then(setBrewAvailable);
-                    }}
-                  >
-                    Re-check
-                  </button>
-                </div>
+                <Card className="border-[var(--warning)]/40 bg-[var(--warning-muted)]/50 shadow-none">
+                  <CardContent className="space-y-3 p-4">
+                    <div className="text-sm font-medium text-[var(--text-primary)]">Homebrew is not installed</div>
+                    <div className="text-sm text-[var(--text-secondary)]">
+                      Homebrew is the macOS package manager we use to install ffmpeg and BlackHole. Open Terminal and run:
+                    </div>
+                    <pre className="overflow-x-auto rounded-lg border border-[var(--border-default)] bg-white px-3 py-2 font-mono text-xs text-[var(--text-primary)]">
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+                    </pre>
+                    <Button
+                      variant="secondary"
+                      onClick={() => {
+                        api.deps.checkBrew().then(setBrewAvailable);
+                      }}
+                    >
+                      Re-check
+                    </Button>
+                  </CardContent>
+                </Card>
               )}
 
               {installLog.length > 0 && (
-                <pre
-                  className="log-view"
-                  style={{ marginTop: 12, maxHeight: 200 }}
-                >
+                <pre className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]">
                   {installLog.join("\n")}
                 </pre>
               )}
+
               {installError && (
-                <div
-                  className="muted"
-                  style={{ color: "var(--danger)", marginTop: 8 }}
-                >
-                  {installError}
-                </div>
+                <div className="text-sm text-[var(--error)]">{installError}</div>
               )}
 
               {deps && deps.blackhole !== "loaded" && (
-                <div
-                  className="checkbox-row"
-                  style={{ marginTop: 14, fontSize: 13 }}
-                >
-                  <input
-                    type="checkbox"
+                <div className="flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+                  <Checkbox
+                    id="wizard-skip-blackhole"
                     checked={skipBlackhole}
-                    onChange={(e) => setSkipBlackhole(e.target.checked)}
+                    onCheckedChange={(checked) => setSkipBlackhole(checked === true)}
                   />
-                  <span className="muted">
-                    Skip — I don't need to capture the other side of calls
-                    (mic-only recording)
-                  </span>
+                  <label htmlFor="wizard-skip-blackhole" className="cursor-pointer text-sm text-[var(--text-secondary)]">
+                    Skip — I don&apos;t need to capture the other side of calls (mic-only recording)
+                  </label>
                 </div>
               )}
 
               {error && (
-                <div
-                  className="muted"
-                  style={{ color: "var(--danger)", marginTop: 8 }}
-                >
-                  {error}
-                </div>
+                <div className="text-sm text-[var(--error)]">{error}</div>
               )}
-
-              <div className="actions">
-                <button
-                  onClick={() => setStep(3)}
-                  disabled={installing !== null}
-                >
-                  Back
-                </button>
-                <button
-                  onClick={() => {
-                    api.depsCheck().then(setDeps).catch(() => {});
-                    api.deps.checkBrew().then(setBrewAvailable).catch(() => {});
-                  }}
-                  disabled={installing !== null}
-                >
-                  Re-check
-                </button>
-                <button
-                  className="primary"
-                  onClick={onFinish}
-                  disabled={finishDisabled}
-                >
-                  {busy ? "Finishing…" : "Finish setup"}
-                </button>
-              </div>
-            </div>
+            </WizardStep>
           )}
         </div>
       </div>
@@ -802,7 +719,121 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   );
 }
 
-interface DepRowProps {
+function WizardStep({
+  title,
+  description,
+  children,
+  footer,
+}: {
+  title: string;
+  description: string;
+  children?: React.ReactNode;
+  footer?: React.ReactNode;
+}) {
+  return (
+    <Card className="rounded-2xl border-[var(--border-default)] bg-white shadow-[0_18px_44px_rgba(31,45,28,0.10)]">
+      <CardContent className="space-y-6 p-7">
+        <div className="space-y-2">
+          <h2 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">{title}</h2>
+          <p className="text-sm leading-6 text-[var(--text-secondary)]">{description}</p>
+        </div>
+        {children ? <div className="space-y-5">{children}</div> : null}
+        {footer ? <div className="border-t border-[var(--border-subtle)] pt-5">{footer}</div> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+function WizardActions({
+  back,
+  secondary,
+  primary,
+}: {
+  back?: { label: string; onClick: () => void; disabled?: boolean };
+  secondary?: { label: string; onClick: () => void; disabled?: boolean };
+  primary: { label: string; onClick: () => void; disabled?: boolean };
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-3">
+      {back ? (
+        <Button variant="secondary" onClick={back.onClick} disabled={back.disabled}>
+          {back.label}
+        </Button>
+      ) : null}
+      <div className="ml-auto flex flex-wrap gap-3">
+        {secondary ? (
+          <Button variant="secondary" onClick={secondary.onClick} disabled={secondary.disabled}>
+            {secondary.label}
+          </Button>
+        ) : null}
+        <Button onClick={primary.onClick} disabled={primary.disabled}>
+          {primary.label}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  htmlFor,
+  meta,
+  status,
+  children,
+}: {
+  label: string;
+  htmlFor?: string;
+  meta?: string;
+  status?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <label htmlFor={htmlFor} className="text-sm font-medium text-[var(--text-primary)]">
+          {label}
+        </label>
+        {meta ? <span className="text-xs text-[var(--text-tertiary)]">{meta}</span> : null}
+        {status ? <Badge variant="success" className="w-fit">{status}</Badge> : null}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Hint({ children }: { children: React.ReactNode }) {
+  return <div className="text-xs leading-5 text-[var(--text-secondary)]">{children}</div>;
+}
+
+function PickerRow({ children }: { children: React.ReactNode }) {
+  return <div className="flex flex-col gap-3 sm:flex-row">{children}</div>;
+}
+
+function SettingToggle({
+  id,
+  checked,
+  onCheckedChange,
+  title,
+  description,
+}: {
+  id: string;
+  checked: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+      <label htmlFor={id} className="cursor-pointer space-y-1">
+        <div className="text-sm font-medium text-[var(--text-primary)]">{title}</div>
+        {description ? <div className="text-sm leading-5 text-[var(--text-secondary)]">{description}</div> : null}
+      </label>
+    </div>
+  );
+}
+
+interface DependencyRowProps {
   name: string;
   ok: boolean;
   value?: string;
@@ -814,7 +845,7 @@ interface DepRowProps {
   footerNote?: string;
 }
 
-function DepRow({
+function DependencyRow({
   name,
   ok,
   value,
@@ -824,44 +855,25 @@ function DepRow({
   brewAvailable,
   onInstall,
   footerNote,
-}: DepRowProps) {
+}: DependencyRowProps) {
   return (
-    <div style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-      <div className="row">
-        <span style={{ width: 120, fontWeight: 500 }}>{name}</span>
-        <span
-          style={{
-            width: 18,
-            textAlign: "center",
-            color: ok ? "var(--success)" : "var(--danger)",
-          }}
-        >
-          {ok ? "✓" : "✗"}
-        </span>
-        {ok && value ? (
-          <span className="mono muted" style={{ overflow: "hidden", textOverflow: "ellipsis" }}>
-            {value}
-          </span>
-        ) : (
-          <span className="muted" style={{ fontSize: 12 }}>
-            {ok ? "installed" : "not installed"}
-          </span>
-        )}
-        <span style={{ flex: 1 }} />
-        {!ok && (
-          <button
-            onClick={onInstall}
-            disabled={anyInstalling || brewAvailable === false}
-          >
-            {installing ? "Installing…" : installLabel}
-          </button>
-        )}
-      </div>
-      {footerNote && !ok && (
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          {footerNote}
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="text-sm font-medium text-[var(--text-primary)]">{name}</div>
+            <DependencyStateBadge ok={ok} warning={false} />
+            {value ? <span className="truncate font-mono text-xs text-[var(--text-secondary)]">{value}</span> : null}
+            {!value ? <span className="text-xs text-[var(--text-secondary)]">{ok ? "installed" : "not installed"}</span> : null}
+          </div>
+          {footerNote && !ok ? <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{footerNote}</div> : null}
         </div>
-      )}
+        {!ok ? (
+          <Button variant="secondary" onClick={onInstall} disabled={anyInstalling || brewAvailable === false}>
+            {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : installLabel}
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -887,74 +899,82 @@ function BlackHoleRow({
   onRestartAudio,
   restartError,
 }: BlackHoleRowProps) {
-  // BlackHole has three legitimate display states: loaded (✓), missing
-  // (offer brew install), and "installed-not-loaded" (cask is on disk but
-  // coreaudiod hasn't picked it up yet — offer Restart Audio instead).
   const icon =
     status === "loaded" ? "✓" : status === "installed-not-loaded" ? "⚠" : "✗";
-  const iconColor =
-    status === "loaded"
-      ? "var(--success)"
-      : status === "installed-not-loaded"
-        ? "var(--warning)"
-        : "var(--danger)";
   const statusText =
     status === "loaded"
       ? "loaded"
       : status === "installed-not-loaded"
         ? "installed but not loaded by macOS"
         : "not installed";
+
   return (
-    <div style={{ padding: "12px 0", borderBottom: "1px solid var(--border)" }}>
-      <div className="row">
-        <span style={{ width: 120, fontWeight: 500 }}>BlackHole 2ch</span>
-        <span style={{ width: 18, textAlign: "center", color: iconColor }}>
-          {icon}
-        </span>
-        <span className="muted" style={{ fontSize: 12 }}>
-          {statusText}
-        </span>
-        <span style={{ flex: 1 }} />
-        {status === "missing" && (
-          <button
-            onClick={onInstall}
-            disabled={anyBusy || brewAvailable === false}
-          >
-            {installing ? "Installing…" : "Install via Homebrew"}
-          </button>
-        )}
-        {status === "installed-not-loaded" && (
-          <button onClick={onRestartAudio} disabled={anyBusy}>
-            {restarting ? "Restarting…" : "Restart audio"}
-          </button>
-        )}
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="text-sm font-medium text-[var(--text-primary)]">BlackHole 2ch</div>
+            <DependencyStateBadge ok={status === "loaded"} warning={status === "installed-not-loaded"} />
+            <span className="text-xs text-[var(--text-secondary)]">{statusText}</span>
+            <span className="text-xs text-[var(--text-tertiary)]">{icon}</span>
+          </div>
+          {status === "missing" && brewAvailable !== false ? (
+            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
+              macOS will ask you to approve the virtual audio driver. Follow the prompt — no restart needed.
+            </div>
+          ) : null}
+          {status === "installed-not-loaded" ? (
+            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
+              The driver is on disk but macOS hasn&apos;t loaded it yet. Restart Audio relaunches coreaudiod. If that doesn&apos;t work, log out and back in.
+            </div>
+          ) : null}
+          {restartError ? <div className="mt-2 text-xs leading-5 text-[var(--error)]">{restartError}</div> : null}
+        </div>
+        {status === "missing" ? (
+          <Button variant="secondary" onClick={onInstall} disabled={anyBusy || brewAvailable === false}>
+            {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : "Install via Homebrew"}
+          </Button>
+        ) : null}
+        {status === "installed-not-loaded" ? (
+          <Button variant="secondary" onClick={onRestartAudio} disabled={anyBusy}>
+            {restarting ? <><Spinner className="h-3.5 w-3.5" /> Restarting…</> : "Restart audio"}
+          </Button>
+        ) : null}
       </div>
-      {status === "missing" && brewAvailable !== false && (
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          macOS will ask you to approve the virtual audio driver. Follow the
-          prompt — no restart needed.
-        </div>
-      )}
-      {status === "installed-not-loaded" && (
-        <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-          The driver is on disk but macOS hasn't loaded it yet. Restart Audio
-          relaunches coreaudiod (you'll be asked for your login password). If
-          that doesn't work, log out and back in.
-        </div>
-      )}
-      {restartError && (
-        <div
-          className="muted"
-          style={{ color: "var(--danger)", marginTop: 6, fontSize: 12 }}
-        >
-          {restartError}
-        </div>
-      )}
     </div>
   );
 }
 
-// -------- Tiny path helpers (can't import node:path in the renderer) --------
+function DependencyStateBadge({
+  ok,
+  warning,
+}: {
+  ok: boolean;
+  warning: boolean;
+}) {
+  if (ok) {
+    return (
+      <Badge variant="success" className="gap-1 normal-case tracking-normal">
+        <CheckCircle2 className="h-3 w-3" />
+        Ready
+      </Badge>
+    );
+  }
+  if (warning) {
+    return (
+      <Badge variant="warning" className="gap-1 normal-case tracking-normal">
+        <AlertTriangle className="h-3 w-3" />
+        Needs attention
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="destructive" className="gap-1 normal-case tracking-normal">
+      <XCircle className="h-3 w-3" />
+      Missing
+    </Badge>
+  );
+}
 
 function joinPath(a: string, b: string): string {
   if (a.endsWith("/")) return a + b;

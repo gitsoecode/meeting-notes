@@ -3,7 +3,7 @@ import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 
 const md = new MarkdownIt({
-  html: false,
+  html: true,
   linkify: true,
   breaks: false,
   typographer: true,
@@ -36,9 +36,16 @@ export interface MarkdownViewProps {
   onWikilinkClick?: (name: string) => void;
 }
 
+function stripFrontmatter(source: string): string {
+  if (!source.startsWith("---\n")) return source;
+  const end = source.indexOf("\n---\n", 4);
+  if (end === -1) return source;
+  return source.slice(end + 5);
+}
+
 export function MarkdownView({ source, className, onWikilinkClick }: MarkdownViewProps) {
   const html = useMemo(() => {
-    const rendered = md.render(source || "");
+    const rendered = md.render(stripFrontmatter(source || ""));
     return DOMPurify.sanitize(rendered, {
       ADD_ATTR: ["data-wikilink"],
     });

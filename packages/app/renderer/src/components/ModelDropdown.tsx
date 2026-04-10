@@ -1,42 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   LLM_MODELS,
   classifyModelClient,
   findModelEntry,
+  localModelIdsMatch,
+  normalizeModelId,
   type LlmModelEntry,
   type LlmProviderKind,
 } from "../constants";
-import { api } from "../ipc-client";
+import { Input } from "./ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+} from "./ui/select";
 
 interface ModelDropdownProps {
-  /** Current model id (free-form string — may be in the catalog or not). */
   value: string;
   onChange: (next: string) => void;
-  /**
-   * Restrict the picker to one provider. Used by the Settings → Local
-   * models card. Default: show both.
-   */
   providerFilter?: LlmProviderKind;
-  /**
-   * If provided, the picker shows the user's actually-installed local
-   * models at the top of the list with a "✓ installed" badge. The Local
-   * models card uses this to encourage reuse of pulled weights and avoid
-   * accidental duplicate downloads.
-   */
   installedLocalModels?: string[];
-  /** RAM in GB — disables local picks the user's machine can't run. */
   totalRamGb?: number;
-  /** Allow a free-form "Custom…" id input. Default: true. */
   allowCustom?: boolean;
+  localMode?: "all" | "installed-only";
+  /** Which cloud providers have a working API key configured */
+  availableKeys?: { claude?: boolean; openai?: boolean };
+  className?: string;
+  triggerClassName?: string;
 }
 
-/**
- * Shared model picker used by Settings (default model) and PromptsEditor
- * (per-prompt override). Renders cloud and local models in two opt-groups
- * with a small chip below the select indicating which kind is currently
- * selected, plus a one-click install path for local models that aren't
- * yet pulled.
- */
 export function ModelDropdown({
   value,
   onChange,
@@ -44,199 +37,183 @@ export function ModelDropdown({
   installedLocalModels,
   totalRamGb,
   allowCustom = true,
+  localMode = "all",
+  availableKeys,
+  className,
+  triggerClassName,
 }: ModelDropdownProps) {
-  const entries = LLM_MODELS.filter(
-    (m) => !providerFilter || m.provider === providerFilter
+  const normalizedInstalled = useMemo(
+    () => (installedLocalModels ?? []).map((m) => normalizeModelId(m)).filter(Boolean),
+    [installedLocalModels]
   );
-  const claudeEntries = entries.filter((m) => m.provider === "claude");
-  const ollamaEntries = entries.filter((m) => m.provider === "ollama");
 
-  const known = entries.some((m) => m.id === value);
+  const entries = useMemo(() => {
+    const base = LLM_MODELS.filter(
+      (m) => !providerFilter || m.provider === providerFilter
+    );
+    if (providerFilter === "claude") return base;
+
+    const extra: LlmModelEntry[] = [];
+    for (const installed of installedLocalModels ?? []) {
+      const norm = normalizeModelId(installed);
+      if (!norm) continue;
+      const alreadyKnown = base.some(
+        (m) => m.provider === "ollama" && localModelIdsMatch(m.id, norm)
+      );
+      if (alreadyKnown) continue;
+      extra.push({
+        id: installed,
+        label: installed,
+        provider: "ollama",
+        blurb: "Installed local model detected from Ollama.",
+      });
+    }
+    return [...base, ...extra];
+  }, [installedLocalModels, providerFilter]);
+
+  const claudeEntries = entries.filter((m) => m.provider === "claude");
+  const openaiEntries = entries.filter((m) => m.provider === "openai");
+  const ollamaEntries = entries.filter((m) => {
+    if (m.provider !== "ollama") return false;
+    if (localMode === "installed-only" && installedLocalModels) {
+      return normalizedInstalled.some((inst) => localModelIdsMatch(inst, m.id));
+    }
+    return true;
+  });
+
+  const known = entries.some((m) =>
+    m.provider === "claude" || m.provider === "openai" ? m.id === value : localModelIdsMatch(m.id, value)
+  );
   const [showCustom, setShowCustom] = useState(allowCustom && !!value && !known);
 
-  // If the value flips to something we recognise (e.g. wizard reset),
-  // collapse the custom input again so the dropdown is the source of truth.
   useEffect(() => {
-    if (entries.some((m) => m.id === value)) {
+    if (
+      entries.some((m) =>
+        m.provider === "claude" || m.provider === "openai" ? m.id === value : localModelIdsMatch(m.id, value)
+      )
+    ) {
       setShowCustom(false);
     }
-  }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [entries, value]);
 
   const onSelectChange = (next: string) => {
     if (next === "__custom__") {
       setShowCustom(true);
-      // Don't immediately overwrite — let the user type into the input.
-      if (entries.some((m) => m.id === value)) onChange("");
-    } else {
-      setShowCustom(false);
-      onChange(next);
+      if (known) onChange("");
+      return;
     }
+    setShowCustom(false);
+    onChange(next);
   };
 
   const selectValue = showCustom ? "__custom__" : known ? value : "__custom__";
-  const currentKind: LlmProviderKind | undefined = value
-    ? classifyModelClient(value)
-    : undefined;
-  const currentEntry = findModelEntry(value);
-  const isLocal = currentKind === "ollama";
-  const localInstalled =
-    isLocal && installedLocalModels ? installedLocalModels.includes(value) : false;
+  const selectedEntry = useMemo(() => findModelEntry(value), [value]);
+  const selectedLabel = showCustom
+    ? "Custom model"
+    : (selectedEntry?.label ?? value.trim()) || "Select a model";
+
+  const isInstalled = (model: LlmModelEntry) =>
+    normalizedInstalled.some((inst) => localModelIdsMatch(inst, model.id));
+
+  const tooBig = (model: LlmModelEntry) =>
+    typeof totalRamGb === "number" &&
+    typeof model.minRamGb === "number" &&
+    model.minRamGb > totalRamGb;
 
   return (
-    <>
-      <select value={selectValue} onChange={(e) => onSelectChange(e.target.value)}>
-        {claudeEntries.length > 0 && (
-          <optgroup label="Claude (cloud)">
-            {claudeEntries.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </optgroup>
-        )}
-        {ollamaEntries.length > 0 && (
-          <optgroup label="Local (Ollama)">
-            {ollamaEntries.map((m) => (
-              <LocalOption
-                key={m.id}
-                entry={m}
-                installed={installedLocalModels?.includes(m.id) ?? false}
-                totalRamGb={totalRamGb}
-              />
-            ))}
-          </optgroup>
-        )}
-        {allowCustom && <option value="__custom__">Custom…</option>}
-      </select>
+    <div className={className}>
+      <Select value={selectValue} onValueChange={onSelectChange}>
+        <SelectTrigger className={triggerClassName}>
+          <span
+            className={`min-w-0 flex-1 truncate text-left ${value ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
+          >
+            {selectedLabel}
+          </span>
+        </SelectTrigger>
+        <SelectContent>
+          {claudeEntries.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                Anthropic (Cloud){availableKeys && !availableKeys.claude ? " — no API key" : ""}
+              </div>
+              {claudeEntries.map((m) => {
+                const noKey = availableKeys && !availableKeys.claude;
+                return (
+                  <SelectItem key={m.id} value={m.id} disabled={!!noKey}>
+                    <span className={noKey ? "opacity-50" : ""}>{m.label}</span>
+                  </SelectItem>
+                );
+              })}
+            </>
+          )}
+          {openaiEntries.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                OpenAI (Cloud){availableKeys && !availableKeys.openai ? " — no API key" : ""}
+              </div>
+              {openaiEntries.map((m) => {
+                const noKey = availableKeys && !availableKeys.openai;
+                return (
+                  <SelectItem key={m.id} value={m.id} disabled={!!noKey}>
+                    <span className={noKey ? "opacity-50" : ""}>{m.label}</span>
+                  </SelectItem>
+                );
+              })}
+            </>
+          )}
+          {ollamaEntries.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)]">
+                Local (Ollama)
+              </div>
+              {ollamaEntries.map((m) => {
+                const installed = isInstalled(m);
+                const tooLarge = tooBig(m);
+                const disabled = !installed || tooLarge;
+                const sizeLabel = m.sizeGb ? ` · ${m.sizeGb} GB` : "";
+                const statusLabel = installed
+                  ? " — Installed"
+                  : " — Not installed";
+                const ramWarn = tooLarge ? ` · needs ${m.minRamGb} GB RAM` : "";
+                return (
+                  <SelectItem
+                    key={m.id}
+                    value={m.id}
+                    disabled={disabled}
+                  >
+                    <span className={disabled ? "opacity-50" : ""}>
+                      {m.label}
+                      {sizeLabel}
+                      <span className={`text-xs ${installed ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}>
+                        {statusLabel}
+                      </span>
+                      {ramWarn}
+                    </span>
+                  </SelectItem>
+                );
+              })}
+            </>
+          )}
+          {allowCustom && (
+            <SelectItem value="__custom__">Custom…</SelectItem>
+          )}
+        </SelectContent>
+      </Select>
 
       {showCustom && allowCustom && (
-        <input
-          style={{ marginTop: 6 }}
+        <Input
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="model id (e.g. claude-… or qwen3.5:9b)"
+          placeholder="model id (e.g. claude-… or qwen3.5)"
+          className="mt-2"
         />
       )}
 
-      {/* Provider chip + install hint */}
-      {value && currentKind && (
-        <div className="row" style={{ marginTop: 6, alignItems: "center", gap: 8 }}>
-          <span
-            className="chip"
-            data-kind={currentKind}
-            style={{
-              fontSize: 11,
-              padding: "2px 8px",
-              borderRadius: 999,
-              background:
-                currentKind === "claude" ? "var(--accent-muted)" : "var(--success-muted)",
-              color: currentKind === "claude" ? "var(--accent)" : "var(--success)",
-            }}
-          >
-            {currentKind === "claude" ? "Cloud" : "Local"}
-          </span>
-          {currentEntry?.blurb && (
-            <span className="muted" style={{ fontSize: 12 }}>
-              {currentEntry.blurb}
-            </span>
-          )}
-          {isLocal && installedLocalModels && !localInstalled && (
-            <InstallHint model={value} />
-          )}
-        </div>
+      {value && !showCustom && classifyModelClient(value) === "ollama" && installedLocalModels && !normalizedInstalled.some((inst) => localModelIdsMatch(inst, value)) && (
+        <p className="mt-2 text-xs text-[var(--text-tertiary)]">
+          This model is not installed. Go to <strong>Settings → AI Models</strong> to pull it.
+        </p>
       )}
-    </>
-  );
-}
-
-function LocalOption({
-  entry,
-  installed,
-  totalRamGb,
-}: {
-  entry: LlmModelEntry;
-  installed: boolean;
-  totalRamGb?: number;
-}) {
-  const tooBig =
-    typeof totalRamGb === "number" &&
-    typeof entry.minRamGb === "number" &&
-    entry.minRamGb > totalRamGb;
-  const sizeLabel = entry.sizeGb ? ` · ${entry.sizeGb} GB` : "";
-  const installedLabel = installed ? " ✓ installed" : "";
-  const ramWarn = tooBig ? ` · needs ${entry.minRamGb} GB RAM` : "";
-  return (
-    <option value={entry.id} disabled={tooBig}>
-      {entry.label}
-      {sizeLabel}
-      {installedLabel}
-      {ramWarn}
-    </option>
-  );
-}
-
-/**
- * Tiny inline "Install now" affordance for local models that aren't
- * pulled yet. Streams setup-llm:log into a small modal so the user can
- * watch the pull progress.
- */
-function InstallHint({ model }: { model: string }) {
-  const [busy, setBusy] = useState(false);
-  const [logOpen, setLogOpen] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!logOpen) return;
-    const unsub = api.on.setupLlmLog((line) => setLog((prev) => [...prev, line]));
-    return () => unsub();
-  }, [logOpen]);
-
-  const onInstall = async () => {
-    setBusy(true);
-    setLog([]);
-    setError(null);
-    setLogOpen(true);
-    try {
-      await api.llm.setup({ model });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <>
-      <span className="muted" style={{ fontSize: 12 }}>
-        Not installed —
-      </span>
-      <button onClick={onInstall} disabled={busy}>
-        {busy ? "Installing…" : "Install now"}
-      </button>
-      {logOpen && (
-        <div className="modal-backdrop" onClick={() => !busy && setLogOpen(false)}>
-          <div
-            className="modal"
-            onClick={(e) => e.stopPropagation()}
-            style={{ width: 640 }}
-          >
-            <h2>Pulling {model}</h2>
-            <p className="muted">First-time download — runs in the background.</p>
-            {log.length > 0 && <pre className="log-view">{log.join("\n")}</pre>}
-            {error && (
-            <div className="muted tone-error">
-              {error}
-            </div>
-            )}
-            <div className="actions">
-              <button onClick={() => setLogOpen(false)} disabled={busy}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
+    </div>
   );
 }

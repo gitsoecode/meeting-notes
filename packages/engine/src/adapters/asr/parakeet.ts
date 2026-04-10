@@ -1,10 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import type { AsrProvider, TranscriptResult, TranscriptSegment } from "./provider.js";
-
-const execFileAsync = promisify(execFile);
+import type { AsrProvider, TranscriptResult, TranscriptSegment, AsrCallOptions } from "./provider.js";
+import { runCommand } from "../../core/exec.js";
 
 interface ParakeetSentence {
   text: string;
@@ -30,7 +27,8 @@ export class ParakeetMlxProvider implements AsrProvider {
 
   async transcribe(
     audioPath: string,
-    speaker: "me" | "others" | "unknown" = "unknown"
+    speaker: "me" | "others" | "unknown" = "unknown",
+    options?: AsrCallOptions
   ): Promise<TranscriptResult> {
     if (!fs.existsSync(this.binaryPath)) {
       throw new Error(
@@ -54,16 +52,14 @@ export class ParakeetMlxProvider implements AsrProvider {
     ];
 
     try {
-      await execFileAsync(this.binaryPath, args, {
-        timeout: 1_800_000, // 30 min cap for long meetings
-        maxBuffer: 64 * 1024 * 1024,
+      await runCommand(this.binaryPath, args, {
+        timeoutMs: 1_800_000,
+        signal: options?.signal,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      const stderr = (err as { stderr?: string })?.stderr ?? "";
       throw new Error(
         `Parakeet (mlx_audio.stt.generate) failed: ${msg}\n` +
-        (stderr ? `stderr:\n${stderr}\n` : "") +
         `\nCommand: ${this.binaryPath} ${args.join(" ")}\n` +
         `\nTry reinstalling: rm -rf ~/.meeting-notes/parakeet-venv && meeting-notes setup-asr`
       );

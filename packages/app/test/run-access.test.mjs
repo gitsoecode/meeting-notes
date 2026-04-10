@@ -6,8 +6,12 @@ import path from "node:path";
 import {
   assertPathInsideRoot,
   isAllowedRunDocumentName,
+  isAllowedRunMediaName,
+  listRunFiles,
   resolveRunDocumentPath,
   resolveRunFolderPath,
+  resolveRunMediaPath,
+  RUN_AUDIO_DIR,
   RUN_INDEX_FILE,
   RUN_NOTES_FILE,
 } from "../dist/main/run-access.js";
@@ -51,4 +55,64 @@ test("isAllowedRunDocumentName only accepts markdown documents and run.log", () 
   assert.equal(isAllowedRunDocumentName("run.log"), true);
   assert.equal(isAllowedRunDocumentName("nested/notes.md"), false);
   assert.equal(isAllowedRunDocumentName("notes.txt"), false);
+});
+
+test("run media names stay scoped to top-level source recordings", () => {
+  assert.equal(isAllowedRunMediaName("audio/mic.wav"), true);
+  assert.equal(isAllowedRunMediaName("audio/zoom.mp4"), true);
+  assert.equal(isAllowedRunMediaName("audio/nested/clip.wav"), false);
+  assert.equal(isAllowedRunMediaName("../audio/mic.wav"), false);
+  assert.equal(isAllowedRunMediaName("audio/normalized-mic.wav"), false);
+});
+
+test("resolveRunMediaPath keeps media access scoped to a run folder", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-media-"));
+  const dataPath = path.join(tmpDir, "Meetings");
+  const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "Media Run");
+  const audioDir = path.join(runFolder, RUN_AUDIO_DIR);
+
+  fs.mkdirSync(audioDir, { recursive: true });
+  fs.writeFileSync(path.join(runFolder, RUN_INDEX_FILE), "---\nrun_id: 1\ntitle: Test\n---\n");
+  fs.writeFileSync(path.join(audioDir, "mic.wav"), "audio");
+
+  const config = makeConfig(dataPath);
+  assert.equal(
+    resolveRunMediaPath(runFolder, "audio/mic.wav", config),
+    path.join(audioDir, "mic.wav")
+  );
+  assert.throws(
+    () => resolveRunMediaPath(runFolder, "audio/nested/mic.wav", config),
+    /invalid/
+  );
+  assert.throws(
+    () => resolveRunMediaPath(runFolder, "audio/normalized-mic.wav", config),
+    /invalid/
+  );
+});
+
+test("listRunFiles includes source media but hides normalized internals", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-files-"));
+  const dataPath = path.join(tmpDir, "Meetings");
+  const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "Imported Run");
+  const audioDir = path.join(runFolder, RUN_AUDIO_DIR);
+
+  fs.mkdirSync(audioDir, { recursive: true });
+  fs.writeFileSync(path.join(runFolder, RUN_INDEX_FILE), "---\nrun_id: 1\ntitle: Test\n---\n");
+  fs.writeFileSync(path.join(runFolder, RUN_NOTES_FILE), "# Notes\n");
+  fs.writeFileSync(path.join(runFolder, "run.log"), "hello\n");
+  fs.writeFileSync(path.join(audioDir, "zoom-recording.mp4"), "video");
+  fs.writeFileSync(path.join(audioDir, "normalized-zoom-recording.wav"), "normalized");
+
+  const config = makeConfig(dataPath);
+  const files = listRunFiles(runFolder, config);
+
+  assert.deepEqual(
+    files.map((file) => [file.name, file.kind]),
+    [
+      ["index.md", "document"],
+      ["notes.md", "document"],
+      ["run.log", "log"],
+      ["audio/zoom-recording.mp4", "media"],
+    ]
+  );
 });

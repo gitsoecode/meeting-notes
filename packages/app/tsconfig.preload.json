@@ -12,6 +12,6 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["preload/**/*", "shared/**/*"],
+  "include": ["preload/**/*"],
   "exclude": ["node_modules", "dist"]
 }

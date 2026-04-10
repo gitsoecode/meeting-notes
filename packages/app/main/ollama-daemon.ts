@@ -2,8 +2,9 @@ import { spawn, type ChildProcess, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { pingOllama, getConfigDir } from "@meeting-notes/engine";
+import { pingOllama, getConfigDir, createAppLogger } from "@meeting-notes/engine";
 import { bundledBin, bundledBinExists } from "./bundled.js";
+import { trackChildProcess, updateTrackedProcess } from "./activity-monitor.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -22,6 +23,8 @@ export interface OllamaState {
 let state: OllamaState | null = null;
 let child: ChildProcess | null = null;
 let logStream: fs.WriteStream | null = null;
+let trackedProcessId: string | null = null;
+const appLogger = createAppLogger(false);
 
 /**
  * Start (or reuse) an Ollama daemon and return where it lives. Resolution
@@ -77,16 +80,44 @@ export async function ensureOllamaDaemon(): Promise<OllamaState> {
     stdio: ["ignore", "pipe", "pipe"],
     detached: false,
   });
+  trackedProcessId = trackChildProcess(child, {
+    type: "ollama-daemon",
+    label: "Ollama daemon",
+    command: `${binary} serve`,
+  });
+  appLogger.info("Starting Ollama daemon", {
+    processType: "ollama-daemon",
+    pid: child.pid,
+    detail: source,
+  });
   child.stdout?.on("data", (chunk: Buffer) => logStream?.write(chunk));
   child.stderr?.on("data", (chunk: Buffer) => logStream?.write(chunk));
   child.on("exit", (code, signal) => {
     logStream?.write(`\n--- ollama serve exited code=${code} signal=${signal} ---\n`);
+    const payload = {
+      processType: "ollama-daemon",
+      pid: child?.pid,
+      detail: signal ?? (code != null ? `code=${code}` : undefined),
+    };
+    if (code === 0) {
+      appLogger.info("Ollama daemon exited", payload);
+    } else {
+      appLogger.error("Ollama daemon exited", payload);
+    }
   });
 
   // Poll for readiness
   const start = Date.now();
   while (Date.now() - start < PING_TIMEOUT_MS) {
     if (await pingOllama(DEFAULT_BASE_URL)) {
+      if (trackedProcessId) {
+        updateTrackedProcess(trackedProcessId, { status: "running" });
+      }
+      appLogger.info("Ollama daemon ready", {
+        processType: "ollama-daemon",
+        pid: child.pid,
+        detail: source,
+      });
       state = { source, baseUrl: DEFAULT_BASE_URL, pid: child.pid };
       return state;
     }
@@ -100,6 +131,7 @@ export async function ensureOllamaDaemon(): Promise<OllamaState> {
     // best effort
   }
   child = null;
+  trackedProcessId = null;
   throw new Error(
     `Ollama daemon failed to start within ${PING_TIMEOUT_MS}ms. ` +
       `Check ~/.meeting-notes/ollama.log for details.`
@@ -123,6 +155,7 @@ export async function stopOllamaDaemon(): Promise<void> {
     }
   }
   child = null;
+  trackedProcessId = null;
   logStream?.end();
   logStream = null;
   state = null;

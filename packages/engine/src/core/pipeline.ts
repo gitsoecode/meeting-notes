@@ -8,6 +8,7 @@ import { writeMarkdownFile } from "./markdown.js";
 import { updateSectionState } from "./run.js";
 import { migrateVaultPromptsToHome } from "./migrate-prompts.js";
 import { Logger } from "../logging/logger.js";
+import { throwIfAborted } from "./abort.js";
 
 /**
  * Callback the pipeline invokes to report per-section progress. The
@@ -15,6 +16,10 @@ import { Logger } from "../logging/logger.js";
  * CLI ignores it (its logs already tell the same story).
  */
 export type PipelineProgressEvent =
+  | {
+      type: "run-planned";
+      steps: PipelinePlannedStep[];
+    }
   | { type: "section-start"; sectionId: string; label: string; filename: string; model?: string }
   | {
       type: "section-complete";
@@ -36,7 +41,8 @@ export type PipelineProgressEvent =
 export type LlmCallFn = (
   systemPrompt: string,
   userMessage: string,
-  model?: string
+  model?: string,
+  signal?: AbortSignal
 ) => Promise<{ content: string; tokensUsed?: number }>;
 
 export interface PipelineInput {
@@ -61,6 +67,14 @@ export interface PipelineResult {
   attempts?: number;
 }
 
+export interface PipelinePlannedStep {
+  sectionId: string;
+  label: string;
+  filename: string;
+  model?: string;
+  kind: "transcript" | "prompt";
+}
+
 export interface PipelineRunOptions {
   /** Run only these section ids. Bypasses autoOnly filter. */
   onlyIds?: string[];
@@ -77,6 +91,10 @@ export interface PipelineRunOptions {
   autoOnly?: boolean;
   /** Live progress callback (Electron app subscribes; CLI ignores). */
   onProgress?: (event: PipelineProgressEvent) => void;
+  /** Optional abort signal to cancel queued/running work. */
+  signal?: AbortSignal;
+  /** Optional precomputed prompt plan so callers can publish roadmap state once up front. */
+  plannedPrompts?: ResolvedPrompt[];
 }
 
 /**
@@ -85,6 +103,10 @@ export interface PipelineRunOptions {
 export interface ResolvedPrompt {
   id: string;
   label: string;
+  description: string | null;
+  category: string | null;
+  sortOrder: number | null;
+  recommended: boolean;
   filename: string;
   prompt: string;
   enabled: boolean;
@@ -133,6 +155,10 @@ export function getLegacyVaultPromptsDir(config: AppConfig): string {
 interface PromptFrontmatter {
   id?: unknown;
   label?: unknown;
+  description?: unknown;
+  category?: unknown;
+  sort_order?: unknown;
+  recommended?: unknown;
   filename?: unknown;
   enabled?: unknown;
   auto?: unknown;
@@ -184,13 +210,25 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
   }
 
   const builtin = fm.builtin === true;
-  // Builtins are forced enabled + auto to preserve the "summary always runs" invariant.
-  const enabled = builtin ? true : fm.enabled !== false;
-  const auto = builtin ? true : fm.auto === true;
+  const enabled = fm.enabled !== false;
+  const auto = fm.auto === true;
 
   return {
     id: fm.id,
     label: fm.label,
+    description:
+      typeof fm.description === "string" && fm.description.trim()
+        ? fm.description.trim()
+        : null,
+    category:
+      typeof fm.category === "string" && fm.category.trim()
+        ? fm.category.trim()
+        : null,
+    sortOrder:
+      typeof fm.sort_order === "number" && Number.isFinite(fm.sort_order)
+        ? fm.sort_order
+        : null,
+    recommended: fm.recommended === true,
     filename: fm.filename,
     prompt: body,
     enabled,
@@ -203,8 +241,9 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
 
 /**
  * Load every prompt from `~/.meeting-notes/prompts/`.
- * Returns builtin prompts first, then the rest alphabetically by filename.
- * Self-heals by re-seeding the default summary if no builtin is present.
+ * Backfills any newly shipped default prompts that are missing locally
+ * without overwriting user-edited files. Returns builtin prompts first,
+ * then the rest alphabetically by filename.
  *
  * If `config` is provided and legacy prompts still exist in the vault,
  * they are migrated lazily on first load (idempotent).
@@ -227,6 +266,14 @@ export function loadAllPrompts(config?: AppConfig, logger?: Logger): ResolvedPro
 
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
+  }
+
+  const seededDefaults = seedAllDefaultPrompts(dir);
+  if (seededDefaults.length > 0) {
+    logger?.info("Seeded missing shipped prompt defaults", {
+      dir,
+      count: seededDefaults.length,
+    });
   }
 
   let files = fs
@@ -252,7 +299,8 @@ export function loadAllPrompts(config?: AppConfig, logger?: Logger): ResolvedPro
     prompts.push(prompt);
   }
 
-  // Self-heal: ensure at least one builtin exists.
+  // Self-heal: ensure at least one builtin exists even if the shipped
+  // defaults are unavailable or unreadable for some reason.
   const hasBuiltin = prompts.some((p) => p.builtin);
   if (!hasBuiltin) {
     logger?.warn("No builtin prompt found, re-seeding default summary", { dir });
@@ -263,11 +311,16 @@ export function loadAllPrompts(config?: AppConfig, logger?: Logger): ResolvedPro
     }
   }
 
-  // Sort: builtins first, then alphabetical by filename
+  // Sort: builtins first, then explicit sort order, then alphabetical by label.
   prompts.sort((a, b) => {
     if (a.builtin && !b.builtin) return -1;
     if (!a.builtin && b.builtin) return 1;
-    return a.filename.localeCompare(b.filename);
+    if (a.sortOrder != null && b.sortOrder != null && a.sortOrder !== b.sortOrder) {
+      return a.sortOrder - b.sortOrder;
+    }
+    if (a.sortOrder != null && b.sortOrder == null) return -1;
+    if (a.sortOrder == null && b.sortOrder != null) return 1;
+    return a.label.localeCompare(b.label);
   });
 
   return prompts;
@@ -408,16 +461,19 @@ async function callWithRetry(
   maxAttempts: number,
   logger: Logger,
   sectionId: string,
-  model?: string
+  model?: string,
+  signal?: AbortSignal
 ): Promise<{ content: string; tokensUsed?: number; attempts: number }> {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const response = await llmCall(systemPrompt, userMessage, model);
+      throwIfAborted(signal);
+      const response = await llmCall(systemPrompt, userMessage, model, signal);
       return { ...response, attempts: attempt };
     } catch (err) {
       lastError = err;
+      throwIfAborted(signal);
       const retryable = isRetryableError(err);
       const errorMsg = err instanceof Error ? err.message : String(err);
 
@@ -448,33 +504,24 @@ export async function runPipeline(
   logger: Logger,
   options: PipelineRunOptions = {}
 ): Promise<PipelineResult[]> {
-  const { onlyIds, skipComplete, onlyFailed, maxAttempts = 3, autoOnly, onProgress } = options;
+  const {
+    maxAttempts = 3,
+    autoOnly,
+    onProgress,
+    signal,
+    plannedPrompts,
+  } = options;
 
-  let allPrompts = loadAllPrompts(config, logger);
-
-  // Drop disabled prompts up front — they never run regardless of flags.
-  allPrompts = allPrompts.filter((p) => p.enabled);
-
-  // Apply filters
-  const { loadRunManifest } = await import("./run.js");
-  const manifest = loadRunManifest(runFolderPath);
-
-  if (onlyIds && onlyIds.length > 0) {
-    // Explicit beats implicit — onlyIds bypasses autoOnly.
-    allPrompts = allPrompts.filter((p) => onlyIds.includes(p.id));
-  } else if (autoOnly) {
-    // Only auto prompts. Builtins always counted as auto (loader enforces).
-    allPrompts = allPrompts.filter((p) => p.auto);
-  }
-
-  if (onlyFailed) {
-    allPrompts = allPrompts.filter((p) => manifest.sections[p.id]?.status === "failed");
-  } else if (skipComplete) {
-    allPrompts = allPrompts.filter((p) => manifest.sections[p.id]?.status !== "complete");
-  }
+  const allPrompts =
+    plannedPrompts ?? await planPipelineSteps(config, runFolderPath, logger, options);
 
   if (allPrompts.length === 0) {
-    logger.info("No sections to run after filtering", { onlyIds, skipComplete, onlyFailed, autoOnly });
+    logger.info("No sections to run after filtering", {
+      onlyIds: options.onlyIds,
+      skipComplete: options.skipComplete,
+      onlyFailed: options.onlyFailed,
+      autoOnly,
+    });
     return [];
   }
 
@@ -485,9 +532,10 @@ export async function runPipeline(
   });
 
   const userMessage = buildUserMessage(input);
+  const results: PipelineResult[] = [];
 
-  // Mark all as running
   for (const prompt of allPrompts) {
+    throwIfAborted(signal);
     updateSectionState(runFolderPath, prompt.id, {
       status: "running",
       filename: prompt.filename,
@@ -501,122 +549,136 @@ export async function runPipeline(
       filename: prompt.filename,
       model: prompt.model ?? undefined,
     });
+
+    const start = Date.now();
+    logger.info(`Starting section: ${prompt.id}`, { label: prompt.label });
+    const renderedPrompt = renderPromptTemplate(prompt.prompt, input);
+
+    try {
+      const response = await callWithRetry(
+        llmCall,
+        renderedPrompt,
+        userMessage,
+        maxAttempts,
+        logger,
+        prompt.id,
+        prompt.model ?? undefined,
+        signal
+      );
+      throwIfAborted(signal);
+      const latencyMs = Date.now() - start;
+
+      writeMarkdownFile(
+        path.join(runFolderPath, prompt.filename),
+        {
+          type: "meeting-output",
+          section_id: prompt.id,
+          label: prompt.label,
+          generated_at: new Date().toISOString(),
+          builtin: prompt.builtin,
+          tokens_used: response.tokensUsed,
+          attempts: response.attempts,
+        },
+        response.content
+      );
+
+      updateSectionState(runFolderPath, prompt.id, {
+        status: "complete",
+        filename: prompt.filename,
+        label: prompt.label,
+        builtin: prompt.builtin,
+        latency_ms: latencyMs,
+        tokens_used: response.tokensUsed,
+        completed_at: new Date().toISOString(),
+      });
+
+      logger.info(`Completed section: ${prompt.id}`, {
+        latencyMs,
+        tokensUsed: response.tokensUsed,
+        attempts: response.attempts,
+      });
+
+      onProgress?.({
+        type: "section-complete",
+        sectionId: prompt.id,
+        label: prompt.label,
+        filename: prompt.filename,
+        latencyMs,
+        tokensUsed: response.tokensUsed,
+      });
+
+      results.push({
+        sectionId: prompt.id,
+        filename: prompt.filename,
+        content: response.content,
+        success: true,
+        tokensUsed: response.tokensUsed,
+        latencyMs,
+        attempts: response.attempts,
+      });
+    } catch (err) {
+      throwIfAborted(signal);
+      const latencyMs = Date.now() - start;
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`Failed section: ${prompt.id}`, { error: errorMsg, latencyMs });
+
+      updateSectionState(runFolderPath, prompt.id, {
+        status: "failed",
+        filename: prompt.filename,
+        label: prompt.label,
+        builtin: prompt.builtin,
+        error: errorMsg,
+        latency_ms: latencyMs,
+      });
+
+      onProgress?.({
+        type: "section-failed",
+        sectionId: prompt.id,
+        label: prompt.label,
+        filename: prompt.filename,
+        error: errorMsg,
+        latencyMs,
+      });
+
+      results.push({
+        sectionId: prompt.id,
+        filename: prompt.filename,
+        content: "",
+        success: false,
+        error: errorMsg,
+        latencyMs,
+      });
+    }
   }
 
-  // Fire all calls in parallel
-  const results = await Promise.allSettled(
-    allPrompts.map(async (prompt): Promise<PipelineResult> => {
-      const start = Date.now();
-      logger.info(`Starting section: ${prompt.id}`, { label: prompt.label });
+  return results;
+}
 
-      // Render prompt template variables
-      const renderedPrompt = renderPromptTemplate(prompt.prompt, input);
+export async function planPipelineSteps(
+  config: AppConfig,
+  runFolderPath: string,
+  logger: Logger,
+  options: Pick<PipelineRunOptions, "onlyIds" | "skipComplete" | "onlyFailed" | "autoOnly"> = {}
+): Promise<ResolvedPrompt[]> {
+  const { onlyIds, skipComplete, onlyFailed, autoOnly } = options;
+  let allPrompts = loadAllPrompts(config, logger);
 
-      try {
-        const response = await callWithRetry(
-          llmCall,
-          renderedPrompt,
-          userMessage,
-          maxAttempts,
-          logger,
-          prompt.id,
-          prompt.model ?? undefined
-        );
-        const latencyMs = Date.now() - start;
+  const { loadRunManifest } = await import("./run.js");
+  const manifest = loadRunManifest(runFolderPath);
 
-        // Write output markdown file
-        writeMarkdownFile(
-          path.join(runFolderPath, prompt.filename),
-          {
-            type: "meeting-output",
-            section_id: prompt.id,
-            label: prompt.label,
-            generated_at: new Date().toISOString(),
-            builtin: prompt.builtin,
-            tokens_used: response.tokensUsed,
-            attempts: response.attempts,
-          },
-          response.content
-        );
+  if (onlyIds && onlyIds.length > 0) {
+    allPrompts = allPrompts.filter((p) => onlyIds.includes(p.id));
+  } else if (autoOnly) {
+    allPrompts = allPrompts.filter((p) => p.enabled && p.auto);
+  } else {
+    allPrompts = allPrompts.filter((p) => p.enabled);
+  }
 
-        // Update manifest section state
-        updateSectionState(runFolderPath, prompt.id, {
-          status: "complete",
-          filename: prompt.filename,
-          label: prompt.label,
-          builtin: prompt.builtin,
-          latency_ms: latencyMs,
-          tokens_used: response.tokensUsed,
-          completed_at: new Date().toISOString(),
-        });
+  if (onlyFailed) {
+    allPrompts = allPrompts.filter((p) => manifest.sections[p.id]?.status === "failed");
+  } else if (skipComplete) {
+    allPrompts = allPrompts.filter((p) => manifest.sections[p.id]?.status !== "complete");
+  }
 
-        logger.info(`Completed section: ${prompt.id}`, {
-          latencyMs,
-          tokensUsed: response.tokensUsed,
-          attempts: response.attempts,
-        });
-
-        onProgress?.({
-          type: "section-complete",
-          sectionId: prompt.id,
-          label: prompt.label,
-          filename: prompt.filename,
-          latencyMs,
-          tokensUsed: response.tokensUsed,
-        });
-
-        return {
-          sectionId: prompt.id,
-          filename: prompt.filename,
-          content: response.content,
-          success: true,
-          tokensUsed: response.tokensUsed,
-          latencyMs,
-          attempts: response.attempts,
-        };
-      } catch (err) {
-        const latencyMs = Date.now() - start;
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        logger.error(`Failed section: ${prompt.id}`, { error: errorMsg, latencyMs });
-
-        updateSectionState(runFolderPath, prompt.id, {
-          status: "failed",
-          filename: prompt.filename,
-          label: prompt.label,
-          builtin: prompt.builtin,
-          error: errorMsg,
-          latency_ms: latencyMs,
-        });
-
-        onProgress?.({
-          type: "section-failed",
-          sectionId: prompt.id,
-          label: prompt.label,
-          filename: prompt.filename,
-          error: errorMsg,
-          latencyMs,
-        });
-
-        return {
-          sectionId: prompt.id,
-          filename: prompt.filename,
-          content: "",
-          success: false,
-          error: errorMsg,
-          latencyMs,
-        };
-      }
-    })
-  );
-
-  return results.map((r, i) => {
-    if (r.status === "fulfilled") return r.value;
-    return {
-      sectionId: allPrompts[i]?.id ?? "unknown",
-      filename: "",
-      content: "",
-      success: false,
-      error: r.reason instanceof Error ? r.reason.message : String(r.reason),
-    };
-  });
+  return allPrompts;
 }

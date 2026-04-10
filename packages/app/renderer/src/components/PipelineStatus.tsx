@@ -1,104 +1,339 @@
-import { useEffect, useState } from "react";
-import type { PipelineProgressEvent } from "../../../shared/ipc";
-import { classifyModelClient } from "../constants";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Clock3,
+  X,
+} from "lucide-react";
+import type {
+  JobProgressStep,
+  JobStatus,
+  PipelineProgressEvent,
+} from "../../../shared/ipc";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
+import { Card, CardContent } from "./ui/card";
+import { Spinner } from "./ui/spinner";
 
-export type SectionState = "pending" | "running" | "complete" | "failed";
+export type SectionState = "queued" | "running" | "complete" | "failed" | "canceled";
 
 export interface SectionStatus {
   id: string;
   label: string;
   state: SectionState;
+  kind: "transcript" | "prompt";
+  filename?: string;
   latencyMs?: number;
   error?: string;
-  /** Wall-clock ms timestamp when this section last entered "running". */
   startedAt?: number;
-  /** Model id this section runs against — drives the local-vs-cloud chip. */
   model?: string;
 }
 
-export interface PipelineStatusProps {
+interface PipelineStatusProps {
   sections: SectionStatus[];
   title?: string;
+  description?: string;
+  status?: JobStatus | "processing";
+  queuePosition?: number;
+  currentLabel?: string;
+  showPreparingWhenEmpty?: boolean;
+  compact?: boolean;
+  action?: ReactNode;
 }
 
-export function PipelineStatus({ sections, title = "Pipeline" }: PipelineStatusProps) {
-  // Drive a 1 Hz repaint while *any* section is running so the elapsed
-  // counters move. The interval is torn down as soon as nothing is
-  // running anymore — no wasted work for stale meetings.
-  const anyRunning = sections.some((s) => s.state === "running");
+export function PipelineStatus({
+  sections,
+  title = "Processing",
+  description,
+  status = "processing",
+  queuePosition,
+  currentLabel,
+  showPreparingWhenEmpty = false,
+  compact = false,
+  action,
+}: PipelineStatusProps) {
+  const anyRunning = sections.some((section) => section.state === "running");
+  const visibleSections = useMemo(() => {
+    if (sections.length > 0 || !showPreparingWhenEmpty) return sections;
+    return [
+      {
+        id: "__preparing__",
+        label: "Preparing processing pipeline",
+        state: "running" as const,
+        kind: "prompt" as const,
+      },
+    ];
+  }, [sections, showPreparingWhenEmpty]);
+  const completed = visibleSections.filter((section) => section.state === "complete").length;
+  const failed = visibleSections.filter((section) => section.state === "failed").length;
+  const total = visibleSections.length;
+  const effectiveStatus = resolvePipelineStatus(status, sections);
+  const displaySections = useMemo(() => {
+    if (effectiveStatus !== "canceled") return visibleSections;
+    return visibleSections.map((section) =>
+      section.state === "running" ? { ...section, state: "canceled" as const } : section
+    );
+  }, [effectiveStatus, visibleSections]);
+  const finished =
+    effectiveStatus === "completed" || effectiveStatus === "failed" || effectiveStatus === "canceled";
+  const [expanded, setExpanded] = useState(!finished);
+
+  useEffect(() => {
+    setExpanded(!finished);
+  }, [finished, title]);
+
+  const summary = buildSummary({
+    status: effectiveStatus,
+    completed,
+    failed,
+    total,
+    queuePosition,
+    currentLabel,
+  });
+
   const [, setTick] = useState(0);
   useEffect(() => {
     if (!anyRunning) return;
-    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    const id = window.setInterval(() => setTick((value) => value + 1), 1000);
     return () => clearInterval(id);
   }, [anyRunning]);
 
   return (
-    <div className="card">
-      <div className="card-header">
-        <span>{title}</span>
-      </div>
-      <div className="pipeline-list">
-        {sections.length === 0 && (
-          <div className="muted">No pipeline runs yet.</div>
-        )}
-        {sections.map((s) => {
-          const elapsedSec =
-            s.state === "running" && s.startedAt
-              ? Math.floor((Date.now() - s.startedAt) / 1000)
-              : null;
-          const isLocal = s.model ? classifyModelClient(s.model) === "ollama" : false;
-          return (
-            <div key={s.id} className="pipeline-row">
-              <span>{s.label}</span>
-              <span className={`state ${s.state}`} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {s.state === "running" && <span className="spinner" aria-hidden="true" />}
-                {s.state}
-                {s.state === "running" && elapsedSec != null && (
-                  <span className="muted" style={{ fontVariantNumeric: "tabular-nums" }}>
-                    {elapsedSec}s
-                  </span>
-                )}
-                {s.state === "running" && isLocal && elapsedSec != null && elapsedSec > 20 && (
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    Running locally — this can take a few minutes
-                  </span>
-                )}
-                {s.latencyMs != null && s.state === "complete"
-                  ? ` · ${(s.latencyMs / 1000).toFixed(1)}s`
-                  : ""}
-              </span>
+    <Card className={cn(
+      "border-[var(--border-default)] bg-white shadow-none",
+      compact ? "rounded-xl" : "rounded-2xl"
+    )}>
+      <CardContent className={cn("space-y-3", compact ? "p-4" : "p-5")}>
+        <div className="flex items-start gap-3">
+          <div className="flex h-5 w-5 shrink-0 items-center justify-center pt-0.5">
+            <StatusIcon status={effectiveStatus} />
+          </div>
+
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 space-y-1">
+                <div className={cn(
+                  "font-semibold text-[var(--text-primary)]",
+                  compact ? "text-sm" : "text-base"
+                )}>
+                  {title}
+                </div>
+                <div className="text-sm text-[var(--text-secondary)]">
+                  {description ?? summary}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {action}
+                {finished || visibleSections.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setExpanded((value) => !value)}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  >
+                    {expanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                    {expanded ? "Hide details" : "Show details"}
+                  </button>
+                ) : null}
+              </div>
             </div>
-          );
-        })}
+
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
+              <span>{statusLabel(effectiveStatus)}</span>
+              {total > 0 ? <span>{completed}/{total} complete</span> : null}
+              {failed > 0 ? <span>{failed} failed</span> : null}
+              {currentLabel && !finished ? <span>Current: {currentLabel}</span> : null}
+            </div>
+
+            <div className="h-px bg-[var(--border-subtle)]" />
+
+            {expanded ? (
+              <div className="space-y-2">
+                {displaySections.map((section) => (
+                  <StepRow key={section.id} section={section} />
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function StepRow({ section }: { section: SectionStatus }) {
+  const elapsedSec =
+    section.state === "running" && section.startedAt
+      ? Math.floor((Date.now() - section.startedAt) / 1000)
+      : null;
+
+  return (
+    <div className="flex items-start gap-3 py-1">
+      <div className="flex h-5 w-5 shrink-0 items-center justify-center">
+        <StepIcon state={section.state} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm text-[var(--text-primary)]">{section.label}</div>
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
+          <span>{section.kind === "transcript" ? "Transcript" : "Prompt"}</span>
+          {section.state === "running" && elapsedSec != null ? (
+            <span>{elapsedSec}s elapsed</span>
+          ) : null}
+          {section.state === "canceled" ? <span>Canceled</span> : null}
+          {section.state === "complete" && section.latencyMs != null ? (
+            <span>{(section.latencyMs / 1000).toFixed(1)}s</span>
+          ) : null}
+          {section.filename ? <span>{section.filename}</span> : null}
+        </div>
+        {section.error ? (
+          <div className="mt-1 text-xs text-[var(--error)]">{section.error}</div>
+        ) : null}
       </div>
     </div>
   );
 }
 
-/**
- * Fold a stream of PipelineProgressEvents into a SectionStatus[] in a
- * useReducer-friendly way. Returned as a standalone helper so multiple
- * views (record + reprocess modal) can share the same logic.
- */
+export function ProcessingStatusInline({
+  status,
+  currentLabel,
+}: {
+  status: JobStatus | "processing";
+  currentLabel?: string;
+}) {
+  const resolvedStatus = resolvePipelineStatus(status);
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      {resolvedStatus === "processing" || resolvedStatus === "running" ? <Spinner className="h-3.5 w-3.5" /> : null}
+      <span className="truncate text-xs text-[var(--text-secondary)]">
+        {currentLabel ?? statusLabel(resolvedStatus)}
+      </span>
+    </div>
+  );
+}
+
+export function resolvePipelineStatus(
+  status: JobStatus | "processing",
+  sections: SectionStatus[] = []
+): JobStatus | "processing" {
+  if (status !== "processing" && status !== "running") {
+    return status;
+  }
+  if (sections.some((section) => section.state === "running")) {
+    return status;
+  }
+  if (sections.length === 0) {
+    return status;
+  }
+  const terminalSections = sections.filter(
+    (section) => section.state === "complete" || section.state === "failed"
+  );
+  if (terminalSections.length !== sections.length) {
+    return status;
+  }
+  return sections.some((section) => section.state === "failed") ? "failed" : "completed";
+}
+
+function StatusIcon({ status }: { status: JobStatus | "processing" }) {
+  if (status === "completed") return <Check className="h-4 w-4 text-[var(--text-primary)]" />;
+  if (status === "failed") return <AlertCircle className="h-4 w-4 text-[var(--error)]" />;
+  if (status === "queued") return <Clock3 className="h-4 w-4 text-[var(--text-secondary)]" />;
+  if (status === "canceled") return <X className="h-4 w-4 text-[var(--text-secondary)]" />;
+  return <Spinner className="h-4 w-4" />;
+}
+
+function StepIcon({ state }: { state: SectionState }) {
+  if (state === "complete") return <Check className="h-4 w-4 text-[var(--text-secondary)]" />;
+  if (state === "failed") return <AlertCircle className="h-4 w-4 text-[var(--error)]" />;
+  if (state === "canceled") return <X className="h-4 w-4 text-[var(--text-secondary)]" />;
+  if (state === "running") return <Spinner className="h-4 w-4" />;
+  return <Circle className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />;
+}
+
+function buildSummary({
+  status,
+  completed,
+  failed,
+  total,
+  queuePosition,
+  currentLabel,
+}: {
+  status: JobStatus | "processing";
+  completed: number;
+  failed: number;
+  total: number;
+  queuePosition?: number;
+  currentLabel?: string;
+}) {
+  if (status === "queued") {
+    return queuePosition ? `Queued · position ${queuePosition}` : "Queued";
+  }
+  if (status === "failed") {
+    return failed > 0 ? `Failed after ${completed}/${total} completed` : "Failed";
+  }
+  if (status === "completed") {
+    return `${completed}/${total} steps completed`;
+  }
+  if (currentLabel) {
+    return currentLabel;
+  }
+  if (total > 0) {
+    return `${completed}/${total} steps completed`;
+  }
+  return "Preparing processing pipeline";
+}
+
+function statusLabel(status: JobStatus | "processing") {
+  if (status === "running") return "Processing";
+  if (status === "completed") return "Completed";
+  if (status === "failed") return "Failed";
+  if (status === "queued") return "Queued";
+  if (status === "canceled") return "Canceled";
+  return "Processing";
+}
+
+export function sectionsFromJobSteps(steps?: JobProgressStep[]): SectionStatus[] {
+  return (steps ?? []).map((step) => ({
+    id: step.sectionId,
+    label: step.label,
+    state: step.state,
+    kind: step.kind,
+    filename: step.filename,
+    latencyMs: step.latencyMs,
+    error: step.error,
+    startedAt: step.startedAt,
+    model: step.model,
+  }));
+}
+
 export function applyProgress(
   prev: SectionStatus[],
   event: PipelineProgressEvent
 ): SectionStatus[] {
   switch (event.type) {
+    case "run-planned":
+      return event.steps.map((step) => ({
+        id: step.sectionId,
+        label: step.label,
+        state: "queued",
+        kind: step.kind,
+        filename: step.filename,
+        model: step.model,
+      }));
     case "section-start": {
       const startedAt = Date.now();
-      const existing = prev.find((s) => s.id === event.sectionId);
+      const existing = prev.find((section) => section.id === event.sectionId);
       if (existing) {
-        return prev.map((s) =>
-          s.id === event.sectionId
+        return prev.map((section) =>
+          section.id === event.sectionId
             ? {
-                ...s,
-                state: "running" as SectionState,
+                ...section,
+                state: "running",
                 startedAt,
-                model: event.model,
+                model: event.model ?? section.model,
               }
-            : s
+            : section
         );
       }
       return [
@@ -109,27 +344,70 @@ export function applyProgress(
           state: "running",
           startedAt,
           model: event.model,
+          filename: event.filename,
+          kind: event.sectionId === "__transcript__" ? "transcript" : "prompt",
         },
       ];
     }
     case "section-complete":
-      return prev.map((s) =>
-        s.id === event.sectionId
-          ? { ...s, state: "complete" as SectionState, latencyMs: event.latencyMs }
-          : s
-      );
+      return prev.some((section) => section.id === event.sectionId)
+        ? prev.map((section) =>
+            section.id === event.sectionId
+              ? { ...section, state: "complete", latencyMs: event.latencyMs }
+              : section
+          )
+        : [
+            ...prev,
+            {
+              id: event.sectionId,
+              label: event.label,
+              state: "complete",
+              kind: event.sectionId === "__transcript__" ? "transcript" : "prompt",
+              filename: event.filename,
+              latencyMs: event.latencyMs,
+            },
+          ];
     case "section-failed":
-      return prev.map((s) =>
-        s.id === event.sectionId
-          ? {
-              ...s,
-              state: "failed" as SectionState,
+      return prev.some((section) => section.id === event.sectionId)
+        ? prev.map((section) =>
+            section.id === event.sectionId
+              ? {
+                  ...section,
+                  state: "failed",
+                  latencyMs: event.latencyMs,
+                  error: event.error,
+                }
+              : section
+          )
+        : [
+            ...prev,
+            {
+              id: event.sectionId,
+              label: event.label,
+              state: "failed",
+              kind: event.sectionId === "__transcript__" ? "transcript" : "prompt",
+              filename: event.filename,
               latencyMs: event.latencyMs,
               error: event.error,
-            }
-          : s
-      );
+            },
+          ];
     default:
       return prev;
   }
+}
+
+export function CancelJobButton({
+  jobId,
+  disabled,
+  onCancel,
+}: {
+  jobId: string;
+  disabled?: boolean;
+  onCancel: (jobId: string) => void | Promise<void>;
+}) {
+  return (
+    <Button variant="secondary" size="sm" onClick={() => void onCancel(jobId)} disabled={disabled}>
+      Cancel
+    </Button>
+  );
 }

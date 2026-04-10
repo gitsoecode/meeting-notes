@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Button } from "./ui/button";
 
 interface ShortcutRecorderProps {
   value: string;
@@ -77,29 +78,32 @@ export function ShortcutRecorder({ value, onChange }: ShortcutRecorderProps) {
   }, [recording, onChange]);
 
   return (
-    <div className="row" style={{ alignItems: "center" }}>
-      <button
+    <div className="flex flex-wrap items-center gap-3">
+      <Button
         ref={buttonRef}
         type="button"
         onClick={() => {
           setRecording((r) => !r);
           setHint(null);
         }}
-        className={recording ? "primary" : ""}
-        style={{ minWidth: 200, fontFamily: "var(--font-mono)" }}
+        variant={recording ? "default" : "secondary"}
+        className="min-w-[220px] font-mono"
       >
         {recording ? "Press keys…" : value || "(none)"}
-      </button>
+      </Button>
       {value && !recording && (
-        <button
+        <Button
           type="button"
           onClick={() => onChange("")}
           title="Clear shortcut"
+          variant="ghost"
         >
           Clear
-        </button>
+        </Button>
       )}
-      {hint && <span className="muted tone-warning">{hint}</span>}
+      {hint ? (
+        <span className="text-sm text-[var(--warning-text)]">{hint}</span>
+      ) : null}
     </div>
   );
 }

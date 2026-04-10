@@ -22,20 +22,26 @@ function computeDurationMinutes(runFolder: string, endedIso: string): number | n
   }
 }
 import {
+  planPipelineSteps,
   runPipeline,
+  type LlmCallFn,
   type PipelineInput,
   type PipelineProgressEvent,
+  type PipelinePlannedStep,
 } from "./pipeline.js";
 import { getSecret, requireSecret } from "./secrets.js";
 import { ClaudeProvider } from "../adapters/llm/claude.js";
+import { OpenAIProvider } from "../adapters/llm/openai.js";
 import { OllamaProvider } from "../adapters/llm/ollama.js";
 import { classifyModel } from "../adapters/llm/resolve.js";
+import { normalizeLocalModelId } from "./setup-llm.js";
 import type { LlmProvider } from "../adapters/llm/provider.js";
 import type { AsrProvider, TranscriptResult } from "../adapters/asr/provider.js";
 import { normalizeAudio, asrAudioExtension, type AsrAudioFormat } from "./audio.js";
 import { formatTranscriptMarkdown, buildTranscriptForLlm, buildSpeakerExcerpts } from "./transcript.js";
 import { writeMarkdownFile } from "./markdown.js";
 import type { Logger } from "../logging/logger.js";
+import { throwIfAborted } from "./abort.js";
 
 export async function createAsrProvider(config: AppConfig): Promise<AsrProvider> {
   if (config.asr_provider === "openai") {
@@ -65,10 +71,12 @@ interface TranscribeAudioOptions {
   audioPath: string;
   speaker?: "me" | "others" | "unknown";
   logger: Logger;
+  signal?: AbortSignal;
 }
 
 export async function transcribeAudio(opts: TranscribeAudioOptions): Promise<TranscriptResult> {
   const { config, runFolder, audioPath, speaker = "unknown", logger } = opts;
+  throwIfAborted(opts.signal);
 
   const asr = await createAsrProvider(config);
 
@@ -97,7 +105,8 @@ export async function transcribeAudio(opts: TranscribeAudioOptions): Promise<Tra
     });
   }
 
-  const result = await asr.transcribe(audioForAsr, speaker);
+  const result = await asr.transcribe(audioForAsr, speaker, { signal: opts.signal });
+  throwIfAborted(opts.signal);
   logger.info("Transcription complete", {
     provider: result.provider,
     segments: result.segments.length,
@@ -135,34 +144,77 @@ interface ProcessRunOptions {
   autoOnly?: boolean;
   /** Live progress callback forwarded to the pipeline. */
   onProgress?: (event: PipelineProgressEvent) => void;
+  signal?: AbortSignal;
 }
 
 export async function processRun(opts: ProcessRunOptions): Promise<{
   succeeded: string[];
   failed: string[];
 }> {
-  const { config, runFolder, title, date, audioFiles, logger, autoOnly = true, onProgress } = opts;
+  const { config, runFolder, title, date, audioFiles, logger, autoOnly = true, onProgress, signal } = opts;
+  const transcriptStep: PipelinePlannedStep = {
+    sectionId: "__transcript__",
+    label: "Build transcript",
+    filename: "transcript.md",
+    kind: "transcript",
+  };
 
   updateRunStatus(runFolder, "processing");
+  throwIfAborted(signal);
+  const plannedPrompts = await planPipelineSteps(config, runFolder, logger, { autoOnly });
+  onProgress?.({
+    type: "run-planned",
+    steps: [
+      transcriptStep,
+      ...plannedPrompts.map((prompt) => ({
+        sectionId: prompt.id,
+        label: prompt.label,
+        filename: prompt.filename,
+        model: prompt.model ?? undefined,
+        kind: "prompt" as const,
+      })),
+    ],
+  });
+  onProgress?.({
+    type: "section-start",
+    sectionId: transcriptStep.sectionId,
+    label: transcriptStep.label,
+    filename: transcriptStep.filename,
+  });
 
   // --- Transcription (in parallel for multiple sources) ---
   let transcriptResult: TranscriptResult;
+  const transcriptStartedAt = Date.now();
   try {
-    const transcripts = await Promise.all(
-      audioFiles.map((af) =>
-        transcribeAudio({
+    const transcripts = [];
+    for (const af of audioFiles) {
+      throwIfAborted(signal);
+      transcripts.push(
+        await transcribeAudio({
           config,
           runFolder,
           audioPath: af.path,
           speaker: af.speaker,
           logger,
+          signal,
         })
-      )
-    );
+      );
+    }
     transcriptResult = transcripts.length === 1 ? transcripts[0] : mergeTranscripts(transcripts);
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      throw err;
+    }
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("Transcription failed", { error: msg });
+    onProgress?.({
+      type: "section-failed",
+      sectionId: transcriptStep.sectionId,
+      label: transcriptStep.label,
+      filename: transcriptStep.filename,
+      error: msg,
+      latencyMs: Date.now() - transcriptStartedAt,
+    });
     {
       const endedIso = new Date().toISOString();
       updateRunStatus(runFolder, "error", {
@@ -185,6 +237,13 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     },
     formatTranscriptMarkdown(transcriptResult)
   );
+  onProgress?.({
+    type: "section-complete",
+    sectionId: transcriptStep.sectionId,
+    label: transcriptStep.label,
+    filename: transcriptStep.filename,
+    latencyMs: Date.now() - transcriptStartedAt,
+  });
 
   // --- LLM Pipeline ---
   // Build a provider factory that dispatches per-call based on the model id.
@@ -193,13 +252,16 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   // a Claude model is actually selected somewhere — fully-local users
   // should never be told to set a key they don't need.
   const defaultModel =
-    config.llm_provider === "ollama" ? config.ollama.model : config.claude.model;
+    config.llm_provider === "ollama" ? config.ollama.model : (config.llm_provider === "openai" ? config.openai.model : config.claude.model);
   const claudeKey = await getSecret("claude");
+  const openaiKey = await getSecret("openai");
   const claudeCache: Record<string, ClaudeProvider> = {};
+  const openaiCache: Record<string, OpenAIProvider> = {};
   const ollamaCache: Record<string, OllamaProvider> = {};
   const llmFactory = (model?: string): LlmProvider => {
     const id = model && model.trim() ? model : defaultModel;
-    if (classifyModel(id) === "claude") {
+    const kind = classifyModel(id);
+    if (kind === "claude") {
       if (!claudeKey) {
         throw new Error(
           `Prompt requested Claude model "${id}" but no Anthropic API key is set. ` +
@@ -208,16 +270,40 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       }
       return (claudeCache[id] ??= new ClaudeProvider(claudeKey, id));
     }
-    return (ollamaCache[id] ??= new OllamaProvider(config.ollama.base_url, id));
+    if (kind === "openai") {
+      if (!openaiKey) {
+        throw new Error(
+          `Prompt requested OpenAI model "${id}" but no OpenAI API key is set. ` +
+            `Add one in Settings → LLM, or change the prompt's model to a local one.`
+        );
+      }
+      return (openaiCache[id] ??= new OpenAIProvider(openaiKey, id));
+    }
+    const normalizedId = normalizeLocalModelId(id) || id;
+    return (ollamaCache[normalizedId] ??= new OllamaProvider(config.ollama.base_url, normalizedId));
   };
 
-  // If the *default* provider is Claude and no key exists, skip the whole
+  // If the *default* provider is Claude/OpenAI and no key exists, skip the whole
   // pipeline with a clear log line — same behavior as before, but only
   // when local models aren't going to take over.
   if (config.llm_provider === "claude" && !claudeKey) {
     logger.warn(
       "LLM pipeline skipped — no Anthropic API key in macOS Keychain " +
         "(run 'meeting-notes set-key claude' or switch llm_provider to 'ollama')"
+    );
+    {
+      const endedIso = new Date().toISOString();
+      updateRunStatus(runFolder, "complete", {
+        ended: endedIso,
+        duration_minutes: computeDurationMinutes(runFolder, endedIso),
+      });
+    }
+    return { succeeded: [], failed: [] };
+  }
+  if (config.llm_provider === "openai" && !openaiKey) {
+    logger.warn(
+      "LLM pipeline skipped — no OpenAI API key in macOS Keychain " +
+        "(run 'meeting-notes set-key openai' or switch llm_provider to 'ollama')"
     );
     {
       const endedIso = new Date().toISOString();
@@ -241,14 +327,20 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     meExcerpts: buildSpeakerExcerpts(transcriptResult, "me"),
     othersExcerpts: buildSpeakerExcerpts(transcriptResult, "others"),
   };
+  const llmCall: LlmCallFn = (
+    systemPrompt: string,
+    userMessage: string,
+    model?: string,
+    pipelineSignal?: AbortSignal
+  ) => llmFactory(model).call(systemPrompt, userMessage, model, { signal: pipelineSignal });
 
   const results = await runPipeline(
     config,
     runFolder,
     input,
-    (sys, usr, model) => llmFactory(model).call(sys, usr, model),
+    llmCall,
     logger,
-    { autoOnly, onProgress }
+    { autoOnly, onProgress, signal, plannedPrompts }
   );
 
   const succeeded = results.filter((r) => r.success).map((r) => r.sectionId);

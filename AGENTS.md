@@ -30,6 +30,7 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 - Build and regression-check with `npm test`.
 - Use `docs/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.
 - Prefer small shared helpers over growing `packages/app/main/ipc.ts` with more business logic.
+- For renderer UI work, prefer `shadcn/ui` primitives and composition patterns as the default approach. Favor extending the shared component layer under `packages/app/renderer/src/components/ui` over introducing new bespoke controls or one-off styling patterns.
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:
   `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`.
 

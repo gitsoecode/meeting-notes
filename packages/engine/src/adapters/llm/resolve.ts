@@ -11,8 +11,10 @@
  * wrong dropdown, the API call will fail with a clear error rather
  * than silently routing to the wrong place.
  */
-export type LlmKind = "claude" | "ollama";
+export type LlmKind = "claude" | "openai" | "ollama";
 
 export function classifyModel(id: string): LlmKind {
-  return id.startsWith("claude-") ? "claude" : "ollama";
+  if (id.startsWith("claude-")) return "claude";
+  if (id.startsWith("gpt-") || id.startsWith("o1-")) return "openai";
+  return "ollama";
 }

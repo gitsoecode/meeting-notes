@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Crepe } from "@milkdown/crepe";
+import { cn } from "@/lib/utils";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
@@ -105,5 +106,5 @@ export function MarkdownEditor({
     crepeRef.current?.setReadonly(readOnly);
   }, [readOnly]);
 
-  return <div ref={rootRef} className={className ?? "markdown-editor"} />;
+  return <div ref={rootRef} className={cn("markdown-editor", className)} />;
 }

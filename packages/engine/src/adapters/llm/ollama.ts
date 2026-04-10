@@ -1,4 +1,4 @@
-import type { LlmProvider, LlmResponse } from "./provider.js";
+import type { LlmProvider, LlmResponse, LlmCallOptions } from "./provider.js";
 
 export interface OllamaTag {
   name: string;
@@ -11,6 +11,21 @@ interface OllamaChatResponse {
   eval_count?: number;
   prompt_eval_count?: number;
   done: boolean;
+}
+
+export interface RunningOllamaModel {
+  model: string;
+  name?: string;
+  size?: number;
+  size_vram?: number;
+  expires_at?: string;
+  details?: {
+    parameter_size?: string;
+    quantization_level?: string;
+    family?: string;
+    families?: string[];
+    format?: string;
+  };
 }
 
 interface OllamaPullChunk {
@@ -41,12 +56,14 @@ export class OllamaProvider implements LlmProvider {
   async call(
     systemPrompt: string,
     userMessage: string,
-    modelOverride?: string
+    modelOverride?: string,
+    options?: LlmCallOptions
   ): Promise<LlmResponse> {
     const model = modelOverride && modelOverride.trim() ? modelOverride : this.model;
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: { "content-type": "application/json" },
+      signal: options?.signal,
       body: JSON.stringify({
         model,
         stream: false,
@@ -87,6 +104,15 @@ export async function listOllamaModels(
   const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/tags`);
   if (!res.ok) throw new Error(`Ollama /api/tags ${res.status}`);
   const data = (await res.json()) as { models?: OllamaTag[] };
+  return data.models ?? [];
+}
+
+export async function listRunningOllamaModels(
+  baseUrl: string = DEFAULT_BASE_URL
+): Promise<RunningOllamaModel[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/api/ps`);
+  if (!res.ok) throw new Error(`Ollama /api/ps ${res.status}`);
+  const data = (await res.json()) as { models?: RunningOllamaModel[] };
   return data.models ?? [];
 }
 

@@ -12,6 +12,14 @@ export interface TranscriptResult {
   durationMs: number;
 }
 
+export interface AsrCallOptions {
+  signal?: AbortSignal;
+}
+
 export interface AsrProvider {
-  transcribe(audioPath: string, speaker?: "me" | "others" | "unknown"): Promise<TranscriptResult>;
+  transcribe(
+    audioPath: string,
+    speaker?: "me" | "others" | "unknown",
+    options?: AsrCallOptions
+  ): Promise<TranscriptResult>;
 }

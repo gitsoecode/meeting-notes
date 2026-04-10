@@ -10,6 +10,47 @@ export interface RecordingStatus {
   system_captured?: boolean;
 }
 
+export type AppActionEvent =
+  | { type: "open-new-meeting"; source: "shortcut" | "tray" }
+  | { type: "toggle-recording"; source: "shortcut" | "tray" };
+
+export type AppLogLevel = "debug" | "info" | "warn" | "error";
+
+export interface AppLogEntry {
+  id: string;
+  timestamp: string;
+  level: AppLogLevel;
+  component: string;
+  message: string;
+  data?: Record<string, unknown>;
+  jobId?: string;
+  runFolder?: string;
+  processType?: string;
+  pid?: number;
+  stack?: string;
+  detail?: string;
+}
+
+export interface AppLogQuery {
+  limit?: number;
+}
+
+export interface ActivityProcess {
+  id: string;
+  type: string;
+  label: string;
+  status: "starting" | "running" | "exited" | "failed";
+  pid?: number;
+  command?: string;
+  startedAt: string;
+  endedAt?: string;
+  exitCode?: number | null;
+  signal?: string | null;
+  jobId?: string;
+  runFolder?: string;
+  error?: string;
+}
+
 export interface RunSummary {
   run_id: string;
   title: string;
@@ -25,14 +66,36 @@ export interface RunSummary {
   section_ids: string[];
 }
 
+export interface RunSectionState {
+  status: "pending" | "running" | "complete" | "failed";
+  filename: string;
+  label?: string;
+  error?: string;
+}
+
+export interface RunManifest {
+  run_id: string;
+  title: string;
+  status: string;
+  sections: Record<string, RunSectionState>;
+}
+
 export interface RunDetail extends RunSummary {
-  manifest: unknown; // RunManifest from engine
-  files: Array<{ name: string; size: number }>;
+  manifest: RunManifest;
+  files: Array<{ name: string; size: number; kind: "document" | "log" | "media" }>;
+}
+
+export interface DownloadMediaResult {
+  canceled: boolean;
 }
 
 export interface PromptRow {
   id: string;
   label: string;
+  description: string | null;
+  category: string | null;
+  sort_order: number | null;
+  recommended: boolean;
   filename: string;
   enabled: boolean;
   auto: boolean;
@@ -46,6 +109,15 @@ export interface PromptRow {
 export interface StartRecordingRequest {
   title: string;
   description?: string | null;
+}
+
+export interface StopRecordingRequest {
+  mode?: "process" | "delete";
+}
+
+export interface StopRecordingResult {
+  run_folder?: string;
+  deleted?: boolean;
 }
 
 export interface UpdateMetaRequest {
@@ -77,7 +149,20 @@ export interface BulkReprocessResult extends ReprocessResult {
   error?: string;
 }
 
+export interface PipelinePlannedStep {
+  sectionId: string;
+  label: string;
+  filename: string;
+  model?: string;
+  kind: "transcript" | "prompt";
+}
+
 export type PipelineProgressEvent =
+  | {
+      type: "run-planned";
+      runFolder: string;
+      steps: PipelinePlannedStep[];
+    }
   | {
       type: "section-start";
       runFolder: string;
@@ -116,6 +201,71 @@ export type PipelineProgressEvent =
       runFolder: string;
       error: string;
     };
+
+export type JobKind =
+  | "process-recording"
+  | "process-import"
+  | "reprocess-run"
+  | "run-prompt";
+
+export type JobStatus = "queued" | "running" | "completed" | "failed" | "canceled";
+
+export type JobStepState = "queued" | "running" | "complete" | "failed";
+
+export interface JobProgressStep extends PipelinePlannedStep {
+  state: JobStepState;
+  latencyMs?: number;
+  error?: string;
+  startedAt?: number;
+}
+
+export interface JobProgress {
+  completedSections: number;
+  failedSections: number;
+  totalSections: number;
+  currentSectionLabel?: string;
+  steps: JobProgressStep[];
+}
+
+export interface JobSummary {
+  id: string;
+  kind: JobKind;
+  status: JobStatus;
+  title: string;
+  subtitle: string;
+  createdAt: string;
+  startedAt?: string;
+  endedAt?: string;
+  cancelable: boolean;
+  queuePosition?: number;
+  runFolder?: string;
+  promptIds?: string[];
+  provider?: string;
+  model?: string;
+  progress: JobProgress;
+  error?: string;
+}
+
+export interface OllamaRuntimeModelDTO {
+  model: string;
+  name?: string;
+  size?: number;
+  size_vram?: number;
+  expires_at?: string;
+  details?: {
+    parameter_size?: string;
+    quantization_level?: string;
+    family?: string;
+    format?: string;
+  };
+}
+
+export interface OllamaRuntimeDTO {
+  available: boolean;
+  source?: "system-running" | "system-spawned" | "bundled-spawned";
+  models: OllamaRuntimeModelDTO[];
+  error?: string;
+}
 
 export interface AudioDevice {
   name: string;
@@ -178,6 +328,11 @@ export interface DetectedVault {
   name: string;
 }
 
+export interface PickedMediaFile {
+  token: string;
+  name: string;
+}
+
 export interface AppConfigDTO {
   data_path: string;
   obsidian_integration: {
@@ -186,7 +341,7 @@ export interface AppConfigDTO {
     vault_path?: string;
   };
   asr_provider: "whisper-local" | "openai" | "parakeet-mlx";
-  llm_provider: "claude" | "ollama";
+  llm_provider: "claude" | "openai" | "ollama";
   whisper_local: {
     binary_path: string;
     model_path: string;
@@ -196,6 +351,9 @@ export interface AppConfigDTO {
     model: string;
   };
   claude: {
+    model: string;
+  };
+  openai: {
     model: string;
   };
   ollama: {
@@ -219,7 +377,7 @@ export interface InitConfigRequest {
     vault_path?: string;
   };
   asr_provider: AppConfigDTO["asr_provider"];
-  /** Defaults to "claude". When "ollama", we won't require an Anthropic key. */
+  /** Defaults to "claude". */
   llm_provider?: AppConfigDTO["llm_provider"];
   /** Required when llm_provider === "ollama". Ollama tag (e.g. "qwen2.5:7b"). */
   ollama_model?: string;
@@ -243,13 +401,13 @@ export interface MeetingNotesApi {
     setObsidianVault: (vaultPath: string) => Promise<void>;
     openDataDirectory: () => Promise<void>;
     pickDirectory: (opts?: { defaultPath?: string }) => Promise<string | null>;
-    pickAudioFile: () => Promise<string | null>;
+    pickMediaFile: () => Promise<PickedMediaFile | null>;
   };
   // Recording
   recording: {
     getStatus: () => Promise<RecordingStatus>;
     start: (req: StartRecordingRequest) => Promise<{ run_folder: string; run_id: string }>;
-    stop: () => Promise<{ run_folder: string } | null>;
+    stop: (req?: StopRecordingRequest) => Promise<StopRecordingResult | null>;
     listAudioDevices: () => Promise<AudioDevice[]>;
   };
   // Runs
@@ -257,10 +415,15 @@ export interface MeetingNotesApi {
     list: () => Promise<RunSummary[]>;
     get: (runFolder: string) => Promise<RunDetail>;
     readDocument: (runFolder: string, fileName: string) => Promise<string>;
+    getMediaSource: (runFolder: string, fileName: string) => Promise<string>;
+    downloadMedia: (runFolder: string, fileName: string) => Promise<DownloadMediaResult>;
+    deleteMedia: (runFolder: string, fileName: string) => Promise<void>;
     writeNotes: (runFolder: string, content: string) => Promise<void>;
+    startReprocess: (req: ReprocessRequest) => Promise<void>;
     reprocess: (req: ReprocessRequest) => Promise<ReprocessResult>;
     bulkReprocess: (req: BulkReprocessRequest) => Promise<BulkReprocessResult[]>;
-    processAudio: (audioPath: string, title: string) => Promise<{ run_folder: string }>;
+    processMedia: (mediaToken: string, title: string) => Promise<{ run_folder: string }>;
+    processDroppedMedia: (file: unknown, title: string) => Promise<{ run_folder: string }>;
     openInObsidian: (runFolder: string, fileName: string) => Promise<void>;
     openInFinder: (runFolder: string) => Promise<void>;
     deleteRun: (runFolder: string) => Promise<void>;
@@ -275,7 +438,7 @@ export interface MeetingNotesApi {
     setAuto: (id: string, auto: boolean) => Promise<void>;
     resetToDefault: (id?: string) => Promise<void>;
     getDir: () => Promise<string>;
-    openInFinder: () => Promise<void>;
+    openInFinder: (promptId?: string) => Promise<void>;
   };
   // Secrets
   secrets: {
@@ -294,6 +457,12 @@ export interface MeetingNotesApi {
     listInstalled: () => Promise<string[]>;
     /** Delete an installed model. */
     remove: (model: string) => Promise<void>;
+    runtime: () => Promise<OllamaRuntimeDTO>;
+  };
+  jobs: {
+    list: () => Promise<JobSummary[]>;
+    cancel: (jobId: string) => Promise<void>;
+    tailLog: (jobId: string, lines: number) => Promise<string>;
   };
   system: {
     detectHardware: () => Promise<HardwareInfoDTO>;
@@ -303,6 +472,16 @@ export interface MeetingNotesApi {
     tailApp: (lines: number) => Promise<string>;
     tailRun: (runFolder: string, lines: number) => Promise<string>;
     appPath: () => Promise<string>;
+    listAppEntries: (query?: AppLogQuery) => Promise<AppLogEntry[]>;
+    listProcesses: () => Promise<ActivityProcess[]>;
+    reportRendererError: (payload: {
+      source: string;
+      message: string;
+      stack?: string;
+      href?: string;
+      userAgent?: string;
+      detail?: string;
+    }) => Promise<void>;
   };
   // Deps check
   depsCheck: () => Promise<DepsCheckResult>;
@@ -324,7 +503,10 @@ export interface MeetingNotesApi {
     setupAsrLog: (cb: (line: string) => void) => () => void;
     setupLlmLog: (cb: (line: string) => void) => () => void;
     depsInstallLog: (cb: (line: string) => void) => () => void;
-    shortcutTriggered: (cb: () => void) => () => void;
+    appAction: (cb: (event: AppActionEvent) => void) => () => void;
+    jobUpdate: (cb: (job: JobSummary) => void) => () => void;
+    logEntry: (cb: (entry: AppLogEntry) => void) => () => void;
+    processUpdate: (cb: (process: ActivityProcess) => void) => () => void;
   };
 }
 

@@ -3,7 +3,8 @@ import path from "node:path";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { BrowserWindow, ipcMain, dialog, shell } from "electron";
+import { pathToFileURL } from "node:url";
+import { ipcMain, dialog, shell } from "electron";
 import matter from "gray-matter";
 import {
   loadConfig,
@@ -27,19 +28,24 @@ import {
   setupLlm,
   checkOllama,
   listOllamaModels,
+  listRunningOllamaModels,
   deleteOllamaModel,
   processRun,
   getSecret,
   setSecret,
   hasSecret,
+  OperationAbortedError,
   type AppConfig,
   type LlmProvider,
   type PipelineProgressEvent,
   type RunManifest,
 } from "@meeting-notes/engine";
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
+import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware } from "./system.js";
 import type {
+  AppActionEvent,
+  AppLogQuery,
   AppConfigDTO,
   InitConfigRequest,
   RecordingStatus,
@@ -51,11 +57,14 @@ import type {
   BulkReprocessResult,
   PromptRow,
   StartRecordingRequest,
+  StopRecordingRequest,
   PipelineProgressEvent as AppPipelineProgressEvent,
   DepsCheckResult,
   DepsInstallResult,
   DepsInstallTarget,
   DetectedVault,
+  JobSummary,
+  OllamaRuntimeDTO,
 } from "../shared/ipc.js";
 import {
   getStatus as getRecordingStatus,
@@ -66,15 +75,22 @@ import {
 import {
   resolveRunDocumentPath,
   resolveRunFolderPath,
+  resolveRunMediaPath,
+  listRunFiles,
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
 } from "./run-access.js";
 import { bulkReprocessRuns, reprocessRun } from "./runs-service.js";
+import { getRunStartedSortValue, validatePromptModelSelection } from "./model-validation.js";
 import { syncToggleRecordingShortcut } from "./shortcuts.js";
+import { assertImportMediaPath, type PickedMediaFile } from "./media-import.js";
+import { broadcastToAll } from "./events.js";
+import { cancelJob, getJobLog, listJobs, scheduleJob, updateJobProgress } from "./jobs.js";
 
 export { stopActive as stopActiveRecording };
 
 const execFileAsync = promisify(execFile);
+const pendingMediaSelections = new Map<string, string>();
 
 // ---- Helpers ----
 
@@ -91,6 +107,7 @@ function configToDto(config: AppConfig): AppConfigDTO {
     whisper_local: config.whisper_local,
     parakeet_mlx: config.parakeet_mlx,
     claude: config.claude,
+    openai: config.openai,
     ollama: config.ollama,
     recording: config.recording,
     shortcuts: config.shortcuts,
@@ -110,6 +127,7 @@ function dtoToConfig(dto: AppConfigDTO): AppConfig {
     whisper_local: dto.whisper_local,
     parakeet_mlx: dto.parakeet_mlx,
     claude: dto.claude,
+    openai: dto.openai,
     ollama: dto.ollama,
     recording: dto.recording,
     shortcuts: dto.shortcuts,
@@ -122,6 +140,10 @@ function safeLoadConfig(): AppConfig | null {
   } catch {
     return null;
   }
+}
+
+function isAbortLikeError(err: unknown): boolean {
+  return err instanceof OperationAbortedError || (err instanceof Error && err.name === "AbortError");
 }
 
 function toRunSummary(manifest: RunManifest, folderPath: string): RunSummary {
@@ -166,14 +188,6 @@ function walkRunFolders(runsRoot: string): string[] {
   return folders;
 }
 
-// ---- Event broadcast ----
-
-function broadcastToAll(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    win.webContents.send(channel, payload);
-  }
-}
-
 export function broadcastRecordingStatus(): void {
   void getRecordingStatus().then((status) => {
     broadcastToAll("recording:status", status);
@@ -188,17 +202,56 @@ function forwardProgress(runFolder: string, event: PipelineProgressEvent): void 
   broadcastToAll("pipeline:progress", translated);
 }
 
+export function broadcastAppAction(event: AppActionEvent): void {
+  broadcastToAll("app:action", event);
+}
+
 async function handleReprocess(req: ReprocessRequest): Promise<ReprocessResult> {
-  const result = await reprocessRun(req, (event: PipelineProgressEvent) =>
-    forwardProgress(req.runFolder, event)
-  );
-  broadcastToAll("pipeline:progress", {
-    type: "run-complete",
-    runFolder: result.runFolder,
-    succeeded: result.succeeded,
-    failed: result.failed,
-  } satisfies AppPipelineProgressEvent);
-  return result;
+  const kind = req.onlyIds && req.onlyIds.length === 1 ? "run-prompt" : "reprocess-run";
+  const subtitle =
+    kind === "run-prompt"
+      ? "Running a selected prompt for this meeting"
+      : "Reprocessing meeting outputs";
+  return scheduleJob({
+    kind,
+    title: loadRunManifest(resolveRunFolderPath(req.runFolder, loadConfig())).title,
+    subtitle,
+    runFolder: req.runFolder,
+    promptIds: req.onlyIds,
+    provider: loadConfig().llm_provider,
+    model:
+      loadConfig().llm_provider === "ollama"
+        ? loadConfig().ollama.model
+        : loadConfig().claude.model,
+    task: async ({ signal, updateProgress }) => {
+      const result = await reprocessRun(
+        req,
+        (event: PipelineProgressEvent) => {
+          updateProgress(event);
+          forwardProgress(req.runFolder, event);
+        },
+        signal
+      );
+      broadcastToAll("pipeline:progress", {
+        type: "run-complete",
+        runFolder: result.runFolder,
+        succeeded: result.succeeded,
+        failed: result.failed,
+      } satisfies AppPipelineProgressEvent);
+      return result;
+    },
+  });
+}
+
+function startReprocessInBackground(req: ReprocessRequest): void {
+  void handleReprocess(req).catch((err) => {
+    if (isAbortLikeError(err)) return;
+    broadcastToAll("pipeline:progress", {
+      type: "run-failed",
+      runFolder: req.runFolder,
+      error: err instanceof Error ? err.message : String(err),
+    } satisfies AppPipelineProgressEvent);
+  });
 }
 
 // ---- Handler registration ----
@@ -262,9 +315,10 @@ export function registerIpcHandlers(): void {
         model: "mlx-community/parakeet-tdt-0.6b-v2",
       },
       claude: { model: "claude-sonnet-4-6" },
+      openai: { model: "gpt-4o" },
       ollama: {
         base_url: "http://127.0.0.1:11434",
-        model: req.ollama_model ?? "qwen3.5:9b",
+        model: req.ollama_model ?? "qwen3.5",
       },
       recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },
@@ -315,15 +369,21 @@ export function registerIpcHandlers(): void {
     return result.filePaths[0];
   });
 
-  ipcMain.handle("config:pick-audio-file", async () => {
+  ipcMain.handle("config:pick-media-file", async (): Promise<PickedMediaFile | null> => {
     const result = await dialog.showOpenDialog({
       properties: ["openFile"],
       filters: [
-        { name: "Audio", extensions: ["wav", "mp3", "m4a", "aiff", "flac", "ogg"] },
+        {
+          name: "Meeting media",
+          extensions: ["mp4", "mov", "m4v", "webm", "mkv", "avi", "mp3", "m4a", "wav", "aiff", "flac", "ogg"],
+        },
       ],
     });
     if (result.canceled || result.filePaths.length === 0) return null;
-    return result.filePaths[0];
+    const mediaPath = assertImportMediaPath(result.filePaths[0]);
+    const token = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    pendingMediaSelections.set(token, mediaPath);
+    return { token, name: path.basename(mediaPath) };
   });
 
   // ---- recording ----
@@ -337,13 +397,11 @@ export function registerIpcHandlers(): void {
     return result;
   });
 
-  ipcMain.handle("recording:stop", async () => {
+  ipcMain.handle("recording:stop", async (_e, req?: StopRecordingRequest) => {
     const result = await stopRecording({
-      onProgress: (event) => {
-        const state = getRecordingStatus();
-        void state.then((s) => {
-          if (s.run_folder) forwardProgress(s.run_folder, event);
-        });
+      mode: req?.mode ?? "process",
+      onProgress: (runFolder, event) => {
+        forwardProgress(runFolder, event);
       },
     });
     broadcastRecordingStatus();
@@ -371,7 +429,11 @@ export function registerIpcHandlers(): void {
         // Skip unreadable runs.
       }
     }
-    out.sort((a, b) => (b.started ?? "").localeCompare(a.started ?? ""));
+    out.sort(
+      (a, b) =>
+        getRunStartedSortValue(b.started, b.date) -
+        getRunStartedSortValue(a.started, a.date)
+    );
     return out;
   });
 
@@ -379,19 +441,10 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     const validatedRunFolder = resolveRunFolderPath(runFolder, config);
     const manifest = loadRunManifest(validatedRunFolder);
-    const entries = fs.readdirSync(validatedRunFolder, { withFileTypes: true });
-    const files: Array<{ name: string; size: number }> = [];
-    for (const entry of entries) {
-      if (!entry.isFile()) continue;
-      if (!entry.name.endsWith(".md") && entry.name !== "run.log") continue;
-      const fullPath = path.join(validatedRunFolder, entry.name);
-      const stat = fs.statSync(fullPath);
-      files.push({ name: entry.name, size: stat.size });
-    }
     return {
       ...toRunSummary(manifest, validatedRunFolder),
       manifest,
-      files,
+      files: listRunFiles(validatedRunFolder, config),
     };
   });
 
@@ -401,16 +454,48 @@ export function registerIpcHandlers(): void {
     return fs.readFileSync(filePath, "utf-8");
   });
 
+  ipcMain.handle("runs:get-media-source", async (_e, runFolder: string, fileName: string) => {
+    const config = loadConfig();
+    const filePath = resolveRunMediaPath(runFolder, fileName, config);
+    return pathToFileURL(filePath).toString();
+  });
+
+  ipcMain.handle("runs:download-media", async (_e, runFolder: string, fileName: string) => {
+    const config = loadConfig();
+    const filePath = resolveRunMediaPath(runFolder, fileName, config);
+    const result = await dialog.showSaveDialog({
+      defaultPath: path.basename(filePath),
+    });
+    if (result.canceled || !result.filePath) {
+      return { canceled: true };
+    }
+    fs.copyFileSync(filePath, result.filePath);
+    return { canceled: false };
+  });
+
+  ipcMain.handle("runs:delete-media", async (_e, runFolder: string, fileName: string) => {
+    const config = loadConfig();
+    const filePath = resolveRunMediaPath(runFolder, fileName, config);
+    fs.rmSync(filePath, { force: true });
+  });
+
   ipcMain.handle("runs:write-notes", async (_e, runFolder: string, content: string) => {
     const config = loadConfig();
     const filePath = resolveRunDocumentPath(runFolder, RUN_NOTES_FILE, config);
     fs.writeFileSync(filePath, content, "utf-8");
   });
 
+  ipcMain.handle("runs:start-reprocess", async (_e, req: ReprocessRequest) => {
+    startReprocessInBackground(req);
+  });
+
   ipcMain.handle("runs:reprocess", async (_e, req: ReprocessRequest) => {
     try {
       return await handleReprocess(req);
     } catch (err) {
+      if (isAbortLikeError(err)) {
+        throw err;
+      }
       broadcastToAll("pipeline:progress", {
         type: "run-failed",
         runFolder: req.runFolder,
@@ -425,6 +510,9 @@ export function registerIpcHandlers(): void {
       try {
         return await handleReprocess(singleReq);
       } catch (err) {
+        if (isAbortLikeError(err)) {
+          throw err;
+        }
         broadcastToAll("pipeline:progress", {
           type: "run-failed",
           runFolder: singleReq.runFolder,
@@ -435,40 +523,70 @@ export function registerIpcHandlers(): void {
     });
   });
 
-  ipcMain.handle(
-    "runs:process-audio",
-    async (_e, audioPath: string, title: string) => {
-      const config = loadConfig();
-      const { createRun } = await import("@meeting-notes/engine");
-      const runContext = createRun(config, title, { sourceMode: "file", quiet: true });
-      const audioDir = path.join(runContext.folderPath, "audio");
-      fs.mkdirSync(audioDir, { recursive: true });
-      const destAudio = path.join(audioDir, path.basename(audioPath));
-      fs.copyFileSync(audioPath, destAudio);
+  const importMediaRun = async (mediaPath: string, title: string) => {
+    const config = loadConfig();
+    const validatedMediaPath = assertImportMediaPath(mediaPath);
+    const { createRun, mediaHasAudioStream } = await import("@meeting-notes/engine");
+    if (!(await mediaHasAudioStream(validatedMediaPath))) {
+      throw new Error("This recording does not contain a usable audio track.");
+    }
 
-      void (async () => {
+    const runContext = createRun(config, title, { sourceMode: "file", quiet: true });
+    const audioDir = path.join(runContext.folderPath, "audio");
+    fs.mkdirSync(audioDir, { recursive: true });
+    const destMedia = path.join(audioDir, path.basename(validatedMediaPath));
+    fs.copyFileSync(validatedMediaPath, destMedia);
+
+    void scheduleJob({
+      kind: "process-import",
+      title,
+      subtitle: "Processing imported media",
+      runFolder: runContext.folderPath,
+      provider: config.llm_provider,
+      model: config.llm_provider === "ollama" ? config.ollama.model : config.claude.model,
+      task: async ({ signal, updateProgress }) => {
         try {
-          await processRun({
+          return await processRun({
             config,
             runFolder: runContext.folderPath,
             title,
             date: runContext.manifest.date,
-            audioFiles: [{ path: destAudio, speaker: "unknown" }],
+            audioFiles: [{ path: destMedia, speaker: "unknown" }],
             logger: runContext.logger,
-            onProgress: (event) => forwardProgress(runContext.folderPath, event),
+            signal,
+            onProgress: (event) => {
+              updateProgress(event);
+              forwardProgress(runContext.folderPath, event);
+            },
           });
         } catch (err) {
-          broadcastToAll("pipeline:progress", {
-            type: "run-failed",
-            runFolder: runContext.folderPath,
-            error: err instanceof Error ? err.message : String(err),
-          } satisfies AppPipelineProgressEvent);
+          if (!isAbortLikeError(err)) {
+            broadcastToAll("pipeline:progress", {
+              type: "run-failed",
+              runFolder: runContext.folderPath,
+              error: err instanceof Error ? err.message : String(err),
+            } satisfies AppPipelineProgressEvent);
+          }
+          throw err;
         }
-      })();
+      },
+    }).catch(() => {});
 
-      return { run_folder: runContext.folderPath };
+    return { run_folder: runContext.folderPath };
+  };
+
+  ipcMain.handle("runs:process-media", async (_e, mediaToken: string, title: string) => {
+    const mediaPath = pendingMediaSelections.get(mediaToken);
+    if (!mediaPath) {
+      throw new Error("The selected media file is no longer available. Pick it again and retry.");
     }
-  );
+    pendingMediaSelections.delete(mediaToken);
+    return importMediaRun(mediaPath, title);
+  });
+
+  ipcMain.handle("runs:process-dropped-media", async (_e, mediaPath: string, title: string) => {
+    return importMediaRun(mediaPath, title);
+  });
 
   ipcMain.handle("runs:open-in-obsidian", async (_e, runFolder: string, fileName: string) => {
     const config = loadConfig();
@@ -517,6 +635,10 @@ export function registerIpcHandlers(): void {
     return all.map((p) => ({
       id: p.id,
       label: p.label,
+      description: p.description,
+      category: p.category,
+      sort_order: p.sortOrder,
+      recommended: p.recommended,
       filename: p.filename,
       enabled: p.enabled,
       auto: p.auto,
@@ -534,12 +656,28 @@ export function registerIpcHandlers(): void {
       const all = loadAllPrompts(config ?? undefined);
       const existing = all.find((p) => p.id === id);
       if (!existing) throw new Error(`Prompt not found: ${id}`);
+      const requestedModel = "model" in patch ? patch.model ?? null : existing.model;
+      const ollamaState =
+        requestedModel && !requestedModel.startsWith("claude-")
+          ? ((await ensureOllamaDaemon().catch(() => getOllamaState())) ?? null)
+          : null;
+      const installedLocalModels = ollamaState
+        ? (await listOllamaModels(ollamaState.baseUrl)).map((tag) => tag.name)
+        : undefined;
+      const nextModel = await validatePromptModelSelection(requestedModel, {
+        baseUrl: ollamaState?.baseUrl,
+        installedLocalModels,
+      });
       // Merge body first.
       const raw = fs.readFileSync(existing.sourcePath, "utf-8");
       const parsed = matter(raw);
       const mergedFrontmatter: Record<string, unknown> = {
         ...parsed.data,
         ...("label" in patch ? { label: patch.label } : {}),
+        ...("description" in patch ? { description: patch.description } : {}),
+        ...("category" in patch ? { category: patch.category } : {}),
+        ...("sort_order" in patch ? { sort_order: patch.sort_order } : {}),
+        ...("recommended" in patch ? { recommended: patch.recommended } : {}),
         ...("filename" in patch ? { filename: patch.filename } : {}),
         ...("enabled" in patch ? { enabled: patch.enabled } : {}),
         ...("auto" in patch ? { auto: patch.auto } : {}),
@@ -548,8 +686,8 @@ export function registerIpcHandlers(): void {
         // Empty string / null means "fall back to the default in Settings",
         // which we represent on disk by deleting the key entirely so the
         // frontmatter stays clean.
-        if (patch.model && String(patch.model).trim()) {
-          mergedFrontmatter.model = String(patch.model).trim();
+        if (nextModel) {
+          mergedFrontmatter.model = nextModel;
         } else {
           delete mergedFrontmatter.model;
         }
@@ -584,7 +722,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("prompts:set-auto", async (_e, id: string, auto: boolean) => {
     const config = safeLoadConfig();
-    updatePromptFrontmatter(config ?? undefined, id, { auto });
+    updatePromptFrontmatter(config ?? undefined, id, {
+      auto,
+      enabled: auto,
+    });
   });
 
   ipcMain.handle("prompts:reset-to-default", async (_e, id?: string) => {
@@ -599,8 +740,14 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("prompts:get-dir", async () => getPromptsDir());
 
-  ipcMain.handle("prompts:open-in-finder", async () => {
-    shell.showItemInFolder(getPromptsDir());
+  ipcMain.handle("prompts:open-in-finder", async (_e, promptId?: string) => {
+    const dir = getPromptsDir();
+    if (promptId) {
+      const filePath = path.join(dir, `${promptId}.md`);
+      shell.showItemInFolder(filePath);
+    } else {
+      shell.showItemInFolder(dir);
+    }
   });
 
   // ---- secrets ----
@@ -653,6 +800,11 @@ export function registerIpcHandlers(): void {
           env: { ...process.env },
           stdio: ["ignore", "pipe", "pipe"],
         });
+        trackChildProcess(child, {
+          type: "brew-install",
+          label: target === "ffmpeg" ? "Installing ffmpeg" : "Installing BlackHole",
+          command: `${brew} ${args.join(" ")}`,
+        });
 
         const streamLines = (chunk: Buffer) => {
           const text = chunk.toString("utf-8");
@@ -666,13 +818,29 @@ export function registerIpcHandlers(): void {
         child.stderr?.on("data", streamLines);
 
         child.on("error", (err) => {
+          createAppLogger(false).error("Dependency install failed", {
+            processType: "brew-install",
+            pid: child.pid,
+            detail: target,
+            message: err.message,
+          });
           resolve({ ok: false, error: err.message });
         });
         child.on("exit", (code) => {
           if (code === 0) {
+            createAppLogger(false).info("Dependency install completed", {
+              processType: "brew-install",
+              pid: child.pid,
+              detail: target,
+            });
             broadcastToAll("deps-install:log", `✓ ${target} installed`);
             resolve({ ok: true });
           } else {
+            createAppLogger(false).error("Dependency install exited with error", {
+              processType: "brew-install",
+              pid: child.pid,
+              detail: target,
+            });
             resolve({ ok: false, error: `brew exited with code ${code}` });
           }
         });
@@ -759,6 +927,44 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("logs:app-path", async () => getAppLogPath());
+  ipcMain.handle("logs:list-app-entries", async (_e, query?: AppLogQuery) => {
+    return listAppEntries(query);
+  });
+  ipcMain.handle("logs:list-processes", async () => {
+    return listProcesses();
+  });
+  ipcMain.handle("logs:renderer-error", async (_e, payload: {
+    source: string;
+    message: string;
+    stack?: string;
+    href?: string;
+    userAgent?: string;
+    detail?: string;
+  }) => {
+    try {
+      createAppLogger(false).error(`Renderer ${payload.source}`, {
+        message: payload.message,
+        stack: payload.stack,
+        href: payload.href,
+        userAgent: payload.userAgent,
+        detail: payload.detail,
+      });
+    } catch {
+      // Best effort only. Renderer must not crash because logging failed.
+    }
+  });
+
+  ipcMain.handle("jobs:list", async (): Promise<JobSummary[]> => {
+    return listJobs();
+  });
+
+  ipcMain.handle("jobs:cancel", async (_e, jobId: string) => {
+    cancelJob(jobId);
+  });
+
+  ipcMain.handle("jobs:tail-log", async (_e, jobId: string, lines: number) => {
+    return getJobLog(jobId, lines, tailFile);
+  });
 
   // ---- deps check ----
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
@@ -885,7 +1091,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("llm:list-installed", async (): Promise<string[]> => {
     try {
-      const state = getOllamaState();
+      const state = (await ensureOllamaDaemon().catch(() => getOllamaState())) ?? null;
       const baseUrl = state?.baseUrl;
       const tags = await listOllamaModels(baseUrl);
       return tags.map((t) => t.name);
@@ -897,6 +1103,38 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("llm:remove", async (_e, model: string) => {
     const state = getOllamaState();
     await deleteOllamaModel(model, state?.baseUrl);
+  });
+
+  ipcMain.handle("llm:runtime", async (): Promise<OllamaRuntimeDTO> => {
+    try {
+      const state = getOllamaState() ?? await ensureOllamaDaemon();
+      const models = await listRunningOllamaModels(state.baseUrl);
+      return {
+        available: true,
+        source: state.source,
+        models: models.map((model) => ({
+          model: model.model,
+          name: model.name,
+          size: model.size,
+          size_vram: model.size_vram,
+          expires_at: model.expires_at,
+          details: model.details
+            ? {
+                parameter_size: model.details.parameter_size,
+                quantization_level: model.details.quantization_level,
+                family: model.details.family,
+                format: model.details.format,
+              }
+            : undefined,
+        })),
+      };
+    } catch (err) {
+      return {
+        available: false,
+        models: [],
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   // ---- system ----

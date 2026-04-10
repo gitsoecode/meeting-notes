@@ -2,7 +2,8 @@ import { Tray, Menu, nativeImage, app } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMainWindow } from "./index.js";
-import { isRecording } from "./recording.js";
+import { broadcastAppAction } from "./ipc.js";
+import { getStatus as getRecordingStatus, isRecording } from "./recording.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +11,15 @@ const __dirname = path.dirname(__filename);
 let tray: Tray | null = null;
 let idleIcon: Electron.NativeImage | null = null;
 let recordingIcon: Electron.NativeImage | null = null;
+
+async function dispatchTrayAction(): Promise<void> {
+  const status = await getRecordingStatus();
+  ensureMainWindow();
+  broadcastAppAction({
+    type: status.active ? "toggle-recording" : "open-new-meeting",
+    source: "tray",
+  });
+}
 
 function buildMenu(): Menu {
   return Menu.buildFromTemplate([
@@ -27,8 +37,7 @@ function buildMenu(): Menu {
     {
       label: isRecording() ? "Stop Recording" : "Start Recording",
       click: () => {
-        const win = ensureMainWindow();
-        win.webContents.send("tray:toggle-recording");
+        void dispatchTrayAction();
       },
     },
     { type: "separator" },
@@ -49,6 +58,8 @@ export function setupTray(): void {
   recordingIcon = nativeImage.createFromPath(
     path.resolve(__dirname, "../assets/tray-recordingTemplate.png")
   );
+  idleIcon.setTemplateImage(true);
+  recordingIcon.setTemplateImage(true);
   if (idleIcon.isEmpty()) {
     throw new Error(
       "tray-idleTemplate.png missing from dist/assets — run `npm run build:assets`"

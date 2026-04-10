@@ -1,14 +1,20 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   MeetingNotesApi,
   AppConfigDTO,
+  AppActionEvent,
+  AppLogEntry,
+  AppLogQuery,
+  ActivityProcess,
   InitConfigRequest,
   StartRecordingRequest,
+  StopRecordingRequest,
   ReprocessRequest,
   BulkReprocessRequest,
   PromptRow,
   RecordingStatus,
   PipelineProgressEvent,
+  JobSummary,
 } from "../shared/ipc.js";
 
 const api: MeetingNotesApi = {
@@ -23,12 +29,12 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("config:set-obsidian-vault", vaultPath),
     openDataDirectory: () => ipcRenderer.invoke("config:open-data-directory"),
     pickDirectory: (opts) => ipcRenderer.invoke("config:pick-directory", opts),
-    pickAudioFile: () => ipcRenderer.invoke("config:pick-audio-file"),
+    pickMediaFile: () => ipcRenderer.invoke("config:pick-media-file"),
   },
   recording: {
     getStatus: () => ipcRenderer.invoke("recording:get-status"),
     start: (req: StartRecordingRequest) => ipcRenderer.invoke("recording:start", req),
-    stop: () => ipcRenderer.invoke("recording:stop"),
+    stop: (req?: StopRecordingRequest) => ipcRenderer.invoke("recording:stop", req),
     listAudioDevices: () => ipcRenderer.invoke("recording:list-audio-devices"),
   },
   runs: {
@@ -36,13 +42,28 @@ const api: MeetingNotesApi = {
     get: (runFolder) => ipcRenderer.invoke("runs:get", runFolder),
     readDocument: (runFolder, fileName) =>
       ipcRenderer.invoke("runs:read-document", runFolder, fileName),
+    getMediaSource: (runFolder, fileName) =>
+      ipcRenderer.invoke("runs:get-media-source", runFolder, fileName),
+    downloadMedia: (runFolder, fileName) =>
+      ipcRenderer.invoke("runs:download-media", runFolder, fileName),
+    deleteMedia: (runFolder, fileName) =>
+      ipcRenderer.invoke("runs:delete-media", runFolder, fileName),
     writeNotes: (runFolder, content) =>
       ipcRenderer.invoke("runs:write-notes", runFolder, content),
+    startReprocess: (req: ReprocessRequest) =>
+      ipcRenderer.invoke("runs:start-reprocess", req),
     reprocess: (req: ReprocessRequest) => ipcRenderer.invoke("runs:reprocess", req),
     bulkReprocess: (req: BulkReprocessRequest) =>
       ipcRenderer.invoke("runs:bulk-reprocess", req),
-    processAudio: (audioPath, title) =>
-      ipcRenderer.invoke("runs:process-audio", audioPath, title),
+    processMedia: (mediaToken, title) =>
+      ipcRenderer.invoke("runs:process-media", mediaToken, title),
+    processDroppedMedia: (file, title) => {
+      const mediaPath = webUtils.getPathForFile(file as any);
+      if (!mediaPath) {
+        throw new Error("Could not read the dropped file.");
+      }
+      return ipcRenderer.invoke("runs:process-dropped-media", mediaPath, title);
+    },
     openInObsidian: (runFolder, fileName) =>
       ipcRenderer.invoke("runs:open-in-obsidian", runFolder, fileName),
     openInFinder: (runFolder) => ipcRenderer.invoke("runs:open-in-finder", runFolder),
@@ -59,7 +80,7 @@ const api: MeetingNotesApi = {
     setAuto: (id, auto) => ipcRenderer.invoke("prompts:set-auto", id, auto),
     resetToDefault: (id) => ipcRenderer.invoke("prompts:reset-to-default", id),
     getDir: () => ipcRenderer.invoke("prompts:get-dir"),
-    openInFinder: () => ipcRenderer.invoke("prompts:open-in-finder"),
+    openInFinder: (promptId?: string) => ipcRenderer.invoke("prompts:open-in-finder", promptId),
   },
   secrets: {
     has: (name) => ipcRenderer.invoke("secrets:has", name),
@@ -71,6 +92,12 @@ const api: MeetingNotesApi = {
     setup: (opts) => ipcRenderer.invoke("llm:setup", opts),
     listInstalled: () => ipcRenderer.invoke("llm:list-installed"),
     remove: (model) => ipcRenderer.invoke("llm:remove", model),
+    runtime: () => ipcRenderer.invoke("llm:runtime"),
+  },
+  jobs: {
+    list: () => ipcRenderer.invoke("jobs:list"),
+    cancel: (jobId) => ipcRenderer.invoke("jobs:cancel", jobId),
+    tailLog: (jobId, lines) => ipcRenderer.invoke("jobs:tail-log", jobId, lines),
   },
   system: {
     detectHardware: () => ipcRenderer.invoke("system:detect-hardware"),
@@ -80,6 +107,11 @@ const api: MeetingNotesApi = {
     tailRun: (runFolder, lines) =>
       ipcRenderer.invoke("logs:tail-run", runFolder, lines),
     appPath: () => ipcRenderer.invoke("logs:app-path"),
+    listAppEntries: (query?: AppLogQuery) =>
+      ipcRenderer.invoke("logs:list-app-entries", query),
+    listProcesses: () => ipcRenderer.invoke("logs:list-processes"),
+    reportRendererError: (payload) =>
+      ipcRenderer.invoke("logs:renderer-error", payload),
   },
   depsCheck: () => ipcRenderer.invoke("deps:check"),
   deps: {
@@ -116,14 +148,27 @@ const api: MeetingNotesApi = {
       ipcRenderer.on("deps-install:log", handler);
       return () => ipcRenderer.removeListener("deps-install:log", handler);
     },
-    shortcutTriggered: (cb: () => void) => {
-      const handler = () => cb();
-      ipcRenderer.on("shortcut:toggle-recording", handler);
-      ipcRenderer.on("tray:toggle-recording", handler);
+    appAction: (cb: (event: AppActionEvent) => void) => {
+      const handler = (_e: unknown, event: AppActionEvent) => cb(event);
+      ipcRenderer.on("app:action", handler);
       return () => {
-        ipcRenderer.removeListener("shortcut:toggle-recording", handler);
-        ipcRenderer.removeListener("tray:toggle-recording", handler);
+        ipcRenderer.removeListener("app:action", handler);
       };
+    },
+    jobUpdate: (cb: (job: JobSummary) => void) => {
+      const handler = (_e: unknown, job: JobSummary) => cb(job);
+      ipcRenderer.on("jobs:update", handler);
+      return () => ipcRenderer.removeListener("jobs:update", handler);
+    },
+    logEntry: (cb: (entry: AppLogEntry) => void) => {
+      const handler = (_e: unknown, entry: AppLogEntry) => cb(entry);
+      ipcRenderer.on("logs:entry", handler);
+      return () => ipcRenderer.removeListener("logs:entry", handler);
+    },
+    processUpdate: (cb: (process: ActivityProcess) => void) => {
+      const handler = (_e: unknown, process: ActivityProcess) => cb(process);
+      ipcRenderer.on("logs:process-update", handler);
+      return () => ipcRenderer.removeListener("logs:process-update", handler);
     },
   },
 };

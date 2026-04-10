@@ -22,6 +22,10 @@ export interface ClaudeConfig {
   model: string;
 }
 
+export interface OpenAIConfig {
+  model: string;
+}
+
 export interface OllamaConfig {
   base_url: string;
   model: string;
@@ -59,10 +63,11 @@ export interface AppConfig {
    * so a "claude" default does not preclude using local models for individual
    * prompts and vice versa.
    */
-  llm_provider: "claude" | "ollama";
+  llm_provider: "claude" | "openai" | "ollama";
   whisper_local: WhisperLocalConfig;
   parakeet_mlx: ParakeetMlxConfig;
   claude: ClaudeConfig;
+  openai: OpenAIConfig;
   ollama: OllamaConfig;
   recording: RecordingConfig;
   shortcuts: ShortcutsConfig;
@@ -94,9 +99,12 @@ const DEFAULT_CONFIG: AppConfig = {
   claude: {
     model: "claude-sonnet-4-6",
   },
+  openai: {
+    model: "gpt-4o",
+  },
   ollama: {
     base_url: "http://127.0.0.1:11434",
-    model: "qwen3.5:9b",
+    model: "qwen3.5",
   },
   recording: {
     mic_device: "default",

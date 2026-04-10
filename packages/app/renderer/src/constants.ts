@@ -1,94 +1,13 @@
-/**
- * Curated catalog of LLM models the dropdowns surface as first-class
- * options. The actual config fields are free-form strings, so a user can
- * still type any Claude model id or any Ollama tag via the "Custom…"
- * fallback — this list just gives them a sane default set.
- *
- * Local model picks (Ollama) are intentionally biased toward transcript
- * work: action-item extraction, structured outputs, agentic prompts.
- * Sizes are approximate and should be refreshed from `ollama show <tag>`
- * when the catalog changes.
- */
-export type LlmProviderKind = "claude" | "ollama";
-
-export interface LlmModelEntry {
-  id: string;
-  label: string;
-  provider: LlmProviderKind;
-  /** Local-only: download size in GB. Used for the install hint UX. */
-  sizeGb?: number;
-  /** Local-only: minimum recommended system RAM in GB. Used to disable picks the user can't run. */
-  minRamGb?: number;
-  /** One-line description shown in the picker. */
-  blurb?: string;
-}
-
-export const LLM_MODELS: LlmModelEntry[] = [
-  // ---- Claude (cloud) ----
-  {
-    id: "claude-opus-4-6",
-    label: "Opus 4.6 (smartest)",
-    provider: "claude",
-    blurb: "Anthropic's most capable model. Best for nuanced summaries.",
-  },
-  {
-    id: "claude-sonnet-4-6",
-    label: "Sonnet 4.6 (balanced)",
-    provider: "claude",
-    blurb: "Fast, capable, the default for most prompts.",
-  },
-  {
-    id: "claude-haiku-4-5-20251001",
-    label: "Haiku 4.5 (fastest)",
-    provider: "claude",
-    blurb: "Cheapest and quickest cloud option.",
-  },
-  // ---- Local (Ollama) ----
-  {
-    id: "qwen3.5:9b",
-    label: "Qwen 3.5 9B (recommended)",
-    provider: "ollama",
-    sizeGb: 5.5,
-    minRamGb: 16,
-    blurb: "Best all-around local pick for transcript-style work.",
-  },
-  {
-    id: "gemma4:e4b",
-    label: "Gemma 4 E4B",
-    provider: "ollama",
-    sizeGb: 4.0,
-    minRamGb: 16,
-    blurb: "Lightweight Google model — quick to load, decent quality.",
-  },
-  {
-    id: "qwen3:8b",
-    label: "Qwen 3 8B (lighter, faster)",
-    provider: "ollama",
-    sizeGb: 5.0,
-    minRamGb: 16,
-    blurb: "Slightly smaller alternative with more RAM headroom.",
-  },
-  {
-    id: "gemma3:12b",
-    label: "Gemma 3 12B (slower, bigger)",
-    provider: "ollama",
-    sizeGb: 7.5,
-    minRamGb: 24,
-    blurb: "Higher quality, needs a bigger machine.",
-  },
-];
-
-export function classifyModelClient(id: string): LlmProviderKind {
-  return id.startsWith("claude-") ? "claude" : "ollama";
-}
-
-export function findModelEntry(id: string): LlmModelEntry | undefined {
-  return LLM_MODELS.find((m) => m.id === id);
-}
-
-export function isKnownClaudeModel(id: string): boolean {
-  return LLM_MODELS.some((m) => m.provider === "claude" && m.id === id);
-}
+export {
+  LLM_MODELS,
+  classifyAppModel as classifyModelClient,
+  findModelEntry,
+  isKnownClaudeModel,
+  localModelIdsMatch,
+  normalizeModelId,
+  type LlmModelEntry,
+  type LlmProviderKind,
+} from "../../shared/llm-catalog";
 
 /**
  * Pick a sensible default local model for a machine with `ramGb` of RAM.
@@ -96,8 +15,8 @@ export function isKnownClaudeModel(id: string): boolean {
  */
 export function recommendLocalModel(ramGb: number | undefined): string {
   if (!ramGb || ramGb < 16) return "qwen3:8b";
-  if (ramGb >= 24) return "qwen3.5:9b";
-  return "qwen3.5:9b";
+  if (ramGb >= 24) return "qwen3.5";
+  return "qwen3.5";
 }
 
 /** Format an ISO date as a relative label like "Today" / "Yesterday" / "3d ago". */

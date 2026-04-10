@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getAppLogPath } from "../core/config.js";
+import { getAppLogPath, getConfigDir } from "../core/config.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -11,6 +11,18 @@ interface LogEntry {
   message: string;
   data?: Record<string, unknown>;
 }
+
+export interface StructuredLogEntry extends LogEntry {
+  id: string;
+  jobId?: string;
+  runFolder?: string;
+  processType?: string;
+  pid?: number;
+  stack?: string;
+  detail?: string;
+}
+
+let appLoggerListener: ((entry: StructuredLogEntry) => void) | null = null;
 
 function formatEntry(entry: LogEntry): string {
   const base = `[${entry.timestamp}] ${entry.level.toUpperCase().padEnd(5)} [${entry.component}] ${entry.message}`;
@@ -23,12 +35,16 @@ function formatEntry(entry: LogEntry): string {
 export class Logger {
   private component: string;
   private logFile: string | null;
+  private structuredFile: string | null;
   private consoleEnabled: boolean;
+  private onEntry?: (entry: StructuredLogEntry) => void;
 
-  constructor(component: string, opts?: { logFile?: string; console?: boolean }) {
+  constructor(component: string, opts?: { logFile?: string; structuredFile?: string; console?: boolean; onEntry?: (entry: StructuredLogEntry) => void }) {
     this.component = component;
     this.logFile = opts?.logFile ?? null;
+    this.structuredFile = opts?.structuredFile ?? null;
     this.consoleEnabled = opts?.console ?? false;
+    this.onEntry = opts?.onEntry;
   }
 
   private write(level: LogLevel, message: string, data?: Record<string, unknown>): void {
@@ -40,6 +56,7 @@ export class Logger {
       data,
     };
     const line = formatEntry(entry);
+    const structuredEntry = toStructuredEntry(entry);
 
     if (this.consoleEnabled) {
       if (level === "error") {
@@ -56,6 +73,14 @@ export class Logger {
       fs.mkdirSync(dir, { recursive: true });
       fs.appendFileSync(this.logFile, line + "\n", "utf-8");
     }
+
+    if (this.structuredFile) {
+      const dir = path.dirname(this.structuredFile);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(this.structuredFile, JSON.stringify(structuredEntry) + "\n", "utf-8");
+    }
+
+    this.onEntry?.(structuredEntry);
   }
 
   debug(message: string, data?: Record<string, unknown>): void {
@@ -75,8 +100,53 @@ export class Logger {
   }
 }
 
+function toStructuredEntry(entry: LogEntry): StructuredLogEntry {
+  const data = entry.data;
+  return {
+    id: `${entry.timestamp}-${Math.random().toString(36).slice(2, 10)}`,
+    ...entry,
+    jobId: pickString(data, ["jobId", "job_id"]),
+    runFolder: pickString(data, ["runFolder", "run_folder"]),
+    processType: pickString(data, ["processType", "process_type"]),
+    pid: pickNumber(data, ["pid"]),
+    stack: pickString(data, ["stack"]),
+    detail: pickString(data, ["detail"]),
+  };
+}
+
+function pickString(data: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  if (!data) return undefined;
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function pickNumber(data: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+  if (!data) return undefined;
+  for (const key of keys) {
+    const value = data[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+export function setAppLoggerListener(listener: ((entry: StructuredLogEntry) => void) | null): void {
+  appLoggerListener = listener;
+}
+
 export function createAppLogger(consoleEnabled = false): Logger {
-  return new Logger("app", { logFile: getAppLogPath(), console: consoleEnabled });
+  return new Logger("app", {
+    logFile: getAppLogPath(),
+    structuredFile: path.join(getConfigDir(), "app-events.jsonl"),
+    console: consoleEnabled,
+    onEntry: (entry) => appLoggerListener?.(entry),
+  });
 }
 
 export function createRunLogger(runLogPath: string, consoleEnabled = false): Logger {

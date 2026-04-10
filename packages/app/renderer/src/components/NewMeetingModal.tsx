@@ -1,19 +1,28 @@
 import { useState } from "react";
 import { api } from "../ipc-client";
+import { Button } from "./ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Spinner } from "./ui/spinner";
+import { Textarea } from "./ui/textarea";
 
 interface NewMeetingModalProps {
   onClose: () => void;
-  onStarted?: (runFolder: string) => void;
+  onStarted?: () => void;
 }
 
-/**
- * Quick-start modal for kicking off a new recording from anywhere in
- * the app — used by the persistent titlebar button and the global
- * shortcut. The full Home start card uses inline fields instead of
- * this modal.
- */
 export function NewMeetingModal({ onClose, onStarted }: NewMeetingModalProps) {
-  const [title, setTitle] = useState("Untitled Meeting");
+  const [title, setTitle] = useState(() => {
+    const d = new Date();
+    return `Meeting — ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+  });
   const [description, setDescription] = useState("");
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,7 +35,7 @@ export function NewMeetingModal({ onClose, onStarted }: NewMeetingModalProps) {
         title: title.trim() || "Untitled Meeting",
         description: description.trim() || null,
       });
-      onStarted?.(result.run_folder);
+      onStarted?.();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -36,35 +45,73 @@ export function NewMeetingModal({ onClose, onStarted }: NewMeetingModalProps) {
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>New meeting</h2>
-        <label>Title</label>
-        <input
-          autoFocus
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) onStart();
-          }}
-        />
-        <label style={{ marginTop: 12 }}>Description (optional)</label>
-        <textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={3}
-          placeholder="What's this meeting about?"
-        />
-        {error && <div className="muted tone-error" style={{ marginTop: 8 }}>{error}</div>}
-        <div className="actions">
-          <button onClick={onClose} disabled={starting}>
-            Cancel
-          </button>
-          <button className="primary" onClick={onStart} disabled={starting}>
-            {starting ? "Starting…" : "Start recording"}
-          </button>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>New meeting</DialogTitle>
+          <DialogDescription>
+            Start a fresh recording from the tray or shortcut without hunting for the
+            home screen first.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label
+              htmlFor="new-meeting-title"
+              className="text-sm font-medium text-[var(--text-secondary)]"
+            >
+              Title
+            </label>
+            <Input
+              id="new-meeting-title"
+              autoFocus
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              onFocus={(e) => e.target.select()}
+              disabled={starting}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void onStart();
+              }}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="new-meeting-description"
+              className="text-sm font-medium text-[var(--text-secondary)]"
+            >
+              Description
+            </label>
+            <Textarea
+              id="new-meeting-description"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              disabled={starting}
+              placeholder="What's this meeting about?"
+            />
+          </div>
+
+          {error ? <div className="text-sm text-[var(--error)]">{error}</div> : null}
         </div>
-      </div>
-    </div>
+
+        <DialogFooter>
+          <Button variant="secondary" onClick={onClose} disabled={starting}>
+            Cancel
+          </Button>
+          <Button onClick={onStart} disabled={starting}>
+            {starting ? (
+              <>
+                <Spinner className="mr-2 h-3.5 w-3.5" />
+                Starting…
+              </>
+            ) : (
+              "Start recording"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

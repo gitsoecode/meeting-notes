@@ -8,6 +8,30 @@ export interface SetupLlmOptions {
   onLog?: (line: string) => void;
 }
 
+const LOCAL_MODEL_ALIASES: Record<string, string> = {
+  "qwen3.5:9b": "qwen3.5",
+  "qwen3.5:latest": "qwen3.5",
+  "llama3.1:latest": "llama3.1:8b",
+};
+
+export function normalizeLocalModelId(id: string | null | undefined): string | null {
+  if (!id) return null;
+  const trimmed = id.trim();
+  if (!trimmed) return null;
+  const withoutLatest = trimmed.replace(/:latest$/, "");
+  return LOCAL_MODEL_ALIASES[withoutLatest] ?? withoutLatest;
+}
+
+function localModelIdsMatch(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  const normalizedLeft = normalizeLocalModelId(left);
+  const normalizedRight = normalizeLocalModelId(right);
+  if (!normalizedLeft || !normalizedRight) return false;
+  return normalizedLeft === normalizedRight;
+}
+
 /**
  * Mirrors `setup-asr.ts`: a one-shot installer the renderer can call to
  * make sure a given local model is ready to use. The Ollama daemon
@@ -30,7 +54,7 @@ export async function setupLlm(opts: SetupLlmOptions): Promise<void> {
 
   if (!opts.force) {
     const installed = await listOllamaModels(baseUrl);
-    if (installed.some((m) => m.name === opts.model)) {
+    if (installed.some((m) => localModelIdsMatch(m.name, opts.model))) {
       onLog?.(`✓ ${opts.model} already installed`);
       return;
     }
@@ -41,7 +65,7 @@ export async function setupLlm(opts: SetupLlmOptions): Promise<void> {
 
   // Verify
   const after = await listOllamaModels(baseUrl);
-  if (!after.some((m) => m.name === opts.model)) {
+  if (!after.some((m) => localModelIdsMatch(m.name, opts.model))) {
     throw new Error(`Pull completed but ${opts.model} is not in the model list.`);
   }
   onLog?.(`✓ ${opts.model} ready`);

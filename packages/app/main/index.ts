@@ -1,11 +1,20 @@
 import { app, BrowserWindow, globalShortcut, nativeImage } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerIpcHandlers, broadcastRecordingStatus, stopActiveRecording } from "./ipc.js";
+import { createAppLogger, setAppLoggerListener } from "@meeting-notes/engine";
+import {
+  registerIpcHandlers,
+  broadcastAppAction,
+  broadcastRecordingStatus,
+  stopActiveRecording,
+} from "./ipc.js";
 import { setupTray } from "./tray.js";
 import { ensureOllamaDaemon, stopOllamaDaemon } from "./ollama-daemon.js";
 import { DEFAULT_CONFIG, loadConfig } from "@meeting-notes/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
+import { getStatus as getRecordingStatus } from "./recording.js";
+import { registerWindowContextMenu } from "./context-menu.js";
+import { handleStructuredAppLog } from "./activity-monitor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -15,18 +24,31 @@ const __dirname = path.dirname(__filename);
 // needing a packaged app.
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const IS_DEV = Boolean(DEV_URL);
+const APP_ICON_PATH = path.resolve(__dirname, "../assets/app-icon.png");
 
 let mainWindow: BrowserWindow | null = null;
+const appLogger = createAppLogger(false);
+
+setAppLoggerListener(handleStructuredAppLog);
+
+function loadAppIcon(): Electron.NativeImage | undefined {
+  const icon = nativeImage.createFromPath(APP_ICON_PATH);
+  return icon.isEmpty() ? undefined : icon;
+}
 
 function createMainWindow(): BrowserWindow {
+  appLogger.info("Creating main window");
+  const icon = loadAppIcon();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    minWidth: 820,
+    minHeight: 620,
     title: "Meeting Notes",
-    backgroundColor: "#0b0b0e",
+    show: false,
+    backgroundColor: "#f6f7f2",
     titleBarStyle: "hiddenInset",
+    icon,
     webPreferences: {
       preload: path.resolve(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -35,11 +57,18 @@ function createMainWindow(): BrowserWindow {
     },
   });
 
+  registerWindowContextMenu(win);
+
   if (IS_DEV && DEV_URL) {
     void win.loadURL(DEV_URL);
   } else {
     void win.loadFile(path.resolve(__dirname, "../renderer/index.html"));
   }
+
+  win.once("ready-to-show", () => {
+    appLogger.info("Main window ready to show");
+    win.show();
+  });
 
   win.on("closed", () => {
     if (mainWindow === win) {
@@ -64,24 +93,32 @@ export function ensureMainWindow(): BrowserWindow {
   return mainWindow;
 }
 
+async function dispatchWindowAction(source: "shortcut" | "tray"): Promise<void> {
+  const status = await getRecordingStatus();
+  const win = ensureMainWindow();
+  broadcastAppAction({
+    type: status.active ? "toggle-recording" : "open-new-meeting",
+    source,
+  });
+  win.focus();
+}
+
 app.whenReady().then(() => {
-  if (process.platform === "darwin" && app.dock) {
-    const dockIcon = nativeImage.createFromPath(
-      path.resolve(__dirname, "../assets/app-icon.png")
-    );
-    if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+  const dockIcon = loadAppIcon();
+  if (process.platform === "darwin" && app.dock && dockIcon) {
+    app.dock.setIcon(dockIcon);
   }
 
-  mainWindow = createMainWindow();
   registerIpcHandlers();
+  appLogger.info("App ready");
+  mainWindow = createMainWindow();
   setupTray();
 
   // Kick an initial status broadcast so the renderer can sync.
   broadcastRecordingStatus();
 
   setToggleRecordingHandler(() => {
-    const win = ensureMainWindow();
-    win.webContents.send("shortcut:toggle-recording");
+    void dispatchWindowAction("shortcut");
   });
 
   // If the user has chosen the local LLM provider, bring the Ollama daemon
@@ -104,6 +141,7 @@ app.whenReady().then(() => {
     safeLoadShortcut() ?? DEFAULT_CONFIG.shortcuts.toggle_recording;
   const shortcutResult = syncToggleRecordingShortcut(shortcut);
   if (!shortcutResult.ok) {
+    appLogger.warn("Failed to register global shortcut", { detail: shortcut });
     console.warn(`Failed to register global shortcut: ${shortcut}`);
   }
 
@@ -122,6 +160,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async (event) => {
   event.preventDefault();
+  appLogger.info("App quit requested");
   try {
     await stopActiveRecording("app-quit");
   } catch {
@@ -133,6 +172,7 @@ app.on("before-quit", async (event) => {
     // Best effort.
   }
   globalShortcut.unregisterAll();
+  appLogger.info("App quit complete");
   app.exit(0);
 });
 

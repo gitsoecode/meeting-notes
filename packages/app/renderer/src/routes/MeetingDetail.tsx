@@ -1,56 +1,195 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  FileOutput,
+  MoreHorizontal,
+  PlayCircle,
+  RefreshCcw,
+  Search,
+  SquarePen,
+  Trash2,
+  AlertCircle,
+} from "lucide-react";
 import { api } from "../ipc-client";
 import type {
   AppConfigDTO,
-  PromptRow,
-  RunDetail,
+  JobSummary,
   PipelineProgressEvent,
+  PromptRow,
+  ReprocessRequest,
+  RunDetail,
+  RunManifest,
 } from "../../../shared/ipc";
-import { MarkdownView } from "../components/MarkdownView";
 import { MarkdownEditor } from "../components/MarkdownEditor";
+import { MarkdownView } from "../components/MarkdownView";
 import { OverviewPanel } from "../components/OverviewPanel";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import {
   PipelineStatus,
   applyProgress,
+  CancelJobButton,
+  sectionsFromJobSteps,
   type SectionStatus,
 } from "../components/PipelineStatus";
+import { TranscriptView } from "../components/TranscriptView";
+import { PageIntro, PageScaffold } from "../components/PageScaffold";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Checkbox } from "../components/ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../components/ui/dialog";
+import { Input } from "../components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Spinner } from "../components/ui/spinner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import {
+  buildMeetingPromptCollections,
+  PRIMARY_PROMPT_ID,
+  type MeetingAnalysisPromptItem,
+} from "../../../shared/meeting-prompts";
 
 interface MeetingDetailProps {
   runFolder: string;
   config: AppConfigDTO;
   onBack: () => void;
+  onOpenPromptLibrary: (promptId?: string) => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
-type TabKind = "overview" | "notes" | "transcript" | "prompts";
+type TabKind = "summary" | "analysis" | "notes" | "transcript" | "recording" | "metadata";
 
-interface TabDef {
-  id: TabKind;
-  label: string;
+type PendingConfirmState = {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  cancelLabel?: string;
+  confirmingLabel?: string;
+  confirmVariant?: "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
+  action: () => Promise<void> | void;
+};
+
+function buildAnalysisSignature(detail: RunDetail | null): string {
+  if (!detail) return "";
+  const manifestSections = Object.entries(detail.manifest?.sections ?? {})
+    .map(([id, section]) => [
+      id,
+      section?.status ?? "",
+      section?.filename ?? "",
+      section?.completed_at ?? "",
+    ])
+    .sort(([left], [right]) => left.localeCompare(right));
+  const files = detail.files
+    .filter((file) => file.kind === "document" && file.name.endsWith(".md"))
+    .map((file) => [file.name, file.size])
+    .sort(([left], [right]) => left.localeCompare(right));
+  return JSON.stringify({ status: detail.status, manifestSections, files });
 }
 
-interface PromptOutput {
-  id: string;
-  label: string;
-  fileName: string;
-  status?: string;
+function formatFileSize(size: number): string {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  if (size < 1024 * 1024 * 1024) return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(size / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
-export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps) {
+function getRecordingExtension(fileName: string): string {
+  const baseName = fileName.split("/").pop() ?? fileName;
+  const match = baseName.match(/\.([^.]+)$/);
+  return match ? `.${match[1].toLowerCase()}` : "";
+}
+
+function isAudioRecording(fileName: string): boolean {
+  return [".mp3", ".m4a", ".wav", ".aiff", ".flac", ".ogg"].includes(getRecordingExtension(fileName));
+}
+
+function isVideoRecording(fileName: string): boolean {
+  return [".mp4", ".mov", ".m4v", ".webm", ".mkv", ".avi"].includes(getRecordingExtension(fileName));
+}
+
+function getRecordingTypeLabel(fileName: string): string {
+  if (isAudioRecording(fileName)) return "Audio recording";
+  if (isVideoRecording(fileName)) return "Video recording";
+  return "Recording";
+}
+
+export function MeetingDetail({
+  runFolder,
+  config,
+  onBack,
+  onOpenPromptLibrary,
+  onDirtyChange,
+}: MeetingDetailProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTabId, setActiveTabId] = useState<TabKind>("overview");
+  const [activeTabId, setActiveTabId] = useState<TabKind>("summary");
   const [tabContents, setTabContents] = useState<Record<string, string>>({});
   const [activePromptId, setActivePromptId] = useState<string | null>(null);
+  const [analysisSearchQuery, setAnalysisSearchQuery] = useState("");
+  const [prompts, setPrompts] = useState<PromptRow[]>([]);
+  const [loadingPrompts, setLoadingPrompts] = useState(true);
   const [reprocessOpen, setReprocessOpen] = useState(false);
-  const [runPromptOpen, setRunPromptOpen] = useState(false);
   const [sections, setSections] = useState<SectionStatus[]>([]);
+  const [activeJob, setActiveJob] = useState<JobSummary | null>(null);
+  const [reprocessStarting, setReprocessStarting] = useState(false);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [notesEditMode, setNotesEditMode] = useState(false);
+  const [documentReloadVersion, setDocumentReloadVersion] = useState(0);
+  const [recordingSources, setRecordingSources] = useState<Record<string, string>>({});
+  const [recordingToDelete, setRecordingToDelete] = useState<string | null>(null);
+  const [deletingRecording, setDeletingRecording] = useState(false);
+  const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmState | null>(null);
+  const [confirmingAction, setConfirmingAction] = useState(false);
+  const detailSignatureRef = useRef("");
+  const initialNotesRef = useRef<string | null>(null);
+
+  const invalidateAnalysisCache = (sectionId?: string | null) => {
+    setTabContents((prev) => {
+      if (sectionId) {
+        const cacheKey = sectionId === PRIMARY_PROMPT_ID ? "summary" : `prompt:${sectionId}`;
+        if (!(cacheKey in prev)) return prev;
+        const next = { ...prev };
+        delete next[cacheKey];
+        return next;
+      }
+
+      let changed = false;
+      const next: Record<string, string> = {};
+      for (const [key, value] of Object.entries(prev)) {
+        if (key === "summary" || key.startsWith("prompt:")) {
+          changed = true;
+          continue;
+        }
+        next[key] = value;
+      }
+      return changed ? next : prev;
+    });
+    setDocumentReloadVersion((prev) => prev + 1);
+  };
 
   const refresh = async () => {
     setLoading(true);
     try {
-      const d = await api.runs.get(runFolder);
-      setDetail(d);
+      const nextDetail = await api.runs.get(runFolder);
+      const nextSignature = buildAnalysisSignature(nextDetail);
+      if (detailSignatureRef.current !== nextSignature) {
+        invalidateAnalysisCache();
+      }
+      detailSignatureRef.current = nextSignature;
+      setDetail(nextDetail);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -60,409 +199,1037 @@ export function MeetingDetail({ runFolder, config, onBack }: MeetingDetailProps)
   };
 
   useEffect(() => {
-    refresh();
+    void refresh();
     setTabContents({});
-    setActiveTabId("overview");
+    setActiveTabId("summary");
     setActivePromptId(null);
+    setAnalysisSearchQuery("");
+    setPrompts([]);
+    setLoadingPrompts(true);
     setSections([]);
+    setReprocessStarting(false);
+    setPipelineError(null);
+    setNotesEditMode(false);
+    setRecordingSources({});
+    setRecordingToDelete(null);
+    setDeletingRecording(false);
+    detailSignatureRef.current = "";
+    initialNotesRef.current = null;
   }, [runFolder]);
 
-  // Subscribe to progress events for live updates on reprocess runs.
+  useEffect(() => {
+    let alive = true;
+    setLoadingPrompts(true);
+    void api.prompts.list()
+      .then((list) => {
+        if (!alive) return;
+        setPrompts(list);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setPrompts([]);
+      })
+      .finally(() => {
+        if (alive) setLoadingPrompts(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [runFolder]);
+
   useEffect(() => {
     const unsub = api.on.pipelineProgress((event: PipelineProgressEvent) => {
       if (event.runFolder !== runFolder) return;
+      setReprocessStarting(false);
+      if (event.type === "run-failed") {
+        setPipelineError(event.error);
+      } else if (event.type === "section-start" || event.type === "run-complete") {
+        setPipelineError(null);
+      }
       setSections((prev) => applyProgress(prev, event));
+      if (event.type === "section-complete") {
+        invalidateAnalysisCache(event.sectionId);
+        void refresh();
+        return;
+      }
       if (event.type === "run-complete" || event.type === "run-failed") {
-        refresh();
+        invalidateAnalysisCache();
+        void refresh();
       }
     });
     return () => unsub();
   }, [runFolder]);
 
-  const promptOutputs: PromptOutput[] = useMemo(() => {
-    if (!detail) return [];
-    const manifest = (detail.manifest ?? {}) as {
-      sections?: Record<string, { filename?: string; label?: string; status?: string; builtin?: boolean }>;
-    };
-    const sections = manifest.sections ?? {};
-    const baseFilenames = new Set(["notes.md", "transcript.md", "index.md", "Dashboard.md"]);
-    const out: PromptOutput[] = [];
-
-    // First, anything declared in manifest.sections that isn't a base file.
-    for (const [id, sec] of Object.entries(sections)) {
-      if (!sec.filename) continue;
-      if (baseFilenames.has(sec.filename)) continue;
-      if (!sec.filename.endsWith(".md")) continue;
-      out.push({
-        id,
-        label: sec.label ?? id,
-        fileName: sec.filename,
-        status: sec.status,
-      });
-    }
-
-    // Catch any extra .md files on disk not declared in the manifest.
-    const seen = new Set(out.map((p) => p.fileName));
-    for (const f of detail.files) {
-      if (seen.has(f.name)) continue;
-      if (!f.name.endsWith(".md")) continue;
-      if (baseFilenames.has(f.name)) continue;
-      const id = f.name.replace(/\.md$/, "");
-      out.push({
-        id,
-        label: id.charAt(0).toUpperCase() + id.slice(1),
-        fileName: f.name,
-      });
-    }
-    return out;
-  }, [detail, runFolder]);
-
-  const tabs: TabDef[] = useMemo(() => {
-    const base: TabDef[] = [
-      { id: "overview", label: "Overview" },
-      { id: "notes", label: "Notes" },
-      { id: "transcript", label: "Transcript" },
-    ];
-    if (promptOutputs.length > 0) {
-      base.push({ id: "prompts", label: "Prompts" });
-    }
-    return base;
-  }, [promptOutputs]);
-
-  // Default to the first prompt when entering the Prompts tab.
   useEffect(() => {
-    if (activeTabId !== "prompts") return;
-    if (activePromptId && promptOutputs.some((p) => p.id === activePromptId)) return;
-    const firstComplete = promptOutputs.find((p) => p.status === "complete") ?? promptOutputs[0];
-    setActivePromptId(firstComplete?.id ?? null);
-  }, [activeTabId, promptOutputs, activePromptId]);
+    let canceled = false;
+    api.jobs.list().then((allJobs) => {
+      if (canceled) return;
+      setActiveJob(
+        allJobs.find(
+          (job) =>
+            job.runFolder === runFolder &&
+            (job.status === "queued" || job.status === "running")
+        ) ?? null
+      );
+    }).catch(() => {});
 
-  // Lazily load file contents for whichever document the user is viewing.
+    const unsub = api.on.jobUpdate((job) => {
+      if (job.runFolder !== runFolder) return;
+      if (job.status === "queued" || job.status === "running") {
+        setActiveJob(job);
+        return;
+      }
+      setActiveJob((current) => (current?.id === job.id ? null : current));
+    });
+
+    return () => {
+      canceled = true;
+      unsub();
+    };
+  }, [runFolder]);
+
+  useEffect(() => {
+    if (!activeJob?.progress.steps?.length) return;
+    setSections(sectionsFromJobSteps(activeJob.progress.steps));
+  }, [activeJob]);
+
+  const startReprocess = async (request: ReprocessRequest) => {
+    await api.runs.startReprocess(request);
+    setSections([]);
+    setPipelineError(null);
+    setReprocessStarting(true);
+    void refresh();
+  };
+
+  // Poll for updates when meeting is processing (fallback if events are missed)
+  useEffect(() => {
+    if (!detail || detail.status !== "processing") return;
+    const id = setInterval(() => {
+      void refresh();
+    }, 7000);
+    return () => clearInterval(id);
+  }, [detail?.status, runFolder]);
+
+  const promptCollections = useMemo(() => {
+    if (!detail) {
+      return {
+        primaryPrompt: null,
+        summaryFileName: "summary.md",
+        summaryStatus: undefined,
+        summaryHasOutput: false,
+        analysisPrompts: [] as MeetingAnalysisPromptItem[],
+      };
+    }
+    const manifest = (detail.manifest ?? {}) as {
+      sections?: Record<string, { filename?: string; label?: string; status?: string }>;
+    };
+    return buildMeetingPromptCollections({
+      prompts,
+      manifestSections: manifest.sections ?? {},
+      files: detail.files,
+    });
+  }, [detail, prompts]);
+
+  const recordingFiles = useMemo(
+    () => (detail ? detail.files.filter((file) => file.kind === "media") : []),
+    [detail]
+  );
+
+  const sortedAnalysisPrompts = useMemo(
+    () => [...promptCollections.analysisPrompts].sort(sortAnalysisPrompts),
+    [promptCollections.analysisPrompts]
+  );
+
+  const filteredAnalysisPrompts = useMemo(() => {
+    const query = analysisSearchQuery.trim().toLowerCase();
+    if (!query) return sortedAnalysisPrompts;
+    return sortedAnalysisPrompts.filter((prompt) => {
+      return (
+        prompt.label.toLowerCase().includes(query) ||
+        prompt.id.toLowerCase().includes(query) ||
+        (prompt.description?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [analysisSearchQuery, sortedAnalysisPrompts]);
+
+  const analysisPreloadedPrompts = useMemo(
+    () => filteredAnalysisPrompts.filter((prompt) => prompt.prompt.builtin),
+    [filteredAnalysisPrompts]
+  );
+
+  const analysisCustomPrompts = useMemo(
+    () => filteredAnalysisPrompts.filter((prompt) => !prompt.prompt.builtin),
+    [filteredAnalysisPrompts]
+  );
+
+  useEffect(() => {
+    if (
+      activePromptId &&
+      sortedAnalysisPrompts.some((prompt) => prompt.id === activePromptId)
+    ) {
+      return;
+    }
+    const firstComplete =
+      sortedAnalysisPrompts.find(
+        (prompt) => prompt.status === "complete" && prompt.hasOutput
+      ) ?? sortedAnalysisPrompts[0];
+    setActivePromptId(firstComplete?.id ?? null);
+  }, [activePromptId, sortedAnalysisPrompts]);
+
+  useEffect(() => {
+    if (activeTabId !== "recording" || recordingFiles.length === 0) return;
+    const missing = recordingFiles.filter((file) => !recordingSources[file.name]);
+    if (missing.length === 0) return;
+    let canceled = false;
+    void Promise.all(
+      missing.map(async (file) => {
+        try {
+          const source = await api.runs.getMediaSource(runFolder, file.name);
+          if (canceled) return null;
+          return [file.name, source] as const;
+        } catch {
+          return null;
+        }
+      })
+    ).then((entries) => {
+      if (canceled) return;
+      setRecordingSources((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const entry of entries) {
+          if (!entry) continue;
+          const [name, source] = entry;
+          if (next[name] === source) continue;
+          next[name] = source;
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    });
+    return () => {
+      canceled = true;
+    };
+  }, [activeTabId, recordingFiles, recordingSources, runFolder]);
+
   useEffect(() => {
     if (!detail) return;
     let filePath: string | null = null;
     let cacheKey: string | null = null;
-    if (activeTabId === "notes") {
+    if (activeTabId === "summary") {
+      filePath = promptCollections.summaryFileName;
+      cacheKey = "summary";
+    } else if (activeTabId === "notes") {
       filePath = "notes.md";
       cacheKey = "notes";
     } else if (activeTabId === "transcript") {
       filePath = "transcript.md";
       cacheKey = "transcript";
-    } else if (activeTabId === "prompts" && activePromptId) {
-      const p = promptOutputs.find((x) => x.id === activePromptId);
-      if (p) {
-        filePath = p.fileName;
-        cacheKey = `prompt:${p.id}`;
+    } else if (activeTabId === "analysis" && activePromptId) {
+      const activePrompt = promptCollections.analysisPrompts.find(
+        (prompt) => prompt.id === activePromptId
+      );
+      if (activePrompt) {
+        filePath = activePrompt.fileName;
+        cacheKey = `prompt:${activePrompt.id}`;
       }
     }
-    if (!filePath || !cacheKey) return;
-    if (tabContents[cacheKey] != null) return;
-    const key = cacheKey;
+    if (!filePath || !cacheKey || tabContents[cacheKey] != null) return;
     api.runs
       .readDocument(runFolder, filePath)
-      .then((content) => setTabContents((prev) => ({ ...prev, [key]: content })))
-      .catch(() =>
-        setTabContents((prev) => ({ ...prev, [key]: "_(file not found)_" }))
-      );
-  }, [activeTabId, activePromptId, detail, promptOutputs, runFolder, tabContents]);
+      .then((content) => {
+        setTabContents((prev) => ({ ...prev, [cacheKey!]: content }));
+        if (cacheKey === "notes") {
+          initialNotesRef.current = content;
+        }
+      })
+      .catch((err) => {
+        if (err instanceof Error && /ENOENT/i.test(err.message)) {
+          return;
+        }
+        setTabContents((prev) => ({
+          ...prev,
+          [cacheKey!]: "_(unable to load file)_",
+        }));
+      });
+  }, [
+    activePromptId,
+    activeTabId,
+    detail,
+    documentReloadVersion,
+    promptCollections.analysisPrompts,
+    promptCollections.summaryFileName,
+    runFolder,
+    tabContents,
+  ]);
+
+  const isCompletedMeeting =
+    detail != null && !["recording", "processing"].includes(detail.status);
+
+  const summaryContent = tabContents.summary ?? "";
+  const notesContent = tabContents.notes ?? "";
+  const transcriptContent = tabContents.transcript ?? "";
+  const activePrompt = activePromptId
+    ? sortedAnalysisPrompts.find((prompt) => prompt.id === activePromptId) ?? null
+    : null;
+  const promptContent = activePromptId ? tabContents[`prompt:${activePromptId}`] ?? "" : "";
+  const recordingPendingDelete =
+    recordingToDelete != null
+      ? recordingFiles.find((file) => file.name === recordingToDelete) ?? null
+      : null;
+
+  const isNotesDirty = notesEditMode && isCompletedMeeting && tabContents.notes !== initialNotesRef.current;
+
+  // Update parent about dirty state
+  useEffect(() => {
+    onDirtyChange?.(isNotesDirty);
+  }, [isNotesDirty, onDirtyChange]);
+
+  // Window Close Guard
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (isNotesDirty) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved notes. Are you sure you want to leave?";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isNotesDirty]);
 
   const onNotesChange = (value: string) => {
     setTabContents((prev) => ({ ...prev, notes: value }));
   };
 
+  const saveNotes = async () => {
+    if (tabContents.notes == null) return;
+    await api.runs.writeNotes(runFolder, tabContents.notes);
+    initialNotesRef.current = tabContents.notes;
+    setNotesEditMode(false);
+  };
+
   const onNotesBlur = () => {
-    const notes = tabContents.notes;
-    if (notes == null) return;
-    api.runs.writeNotes(runFolder, notes).catch(() => {});
+    if (isCompletedMeeting || tabContents.notes == null) return;
+    api.runs.writeNotes(runFolder, tabContents.notes).catch(() => {});
   };
 
-  const onOpenFinder = () => api.runs.openInFinder(runFolder);
+  const runSummary = async () => {
+    await startReprocess({
+      runFolder,
+      onlyIds: [PRIMARY_PROMPT_ID],
+    });
+  };
+
+  const runSelectedAnalysisPrompt = async () => {
+    if (!activePrompt) return;
+    await startReprocess({
+      runFolder,
+      onlyIds: [activePrompt.id],
+    });
+  };
+
+  const requestNotesDiscard = (action: () => void, description = "You have unsaved notes. Discard your changes and continue?") => {
+    if (!isNotesDirty) {
+      action();
+      return;
+    }
+
+    setPendingConfirm({
+      title: "Discard note changes?",
+      description,
+      confirmLabel: "Discard changes",
+      cancelLabel: "Keep editing",
+      action,
+    });
+  };
+
+  const onConfirmPendingAction = async () => {
+    if (!pendingConfirm) return;
+    setConfirmingAction(true);
+    try {
+      await pendingConfirm.action();
+      setPendingConfirm(null);
+    } finally {
+      setConfirmingAction(false);
+    }
+  };
+
   const onDelete = async () => {
-    if (!confirm("Delete this meeting and all its files?")) return;
-    await api.runs.deleteRun(runFolder);
-    onBack();
+    setPendingConfirm({
+      title: "Delete meeting?",
+      description: "This permanently deletes the meeting and all of its files from disk.",
+      confirmLabel: "Delete meeting",
+      confirmingLabel: "Deleting…",
+      cancelLabel: "Keep meeting",
+      confirmVariant: "destructive",
+      action: async () => {
+        await api.runs.deleteRun(runFolder);
+        onBack();
+      },
+    });
   };
 
-  if (loading) return <div className="muted">Loading…</div>;
-  if (error) return <div className="muted tone-error">{error}</div>;
-  if (!detail) return <div className="muted">Meeting not found.</div>;
+  const onDownloadRecording = async (fileName: string) => {
+    await api.runs.downloadMedia(runFolder, fileName);
+  };
 
-  const notesContent = tabContents.notes ?? "";
-  const transcriptContent = tabContents.transcript ?? "";
-  const activePrompt = activePromptId
-    ? promptOutputs.find((p) => p.id === activePromptId) ?? null
-    : null;
-  const promptContent = activePromptId
-    ? tabContents[`prompt:${activePromptId}`] ?? ""
-    : "";
+  const onConfirmDeleteRecording = async () => {
+    if (!recordingPendingDelete) return;
+    setDeletingRecording(true);
+    try {
+      await api.runs.deleteMedia(runFolder, recordingPendingDelete.name);
+      setRecordingSources((prev) => {
+        if (!(recordingPendingDelete.name in prev)) return prev;
+        const next = { ...prev };
+        delete next[recordingPendingDelete.name];
+        return next;
+      });
+      setRecordingToDelete(null);
+      await refresh();
+    } finally {
+      setDeletingRecording(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-3 rounded-lg border border-[var(--border-default)] bg-white px-4 py-4 text-sm text-[var(--text-secondary)]">
+        <Spinner />
+        Loading meeting…
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-lg border border-[var(--error)]/20 bg-[var(--error-muted)] px-4 py-3 text-sm text-[var(--error)]">
+        {error}
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div className="rounded-lg border border-[var(--border-default)] bg-white px-4 py-4 text-sm text-[var(--text-secondary)]">
+        Meeting not found.
+      </div>
+    );
+  }
 
   const obsidianTargetPath =
-    activeTabId === "notes"
+    activeTabId === "summary"
+      ? promptCollections.summaryFileName
+      : activeTabId === "notes"
       ? "notes.md"
       : activeTabId === "transcript"
       ? "transcript.md"
-      : activeTabId === "prompts" && activePrompt
+      : activeTabId === "analysis" && activePrompt
       ? activePrompt.fileName
       : null;
 
+  const showPipelineStatus =
+    reprocessStarting ||
+    detail.status === "processing" ||
+    sections.length > 0 ||
+    pipelineError != null ||
+    activeJob != null;
+
+  const pipelineStatusContent = showPipelineStatus ? (
+    <div className="space-y-3">
+      <PipelineStatus
+        sections={sections}
+        title={
+          reprocessStarting && sections.length === 0
+            ? "Reprocess queued for this meeting"
+            : config.llm_provider === "ollama"
+              ? `Processing locally with ${config.ollama.model}`
+              : config.llm_provider === "openai"
+                ? `Processing with ${config.openai.model}`
+                : "Processing meeting outputs"
+        }
+        description={
+          pipelineError
+            ? pipelineError
+            : reprocessStarting && sections.length === 0
+              ? "The job has started in the background. This timeline will fill in as each step begins."
+              : activeJob?.subtitle ??
+                (config.llm_provider === "ollama"
+                  ? "Local models stay on-device while each step updates in place."
+                  : "Outputs update in place as each step finishes.")
+        }
+        status={activeJob?.status ?? "processing"}
+        queuePosition={activeJob?.queuePosition}
+        currentLabel={activeJob?.progress.currentSectionLabel}
+        showPreparingWhenEmpty
+        action={
+          activeJob?.cancelable ? (
+            <CancelJobButton jobId={activeJob.id} onCancel={(jobId) => api.jobs.cancel(jobId)} />
+          ) : undefined
+        }
+      />
+      {pipelineError ? (
+        <div className="flex items-start gap-3 rounded-lg border border-[color:rgba(185,28,28,0.18)] bg-[rgba(185,28,28,0.06)] px-4 py-3 text-sm text-[var(--error)]">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>{pipelineError}</div>
+        </div>
+      ) : null}
+    </div>
+  ) : null;
+
   return (
-    <>
-      <div className="page-header" style={{ alignItems: "flex-start" }}>
-        <div>
-          <button onClick={onBack} style={{ marginBottom: 12 }}>
-            ← Back
-          </button>
-          <h1 className="section-title">{detail.title}</h1>
-          <p className="section-subtitle">
-            {new Date(detail.started || detail.date).toLocaleString()} ·{" "}
-            {detail.duration_minutes != null ? `${detail.duration_minutes.toFixed(1)}m` : "—"} ·{" "}
-            <span className={`status-pill ${detail.status}`}>{detail.status}</span>
-          </p>
-        </div>
-        <div className="page-actions">
-          <button onClick={() => setReprocessOpen(true)}>Reprocess…</button>
-          <button onClick={() => setRunPromptOpen(true)}>Run prompt…</button>
-          <button onClick={onOpenFinder}>Open folder</button>
-          <button className="danger" onClick={onDelete}>Delete</button>
-        </div>
-      </div>
-
-      {sections.length > 0 && (
-        <>
-          {config.llm_provider === "ollama" &&
-            sections.some((s) => s.state === "running") && (
-              <div
-                className="card"
-                style={{ borderColor: "var(--accent)", marginBottom: 8 }}
+    <PageScaffold className="gap-4 md:gap-5">
+      <PageIntro
+        compact
+        title={detail.title}
+        description={
+          <div className="space-y-3">
+            <Button
+              variant="ghost"
+              className="w-fit px-0 text-sm"
+              onClick={() => {
+                requestNotesDiscard(onBack);
+              }}
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to meetings
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Badge
+                variant={
+                  detail.status === "complete"
+                    ? "success"
+                    : detail.status === "processing"
+                    ? "info"
+                    : detail.status === "error"
+                    ? "destructive"
+                    : "warning"
+                }
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span className="spinner" aria-hidden="true" />
-                  <strong>Processing locally with {config.ollama.model}</strong>
-                </div>
-                <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  Stay in the app — local models are slower per section than
-                  cloud LLMs but never leave your machine.
-                </div>
-              </div>
-            )}
-          <PipelineStatus sections={sections} title="Live processing" />
-        </>
-      )}
-
-      <div className="tabs">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            className={`tab ${activeTabId === t.id ? "active" : ""}`}
-            onClick={() => setActiveTabId(t.id)}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
-
-      {activeTabId === "overview" && (
-        <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={refresh} />
-      )}
-
-      {activeTabId === "notes" && (
-        <div style={{ height: "60vh" }}>
-          <MarkdownEditor
-            value={notesContent}
-            onChange={onNotesChange}
-            onBlur={onNotesBlur}
-          />
-        </div>
-      )}
-
-      {activeTabId === "transcript" && <MarkdownView source={transcriptContent} />}
-
-      {activeTabId === "prompts" && (
-        <div className="prompts-tab">
-          <aside className="prompts-tab-nav">
-            <div className="prompts-tab-nav-header">
-              <button onClick={() => setRunPromptOpen(true)}>Run prompt…</button>
+                {detail.status}
+              </Badge>
+              {detail.duration_minutes != null ? (
+                <Badge variant="neutral">{detail.duration_minutes.toFixed(1)}m</Badge>
+              ) : null}
             </div>
-            {promptOutputs.length === 0 ? (
-              <div className="muted" style={{ padding: 12 }}>
-                No prompt outputs yet.
+            <p className="text-sm text-[var(--text-secondary)]">
+              {new Date(detail.started || detail.date).toLocaleString()}
+            </p>
+          </div>
+        }
+        actions={
+          <>
+            <Button variant="secondary" size="sm" onClick={() => setReprocessOpen(true)}>
+              <RefreshCcw className="h-3.5 w-3.5" />
+              Reprocess
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon">
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={() => api.runs.openInFinder(runFolder)}>
+                  Open folder
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onDelete} className="text-[var(--error)]">
+                  Delete meeting
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
+
+      <Tabs
+        value={activeTabId}
+        onValueChange={(value) => {
+          requestNotesDiscard(() => {
+            setNotesEditMode(false);
+            setActiveTabId(value as TabKind);
+          });
+        }}
+      >
+        <TabsList>
+          <TabsTrigger value="summary">Summary</TabsTrigger>
+          <TabsTrigger value="analysis">Analysis</TabsTrigger>
+          <TabsTrigger value="notes">Notes</TabsTrigger>
+          <TabsTrigger value="transcript">Transcript</TabsTrigger>
+          <TabsTrigger value="recording">Recording</TabsTrigger>
+          <TabsTrigger value="metadata">Metadata</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="summary">
+          <Card className="p-4 md:p-6">
+            <CardHeader className="mb-4">
+              <div className="space-y-2">
+                <Badge variant="accent" className="w-fit">
+                  Primary prompt
+                </Badge>
+                <CardTitle className="text-xl">
+                  {promptCollections.primaryPrompt?.label ?? "Summary"}
+                </CardTitle>
+                <p className="text-sm text-[var(--text-secondary)]">
+                  {promptCollections.primaryPrompt?.description?.trim()
+                    ? promptCollections.primaryPrompt.description
+                    : "The primary meeting recap lives here. Use Analysis for any secondary prompts and outputs."}
+                </p>
               </div>
-            ) : (
-              promptOutputs.map((p) => (
-                <button
-                  key={p.id}
-                  className={`prompts-tab-nav-item ${
-                    activePromptId === p.id ? "active" : ""
-                  }`}
-                  onClick={() => setActivePromptId(p.id)}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void runSummary()}
                 >
-                  <span className={`status-pill ${p.status ?? "pending"}`}>
-                    {p.status ?? "—"}
-                  </span>
-                  <span className="prompts-tab-nav-label">{p.label}</span>
-                </button>
-              ))
-            )}
-          </aside>
-          <div className="prompts-tab-content">
-            {activePrompt ? (
-              <MarkdownView source={promptContent} />
+                  <RefreshCcw className="h-3.5 w-3.5" />
+                  Refresh summary
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onOpenPromptLibrary(PRIMARY_PROMPT_ID)}
+                >
+                  <SquarePen className="h-3.5 w-3.5" />
+                  Edit summary prompt
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {pipelineStatusContent}
+              {promptCollections.summaryHasOutput ? (
+                <MarkdownView source={summaryContent} className="markdown-view" />
+              ) : (
+                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-5 text-sm text-[var(--text-secondary)]">
+                  No summary has been generated for this meeting yet. Refresh the summary to create the primary recap.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="analysis">
+          <div className="flex h-[calc(100vh-var(--header-height)-10rem)] min-h-[24rem] overflow-hidden rounded-xl border border-[var(--border-subtle)] bg-white shadow-sm">
+            <div className="flex w-52 shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--bg-secondary)]/30 lg:w-64">
+              <div className="space-y-4 p-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-[var(--text-primary)]">Library</h2>
+                </div>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-[var(--text-tertiary)]" />
+                  <Input
+                    placeholder="Filter..."
+                    className="h-8 bg-white/60 pl-8 text-xs focus:bg-white"
+                    value={analysisSearchQuery}
+                    onChange={(event) => setAnalysisSearchQuery(event.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-2 pb-4">
+                {loadingPrompts ? (
+                  <div className="px-4 py-3 text-sm text-[var(--text-secondary)]">
+                    <div className="flex items-center gap-2">
+                      <Spinner className="h-3.5 w-3.5" />
+                      Loading prompts…
+                    </div>
+                  </div>
+                ) : sortedAnalysisPrompts.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-[var(--text-secondary)]">
+                    No analysis prompts yet.
+                  </div>
+                ) : filteredAnalysisPrompts.length === 0 ? (
+                  <div className="px-4 py-3 text-sm text-[var(--text-secondary)]">
+                    No prompts match this filter.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {analysisPreloadedPrompts.length > 0 ? (
+                      <div className="space-y-1 px-2" data-testid="analysis-category-pre-loaded">
+                        <div className="px-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-tertiary)]/70">
+                          Pre-loaded
+                        </div>
+                        <div className="space-y-0.5">
+                          {analysisPreloadedPrompts.map((prompt) => (
+                            <AnalysisSidebarItem
+                              key={prompt.id}
+                              prompt={prompt}
+                              active={activePromptId === prompt.id}
+                              onSelect={() => setActivePromptId(prompt.id)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-1 px-2" data-testid="analysis-category-custom">
+                      <div className="px-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-tertiary)]/70">
+                        Custom
+                      </div>
+                      <div className="space-y-0.5 px-0.5">
+                        {analysisCustomPrompts.length === 0 ? (
+                          <div className="px-3 py-2 text-[11px] italic text-[var(--text-tertiary)]">
+                            No custom prompts yet
+                          </div>
+                        ) : (
+                          analysisCustomPrompts.map((prompt) => (
+                            <AnalysisSidebarItem
+                              key={prompt.id}
+                              prompt={prompt}
+                              active={activePromptId === prompt.id}
+                              onSelect={() => setActivePromptId(prompt.id)}
+                            />
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="min-w-0 flex-1 overflow-y-auto">
+              {activePrompt ? (
+                <div className="space-y-6 p-5 md:p-6">
+                  <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border-subtle)] pb-5">
+                    <div className="min-w-0 space-y-2">
+                      <h2 className="text-2xl font-semibold text-[var(--text-primary)]">
+                        {activePrompt.label}
+                      </h2>
+                      <p className="max-w-3xl text-sm text-[var(--text-secondary)]">
+                        {activePrompt.description?.trim()
+                          ? activePrompt.description
+                          : "No description yet. Use this prompt when you want a meeting-specific analysis beyond the primary summary."}
+                      </p>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-tertiary)]">
+                        {formatAnalysisPromptMeta(activePrompt)}
+                      </p>
+                    </div>
+                    <Button size="sm" onClick={() => void runSelectedAnalysisPrompt()}>
+                      <PlayCircle className="h-3.5 w-3.5" />
+                      Run prompt
+                    </Button>
+                  </div>
+
+                  {pipelineStatusContent}
+
+                  {activePrompt.hasOutput ? (
+                    <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 md:p-6">
+                      <MarkdownView source={promptContent} className="markdown-view" />
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-5 py-6 text-sm text-[var(--text-secondary)]">
+                      This prompt has not produced an output for this meeting yet. Use the run button above to generate it.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-5 md:p-6">
+                  {pipelineStatusContent}
+                  <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-5 py-6 text-sm text-[var(--text-secondary)]">
+                    Select an analysis prompt to view its output for this meeting.
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="notes">
+          <div className="space-y-4">
+            {isCompletedMeeting && !notesEditMode ? (
+              <Card className="p-4 md:p-6">
+                <CardHeader className="mb-4">
+                  <div className="space-y-2">
+                    <Badge variant="neutral" className="w-fit">
+                      Read mode
+                    </Badge>
+                    <CardTitle className="text-xl">View mode</CardTitle>
+                  </div>
+                  <Button onClick={() => setNotesEditMode(true)}>
+                    <SquarePen className="h-4 w-4" />
+                    Edit
+                  </Button>
+                </CardHeader>
+                <CardContent>
+                  <MarkdownView source={notesContent} className="markdown-view" />
+                </CardContent>
+              </Card>
             ) : (
-              <div className="muted">Select a prompt to view its output.</div>
+              <Card className="p-4">
+                <CardHeader className="mb-4">
+                  <div className="flex items-center justify-between w-full">
+                    <div className="flex items-center gap-3">
+                      <Badge variant={isCompletedMeeting ? "warning" : "accent"} className="w-fit">
+                        {isCompletedMeeting ? "Editing unlocked" : "Live notes"}
+                      </Badge>
+                    </div>
+                    <CardTitle className="text-xl">
+                      {isCompletedMeeting ? "Edit completed meeting notes" : "Notes"}
+                    </CardTitle>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className={`h-[60vh] overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
+                    <MarkdownEditor
+                      value={notesContent}
+                      onChange={onNotesChange}
+                      onBlur={onNotesBlur}
+                    />
+                  </div>
+                  {isCompletedMeeting ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex gap-3">
+                        <Button 
+                          onClick={() => void saveNotes()} 
+                          className={`transition-all duration-300 ${isNotesDirty ? "bg-[var(--accent)] shadow-lg ring-4 ring-[var(--accent)]/15 scale-105" : ""}`}
+                        >
+                          Save notes
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => {
+                            requestNotesDiscard(
+                              () => {
+                                setNotesEditMode(false);
+                                setTabContents((prev) => ({
+                                  ...prev,
+                                  notes: initialNotesRef.current ?? "",
+                                }));
+                              },
+                              "Discard your note edits and return to read mode?"
+                            );
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
             )}
           </div>
-        </div>
-      )}
+        </TabsContent>
 
-      {config.obsidian_integration.enabled && obsidianTargetPath && (
-        <div style={{ marginTop: 12 }}>
-          <button
-            onClick={() =>
-              api.runs.openInObsidian(runFolder, obsidianTargetPath).catch(() => {})
-            }
-          >
-            Open in Obsidian
-          </button>
-        </div>
-      )}
+        <TabsContent value="transcript">
+          <TranscriptView source={transcriptContent} />
+        </TabsContent>
 
-      {reprocessOpen && (
+        <TabsContent value="recording">
+          <div className="space-y-4">
+            {recordingFiles.length === 0 ? (
+              <Card className="p-4 md:p-6">
+                <CardContent>
+                  <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
+                    No source recordings are stored for this meeting.
+                  </div>
+                </CardContent>
+              </Card>
+            ) : (
+              recordingFiles.map((file) => {
+                const source = recordingSources[file.name];
+                const audioPreview = isAudioRecording(file.name) && source;
+                const videoRecording = isVideoRecording(file.name);
+                return (
+                  <Card key={file.name} className="p-4">
+                    <CardHeader className="mb-4">
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Badge variant="neutral">{getRecordingTypeLabel(file.name)}</Badge>
+                          <Badge variant="neutral">{formatFileSize(file.size)}</Badge>
+                        </div>
+                        <CardTitle className="text-lg break-all">{file.name}</CardTitle>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => void onDownloadRecording(file.name)}
+                        >
+                          <FileOutput className="h-3.5 w-3.5" />
+                          Download
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => setRecordingToDelete(file.name)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {audioPreview ? (
+                        <audio controls preload="metadata" src={source} className="w-full">
+                          Your browser does not support audio playback.
+                        </audio>
+                      ) : videoRecording ? (
+                        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
+                          Video preview isn&apos;t available in-app yet. Download this recording to view it.
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
+                          Preview is not available for this recording type. Download the file to inspect it.
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="metadata">
+          <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={() => void refresh()} />
+        </TabsContent>
+      </Tabs>
+
+      {config.obsidian_integration.enabled && obsidianTargetPath ? (
+        <Button variant="secondary" onClick={() => void api.runs.openInObsidian(runFolder, obsidianTargetPath)}>
+          Open in Obsidian
+        </Button>
+      ) : null}
+
+      {reprocessOpen ? (
         <ReprocessModal
           runFolder={runFolder}
+          manifest={detail?.manifest}
           onClose={() => setReprocessOpen(false)}
-          onDone={() => {
+          onStart={async (request) => {
+            await startReprocess(request);
             setReprocessOpen(false);
-            refresh();
           }}
         />
-      )}
+      ) : null}
 
-      {runPromptOpen && (
-        <RunPromptModal
-          runFolder={runFolder}
-          onClose={() => setRunPromptOpen(false)}
-          onDone={() => {
-            setRunPromptOpen(false);
-            refresh();
-          }}
-        />
-      )}
-    </>
+      <Dialog
+        open={recordingPendingDelete != null}
+        onOpenChange={(open) => {
+          if (!open && !deletingRecording) {
+            setRecordingToDelete(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete recording?</DialogTitle>
+            <DialogDescription>
+              This removes the selected source recording from disk but keeps the meeting, notes,
+              transcript, and analysis files. Future reprocessing may fail if this recording is
+              needed again.
+            </DialogDescription>
+          </DialogHeader>
+          {recordingPendingDelete ? (
+            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-3 text-sm text-[var(--text-primary)] break-all">
+              {recordingPendingDelete.name}
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              onClick={() => setRecordingToDelete(null)}
+              disabled={deletingRecording}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void onConfirmDeleteRecording()}
+              disabled={deletingRecording}
+            >
+              {deletingRecording ? (
+                <>
+                  <Spinner />
+                  Deleting…
+                </>
+              ) : (
+                "Delete recording"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={pendingConfirm != null}
+        onOpenChange={(open) => {
+          if (!open && !confirmingAction) {
+            setPendingConfirm(null);
+          }
+        }}
+        title={pendingConfirm?.title ?? ""}
+        description={pendingConfirm?.description ?? ""}
+        cancelLabel={pendingConfirm?.cancelLabel}
+        confirmLabel={pendingConfirm?.confirmLabel ?? "Confirm"}
+        confirmingLabel={pendingConfirm?.confirmingLabel}
+        confirmVariant={pendingConfirm?.confirmVariant}
+        onCancel={() => setPendingConfirm(null)}
+        onConfirm={() => void onConfirmPendingAction()}
+        disabled={confirmingAction}
+      />
+    </PageScaffold>
   );
 }
 
 function ReprocessModal({
   runFolder,
+  manifest,
   onClose,
-  onDone,
+  onStart,
 }: {
   runFolder: string;
+  manifest?: RunManifest;
   onClose: () => void;
-  onDone: () => void;
-}) {
-  const [onlyFailed, setOnlyFailed] = useState(false);
-  const [skipComplete, setSkipComplete] = useState(true);
-  const [autoOnly, setAutoOnly] = useState(true);
-  const [running, setRunning] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const onRun = async () => {
-    setRunning(true);
-    try {
-      await api.runs.reprocess({
-        runFolder,
-        onlyFailed,
-        skipComplete,
-        autoOnly,
-      });
-      onDone();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setRunning(false);
-    }
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Reprocess meeting</h2>
-        <p className="muted">Select which sections to regenerate.</p>
-        <div className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={onlyFailed}
-            onChange={(e) => setOnlyFailed(e.target.checked)}
-            id="only-failed"
-          />
-          <label htmlFor="only-failed" style={{ marginBottom: 0 }}>
-            Only rerun sections that failed last time
-          </label>
-        </div>
-        <div className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={skipComplete}
-            onChange={(e) => setSkipComplete(e.target.checked)}
-            id="skip-complete"
-          />
-          <label htmlFor="skip-complete" style={{ marginBottom: 0 }}>
-            Skip sections that are already complete
-          </label>
-        </div>
-        <div className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={!autoOnly}
-            onChange={(e) => setAutoOnly(!e.target.checked)}
-            id="include-manual"
-          />
-          <label htmlFor="include-manual" style={{ marginBottom: 0 }}>
-            Include manual prompts (off = auto-only)
-          </label>
-        </div>
-        {error && <div className="muted tone-error">{error}</div>}
-        <div className="actions">
-          <button onClick={onClose} disabled={running}>Cancel</button>
-          <button className="primary" onClick={onRun} disabled={running}>
-            {running ? "Running…" : "Run"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function RunPromptModal({
-  runFolder,
-  onClose,
-  onDone,
-}: {
-  runFolder: string;
-  onClose: () => void;
-  onDone: () => void;
+  onStart: (request: ReprocessRequest) => Promise<void>;
 }) {
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [loadingPrompts, setLoadingPrompts] = useState(true);
+  const [selectionMode, setSelectionMode] = useState<"auto" | "custom">("auto");
+  const [selectedPromptIds, setSelectedPromptIds] = useState<string[]>([]);
+  const [scope, setScope] = useState<"smart" | "full" | "failed">("smart");
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.prompts.list().then((list) => {
-      setPrompts(list);
-      if (list.length > 0) setSelectedId(list[0].id);
-    });
+    let alive = true;
+    setLoadingPrompts(true);
+    void api.prompts.list()
+      .then((list) => {
+        if (!alive) return;
+        const sorted = [...list].sort((left, right) => {
+          if (left.auto !== right.auto) return left.auto ? -1 : 1;
+          return left.label.localeCompare(right.label);
+        });
+        setPrompts(sorted);
+        setSelectedPromptIds(sorted.filter((prompt) => prompt.auto).map((prompt) => prompt.id));
+      })
+      .finally(() => {
+        if (alive) setLoadingPrompts(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
+  const togglePrompt = (promptId: string) => {
+    setSelectedPromptIds((prev) =>
+      prev.includes(promptId) ? prev.filter((id) => id !== promptId) : [...prev, promptId]
+    );
+  };
+
   const onRun = async () => {
-    if (!selectedId) return;
+    setError(null);
     setRunning(true);
     try {
-      await api.runs.reprocess({
+      await onStart({
         runFolder,
-        onlyIds: [selectedId],
+        onlyFailed: scope === "failed",
+        skipComplete: scope !== "full",
+        autoOnly: selectionMode === "auto",
+        onlyIds: selectionMode === "custom" ? selectedPromptIds : undefined,
       });
-      onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -470,26 +1237,264 @@ function RunPromptModal({
     }
   };
 
+  const willRunCount = useMemo(() => {
+    const targetIds = selectionMode === "auto" 
+      ? prompts.filter(p => p.enabled && p.auto).map(p => p.id)
+      : selectedPromptIds;
+    
+    return targetIds.filter(id => {
+      const status = manifest?.sections?.[id]?.status;
+      if (scope === "failed") return status === "failed";
+      if (scope === "smart") return status !== "complete";
+      return true; // full
+    }).length;
+  }, [prompts, selectedPromptIds, selectionMode, manifest, scope]);
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Run prompt</h2>
-        <label>Prompt</label>
-        <select value={selectedId} onChange={(e) => setSelectedId(e.target.value)}>
-          {prompts.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label} {p.auto ? "" : "(manual)"}
-            </option>
-          ))}
-        </select>
-        {error && <div className="muted tone-error">{error}</div>}
-        <div className="actions">
-          <button onClick={onClose} disabled={running}>Cancel</button>
-          <button className="primary" onClick={onRun} disabled={running || !selectedId}>
-            {running ? "Running…" : "Run"}
-          </button>
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="gap-6">
+        <DialogHeader>
+          <DialogTitle>Reprocess meeting</DialogTitle>
+          <DialogDescription>
+            Update analysis sections for this meeting. Runs in the background.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5">
+          <div className="space-y-2.5">
+            <label className="text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
+              1. Choose prompts
+            </label>
+            <div className="flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
+              <button
+                type="button"
+                onClick={() => setSelectionMode("auto")}
+                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  selectionMode === "auto"
+                    ? "bg-white text-[var(--text-primary)] shadow-sm"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                Auto-run set
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectionMode("custom")}
+                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                  selectionMode === "custom"
+                    ? "bg-white text-[var(--text-primary)] shadow-sm"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                Pick specific prompts
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2.5">
+            <label className="text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
+              2. Select scope
+            </label>
+            <Select 
+              value={scope} 
+              onValueChange={(val) => setScope(val as any)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="smart">
+                  <div className="flex flex-col items-start gap-0.5">
+                    <span className="font-medium">Smart (New or failed only)</span>
+                    <span className="text-xs text-[var(--text-tertiary)]">Skips sections that already completed successfully.</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="full">
+                  <div className="flex flex-col items-start gap-0.5">
+                    <span className="font-medium">Full (Everything)</span>
+                    <span className="text-xs text-[var(--text-tertiary)]">Re-runs all selected prompts, overwriting existing results.</span>
+                  </div>
+                </SelectItem>
+                <SelectItem value="failed">
+                  <div className="flex flex-col items-start gap-0.5">
+                    <span className="font-medium">Errors only</span>
+                    <span className="text-xs text-[var(--text-tertiary)]">Only retries sections that previously failed.</span>
+                  </div>
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {selectionMode === "custom" && (
+            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="text-sm font-medium text-[var(--text-primary)]">
+                  {selectedPromptIds.length} prompts selected
+                </div>
+                <div className="flex items-center gap-1.5 text-xs">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setSelectedPromptIds(prompts.map((p) => p.id))}
+                    disabled={loadingPrompts || prompts.length === 0}
+                  >
+                    Select all
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2"
+                    onClick={() => setSelectedPromptIds([])}
+                    disabled={selectedPromptIds.length === 0}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              </div>
+
+              <div className="max-h-[220px] space-y-1.5 overflow-auto pr-1">
+                {loadingPrompts ? (
+                  <div className="flex items-center gap-3 rounded-md bg-white px-3 py-2.5 text-sm text-[var(--text-secondary)]">
+                    <Spinner />
+                    Loading prompts…
+                  </div>
+                ) : prompts.length === 0 ? (
+                  <div className="rounded-md bg-white px-3 py-2.5 text-sm text-[var(--text-secondary)]">
+                    No prompts are available yet.
+                  </div>
+                ) : (
+                  prompts.map((prompt) => {
+                    const checked = selectedPromptIds.includes(prompt.id);
+                    const status = manifest?.sections?.[prompt.id]?.status;
+                    return (
+                      <label
+                        key={prompt.id}
+                        className={`flex items-center gap-3 rounded-md border px-3 py-2 text-sm transition-colors cursor-pointer ${
+                          checked
+                            ? "border-[var(--accent)] bg-white shadow-sm"
+                            : "border-[var(--border-default)] bg-white hover:bg-[var(--bg-primary)]"
+                        }`}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={() => togglePrompt(prompt.id)}
+                        />
+                        <div className="min-w-0 flex-1 py-1.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-[var(--text-primary)]">{prompt.label}</span>
+                            {status === "complete" && <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 shadow-none hover:bg-emerald-50">Complete</Badge>}
+                            {status === "failed" && <Badge variant="destructive">Failed</Badge>}
+                          </div>
+                          {prompt.description?.trim() && (
+                            <div className="truncate text-xs text-[var(--text-secondary)]">
+                              {prompt.description}
+                            </div>
+                          )}
+                        </div>
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+
+          {error ? <div className="text-sm text-[var(--error)]">{error}</div> : null}
+        </div>
+
+        <DialogFooter className="items-center">
+          <div className="mr-auto text-sm text-[var(--text-secondary)]">
+            {willRunCount === 0 ? (
+              <span className="text-[var(--text-tertiary)] italic">No prompts match current scope</span>
+            ) : (
+              <span>Will run <strong className="text-[var(--text-primary)]">{willRunCount}</strong> prompt{willRunCount === 1 ? "" : "s"}</span>
+            )}
+          </div>
+          <Button variant="secondary" onClick={onClose} disabled={running}>
+            Cancel
+          </Button>
+          <Button
+            onClick={onRun}
+            disabled={running || willRunCount === 0}
+            className="min-w-[120px]"
+          >
+            {running ? (
+              <>
+                <Spinner />
+                Starting…
+              </>
+            ) : (
+              "Start reprocess"
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function sortAnalysisPrompts(left: MeetingAnalysisPromptItem, right: MeetingAnalysisPromptItem) {
+  if (
+    left.prompt.sort_order != null &&
+    right.prompt.sort_order != null &&
+    left.prompt.sort_order !== right.prompt.sort_order
+  ) {
+    return left.prompt.sort_order - right.prompt.sort_order;
+  }
+  if (left.prompt.sort_order != null && right.prompt.sort_order == null) return -1;
+  if (left.prompt.sort_order == null && right.prompt.sort_order != null) return 1;
+  return left.label.localeCompare(right.label);
+}
+
+function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem): string {
+  const parts = [prompt.prompt.auto ? "Auto-run prompt" : "Manual prompt"];
+
+  if (prompt.status === "running") {
+    parts.push("Running");
+  } else if (prompt.status === "failed") {
+    parts.push("Last run failed");
+  } else if (prompt.status === "queued") {
+    parts.push("Queued");
+  } else if (prompt.hasOutput) {
+    parts.push("Output ready");
+  } else {
+    parts.push("No output yet");
+  }
+
+  return parts.join(" • ");
+}
+
+function AnalysisSidebarItem({
+  prompt,
+  active,
+  onSelect,
+}: {
+  prompt: MeetingAnalysisPromptItem;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`group relative flex w-full items-center justify-between rounded-md px-3 py-2 text-left transition-all ${
+        active
+          ? "bg-white font-semibold text-[var(--text-primary)] shadow-sm ring-1 ring-black/5"
+          : "text-[var(--text-secondary)] hover:bg-white/60 hover:text-[var(--text-primary)]"
+      }`}
+    >
+      <div className="min-w-0">
+        <span className="truncate text-xs">{prompt.label}</span>
+        <div className="mt-0.5 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+          {formatAnalysisPromptMeta(prompt)}
         </div>
       </div>
-    </div>
+      {active && (
+        <div className="absolute left-0 top-2 h-4 w-0.5 rounded-full bg-[var(--accent)]" />
+      )}
+    </button>
   );
 }

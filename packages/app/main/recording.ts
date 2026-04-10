@@ -1,6 +1,8 @@
+import fs from "node:fs";
 import path from "node:path";
 import {
   FfmpegRecorder,
+  OperationAbortedError,
   loadConfig,
   createRun,
   processRun,
@@ -10,6 +12,7 @@ import {
   clearActiveRecording,
   openInObsidian,
   createRunLogger,
+  createAppLogger,
   type RecordingSession,
   type AppConfig,
   type Logger,
@@ -17,6 +20,9 @@ import {
 } from "@meeting-notes/engine";
 import type { RecordingStatus } from "../shared/ipc.js";
 import { buildInterruptedRunUpdate } from "./recording-lifecycle.js";
+import { finishTrackedProcess, startTrackedProcess } from "./activity-monitor.js";
+import { scheduleJob } from "./jobs.js";
+import { resolveRunFolderPath } from "./run-access.js";
 
 export interface ActiveRecordingState {
   session: RecordingSession;
@@ -29,9 +35,15 @@ export interface ActiveRecordingState {
   micPath?: string;
   systemPath?: string;
   systemCaptured: boolean;
+  processIds: string[];
 }
 
 let active: ActiveRecordingState | null = null;
+const appLogger = createAppLogger(false);
+
+function isAbortLikeError(err: unknown): boolean {
+  return err instanceof OperationAbortedError || (err instanceof Error && err.name === "AbortError");
+}
 
 export function isRecording(): boolean {
   return active !== null;
@@ -104,6 +116,30 @@ export async function startRecording(
     micPath: session.paths.mic,
     systemPath: session.paths.system,
     systemCaptured: session.systemCaptured,
+    processIds: [
+      startTrackedProcess({
+        id: session.pids[0] ? `ffmpeg:${session.pids[0]}` : undefined,
+        type: "ffmpeg",
+        label: "Microphone capture",
+        pid: session.pids[0],
+        command: "ffmpeg avfoundation recording",
+        runFolder: folderPath,
+        status: "running",
+      }),
+      ...(session.systemCaptured && session.pids[1]
+        ? [
+            startTrackedProcess({
+              id: `ffmpeg:${session.pids[1]}`,
+              type: "ffmpeg",
+              label: "System audio capture",
+              pid: session.pids[1],
+              command: "ffmpeg avfoundation recording",
+              runFolder: folderPath,
+              status: "running",
+            }),
+          ]
+        : []),
+    ],
   };
 
   // Mirror the CLI's active-recording.json so `meeting-notes stop` can see it.
@@ -123,6 +159,12 @@ export async function startRecording(
     mic: session.paths.mic,
     system: session.paths.system ?? "(none)",
   });
+  appLogger.info("Recording started", {
+    runId: manifest.run_id,
+    runFolder: folderPath,
+    processType: "ffmpeg",
+    detail: session.systemCaptured ? "mic+system" : "mic-only",
+  });
 
   // Try to open notes.md in Obsidian if the integration is on.
   void openInObsidian(config, path.join(folderPath, "notes.md"));
@@ -131,12 +173,15 @@ export async function startRecording(
 }
 
 export interface StopOptions {
-  onProgress?: (event: PipelineProgressEvent) => void;
+  mode?: "process" | "delete";
+  onProgress?: (runFolder: string, event: PipelineProgressEvent) => void;
 }
 
 export async function stopRecording(
   opts: StopOptions = {}
-): Promise<{ run_folder: string } | null> {
+): Promise<{ run_folder?: string; deleted?: boolean } | null> {
+  const mode = opts.mode ?? "process";
+
   if (!active) {
     // Maybe the CLI has an active recording.
     const cli = loadActiveRecording();
@@ -150,6 +195,11 @@ export async function stopRecording(
         }
       }
       clearActiveRecording();
+      if (mode === "delete") {
+        const validatedRunFolder = resolveRunFolderPath(cli.run_folder, loadConfig());
+        fs.rmSync(validatedRunFolder, { recursive: true, force: true });
+        return { deleted: true };
+      }
       return { run_folder: cli.run_folder };
     }
     return null;
@@ -165,7 +215,16 @@ export async function stopRecording(
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  for (const processId of state.processIds) {
+    finishTrackedProcess(processId, { status: "exited" });
+  }
   clearActiveRecording();
+
+  if (mode === "delete") {
+    const validatedRunFolder = resolveRunFolderPath(state.runFolder, state.config);
+    fs.rmSync(validatedRunFolder, { recursive: true, force: true });
+    return { deleted: true };
+  }
 
   const audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[] = [];
   if (state.micPath) audioFiles.push({ path: state.micPath, speaker: "me" });
@@ -176,6 +235,9 @@ export async function stopRecording(
   if (audioFiles.length === 0) {
     state.logger.error("No audio files captured, marking run as error");
     updateRunStatus(state.runFolder, "error", { ended: new Date().toISOString() });
+    appLogger.error("Recording stopped without captured audio", {
+      runFolder: state.runFolder,
+    });
     return { run_folder: state.runFolder };
   }
 
@@ -183,19 +245,37 @@ export async function stopRecording(
   // the renderer subscribes to pipeline progress events.
   void (async () => {
     try {
-      await processRun({
-        config: state.config,
-        runFolder: state.runFolder,
+      await scheduleJob({
+        kind: "process-recording",
         title: state.title,
-        date: state.startedAt.split("T")[0],
-        audioFiles,
-        logger: state.logger,
-        onProgress: opts.onProgress,
+        subtitle: "Processing captured meeting locally",
+        runFolder: state.runFolder,
+        provider: state.config.llm_provider,
+        model:
+          state.config.llm_provider === "ollama"
+            ? state.config.ollama.model
+            : state.config.claude.model,
+        task: async ({ signal, updateProgress }) =>
+          processRun({
+            config: state.config,
+            runFolder: state.runFolder,
+            title: state.title,
+            date: state.startedAt.split("T")[0],
+            audioFiles,
+            logger: state.logger,
+            signal,
+            onProgress: (event) => {
+              updateProgress(event);
+              opts.onProgress?.(state.runFolder, event);
+            },
+          }),
       });
     } catch (err) {
-      state.logger.error("Auto-processing failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      if (!isAbortLikeError(err)) {
+        state.logger.error("Auto-processing failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
   })();
 
@@ -211,12 +291,19 @@ export async function stopActiveRecording(_reason: string): Promise<void> {
   } catch {
     // Best effort.
   }
+  for (const processId of state.processIds) {
+    finishTrackedProcess(processId, { status: "failed", error: "Recording interrupted during app quit" });
+  }
   if (_reason === "app-quit") {
     const endedAt = new Date().toISOString();
     updateRunStatus(state.runFolder, "aborted", buildInterruptedRunUpdate(state.startedAt, endedAt));
     state.logger.warn("Recording aborted during app quit", {
       run_folder: state.runFolder,
       endedAt,
+    });
+    appLogger.warn("Recording aborted during app quit", {
+      runFolder: state.runFolder,
+      detail: endedAt,
     });
   }
   clearActiveRecording();

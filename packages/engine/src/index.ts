@@ -42,6 +42,7 @@ export { processRun } from "./core/process-run.js";
 
 export {
   runPipeline,
+  planPipelineSteps,
   loadAllPrompts,
   updatePromptFrontmatter,
   resetDefaultPrompts,
@@ -55,9 +56,10 @@ export {
   type PipelineRunOptions,
   type LlmCallFn,
   type PipelineProgressEvent,
+  type PipelinePlannedStep,
 } from "./core/pipeline.js";
 
-export { getAudioInfo } from "./core/audio.js";
+export { getAudioInfo, mediaHasAudioStream } from "./core/audio.js";
 
 export {
   buildMarkdown,
@@ -79,7 +81,7 @@ export { openInObsidian } from "./core/obsidian.js";
 
 export { setupAsr } from "./core/setup-asr.js";
 
-export { setupLlm, checkOllama, type SetupLlmOptions } from "./core/setup-llm.js";
+export { setupLlm, checkOllama, normalizeLocalModelId, type SetupLlmOptions } from "./core/setup-llm.js";
 
 export { moveDataDirectory } from "./core/data-path.js";
 
@@ -98,11 +100,20 @@ export {
   OllamaProvider,
   pingOllama,
   listOllamaModels,
+  listRunningOllamaModels,
   pullOllamaModel,
   deleteOllamaModel,
   type OllamaTag,
+  type RunningOllamaModel,
 } from "./adapters/llm/ollama.js";
 export { classifyModel, type LlmKind } from "./adapters/llm/resolve.js";
 export type { LlmProvider, LlmResponse } from "./adapters/llm/provider.js";
+export { OperationAbortedError, throwIfAborted } from "./core/abort.js";
 
-export { createAppLogger, createRunLogger, type Logger } from "./logging/logger.js";
+export {
+  createAppLogger,
+  createRunLogger,
+  setAppLoggerListener,
+  type Logger,
+  type StructuredLogEntry,
+} from "./logging/logger.js";

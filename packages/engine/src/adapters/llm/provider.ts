@@ -4,6 +4,10 @@ export interface LlmResponse {
   model?: string;
 }
 
+export interface LlmCallOptions {
+  signal?: AbortSignal;
+}
+
 export interface LlmProvider {
   /**
    * `modelOverride` lets the pipeline ask a single provider instance to
@@ -14,6 +18,7 @@ export interface LlmProvider {
   call(
     systemPrompt: string,
     userMessage: string,
-    modelOverride?: string
+    modelOverride?: string,
+    options?: LlmCallOptions
   ): Promise<LlmResponse>;
 }

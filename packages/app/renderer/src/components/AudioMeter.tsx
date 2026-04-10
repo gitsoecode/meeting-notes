@@ -6,7 +6,13 @@ import { useEffect, useRef, useState } from "react";
  * reaching the OS from the mic". ffmpeg remains the source of truth for what
  * gets written to disk.
  */
-export function AudioMeter({ active }: { active: boolean }) {
+export function AudioMeter({
+  active,
+  label = "Microphone",
+}: {
+  active: boolean;
+  label?: string;
+}) {
   const [level, setLevel] = useState(0);
   const rafRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -65,7 +71,7 @@ export function AudioMeter({ active }: { active: boolean }) {
       <div className="audio-meter-track">
         <div className="audio-meter-fill" style={{ width: `${pct}%` }} />
       </div>
-      <span className="audio-meter-label">mic</span>
+      <span className="audio-meter-label">{label}</span>
     </div>
   );
 }

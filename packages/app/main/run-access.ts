@@ -6,6 +6,15 @@ export const RUN_INDEX_FILE = "index.md";
 export const RUN_NOTES_FILE = "notes.md";
 export const RUN_TRANSCRIPT_FILE = "transcript.md";
 export const RUN_LOG_FILE = "run.log";
+export const RUN_AUDIO_DIR = "audio";
+
+export type RunFileKind = "document" | "log" | "media";
+
+export interface RunFileDescriptor {
+  name: string;
+  size: number;
+  kind: RunFileKind;
+}
 
 export function assertPathInsideRoot(rootPath: string, targetPath: string, label: string): string {
   const resolvedRoot = path.resolve(rootPath);
@@ -22,6 +31,18 @@ export function isAllowedRunDocumentName(fileName: string): boolean {
     return false;
   }
   return fileName === RUN_LOG_FILE || fileName.endsWith(".md");
+}
+
+export function isAllowedRunMediaName(fileName: string): boolean {
+  if (!fileName) return false;
+  const normalized = path.posix.normalize(fileName);
+  if (normalized !== fileName) return false;
+  const parts = normalized.split("/");
+  if (parts.length !== 2 || parts[0] !== RUN_AUDIO_DIR) return false;
+  const baseName = parts[1];
+  if (!baseName || path.posix.basename(baseName) !== baseName) return false;
+  if (baseName.startsWith("normalized-")) return false;
+  return true;
 }
 
 export function resolveRunFolderPath(
@@ -51,4 +72,60 @@ export function resolveRunDocumentPath(
     path.join(resolvedRunFolder, fileName),
     "Run document"
   );
+}
+
+export function resolveRunMediaPath(
+  runFolder: string,
+  fileName: string,
+  config: AppConfig = loadConfig()
+): string {
+  if (!isAllowedRunMediaName(fileName)) {
+    throw new Error("Run media name is invalid.");
+  }
+  const resolvedRunFolder = resolveRunFolderPath(runFolder, config);
+  const mediaName = fileName.slice(`${RUN_AUDIO_DIR}/`.length);
+  return assertPathInsideRoot(
+    resolvedRunFolder,
+    path.join(resolvedRunFolder, RUN_AUDIO_DIR, mediaName),
+    "Run media"
+  );
+}
+
+export function listRunFiles(
+  runFolder: string,
+  config: AppConfig = loadConfig()
+): RunFileDescriptor[] {
+  const resolvedRunFolder = resolveRunFolderPath(runFolder, config);
+  const files: RunFileDescriptor[] = [];
+
+  for (const entry of fs.readdirSync(resolvedRunFolder, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const kind =
+      entry.name === RUN_LOG_FILE ? "log" : entry.name.endsWith(".md") ? "document" : null;
+    if (!kind) continue;
+    const stat = fs.statSync(path.join(resolvedRunFolder, entry.name));
+    files.push({ name: entry.name, size: stat.size, kind });
+  }
+
+  const audioDir = path.join(resolvedRunFolder, RUN_AUDIO_DIR);
+  if (fs.existsSync(audioDir)) {
+    for (const entry of fs.readdirSync(audioDir, { withFileTypes: true })) {
+      if (!entry.isFile()) continue;
+      if (entry.name.startsWith("normalized-")) continue;
+      const stat = fs.statSync(path.join(audioDir, entry.name));
+      files.push({
+        name: path.posix.join(RUN_AUDIO_DIR, entry.name),
+        size: stat.size,
+        kind: "media",
+      });
+    }
+  }
+
+  files.sort((a, b) => {
+    const order = { document: 0, log: 1, media: 2 } as const;
+    if (order[a.kind] !== order[b.kind]) return order[a.kind] - order[b.kind];
+    return a.name.localeCompare(b.name);
+  });
+
+  return files;
 }
