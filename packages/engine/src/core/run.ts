@@ -6,7 +6,7 @@ import { AppConfig, resolveRunsPath, resolveBasePath } from "./config.js";
 import { writeMarkdownFile, writeRawFile } from "./markdown.js";
 import { createRunLogger, Logger } from "../logging/logger.js";
 
-export type RunStatus = "recording" | "processing" | "complete" | "error" | "aborted";
+export type RunStatus = "draft" | "recording" | "paused" | "processing" | "complete" | "error" | "aborted";
 export type SectionStatus = "pending" | "running" | "complete" | "failed";
 
 export interface SectionState {
@@ -35,6 +35,14 @@ export interface RunManifest {
   asr_provider: string;
   llm_provider: string;
   sections: Record<string, SectionState>;
+  /** ISO 8601 datetime for when the meeting is scheduled. */
+  scheduled_time: string | null;
+  /** Filenames stored in the attachments/ subdirectory. */
+  attachments: string[];
+  /** Pre-configured prompt IDs to run on processing; null = use defaults. */
+  selected_prompts: string[] | null;
+  /** Timestamped audio segment folder names under audio/. */
+  recording_segments: string[];
 }
 
 export interface RunContext {
@@ -76,7 +84,7 @@ export interface CreateRunOptions {
 }
 
 export function manifestToFrontmatter(manifest: RunManifest): Record<string, unknown> {
-  return {
+  const fm: Record<string, unknown> = {
     type: "meeting-run",
     run_id: manifest.run_id,
     title: manifest.title,
@@ -93,6 +101,11 @@ export function manifestToFrontmatter(manifest: RunManifest): Record<string, unk
     llm_provider: manifest.llm_provider,
     sections: manifest.sections,
   };
+  if (manifest.scheduled_time) fm.scheduled_time = manifest.scheduled_time;
+  if (manifest.attachments.length > 0) fm.attachments = manifest.attachments;
+  if (manifest.selected_prompts) fm.selected_prompts = manifest.selected_prompts;
+  if (manifest.recording_segments.length > 0) fm.recording_segments = manifest.recording_segments;
+  return fm;
 }
 
 function buildIndexBody(manifest: RunManifest): string {
@@ -154,6 +167,10 @@ export function createRun(
     asr_provider: config.asr_provider,
     llm_provider: config.llm_provider,
     sections: {},
+    scheduled_time: null,
+    attachments: [],
+    selected_prompts: null,
+    recording_segments: [],
   };
 
   writeManifest(folderPath, manifest);
@@ -164,6 +181,78 @@ export function createRun(
 
   const logger = createRunLogger(path.join(folderPath, "run.log"), consoleLog);
   logger.info("Run created", { run_id: runId, title, source_mode: sourceMode });
+
+  return { manifest, folderPath, logger };
+}
+
+export function formatAudioSegmentName(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  const ss = String(date.getSeconds()).padStart(2, "0");
+  return `${y}-${mo}-${d}_${hh}-${mm}-${ss}`;
+}
+
+function getPrepTemplate(config: AppConfig): string {
+  const templatePath = path.join(resolveBasePath(config), "Templates", "prep-template.md");
+  if (fs.existsSync(templatePath)) {
+    return fs.readFileSync(templatePath, "utf-8");
+  }
+  return "# Talking Points\n\n- \n\n# Agenda\n\n- \n";
+}
+
+export interface CreateDraftOptions {
+  scheduledTime?: string | null;
+  quiet?: boolean;
+}
+
+export function createDraftRun(
+  config: AppConfig,
+  title: string,
+  description: string | null = null,
+  opts: CreateDraftOptions = {}
+): RunContext {
+  const consoleLog = !opts.quiet;
+  const scheduledDate = opts.scheduledTime ? new Date(opts.scheduledTime) : null;
+  const folderDate = scheduledDate && !isNaN(scheduledDate.getTime()) ? scheduledDate : new Date();
+  const now = new Date();
+  const runId = ulid();
+  const dateFolder = formatDateFolder(folderDate);
+  const runFolderName = formatRunFolderName(folderDate, title);
+  const folderPath = path.join(resolveRunsPath(config), dateFolder, runFolderName);
+
+  fs.mkdirSync(path.join(folderPath, "audio"), { recursive: true });
+  fs.mkdirSync(path.join(folderPath, "attachments"), { recursive: true });
+
+  const manifest: RunManifest = {
+    run_id: runId,
+    title,
+    description,
+    date: folderDate.toISOString().split("T")[0],
+    started: now.toISOString(),
+    ended: null,
+    status: "draft",
+    source_mode: "both",
+    tags: [],
+    participants: [],
+    duration_minutes: null,
+    asr_provider: config.asr_provider,
+    llm_provider: config.llm_provider,
+    sections: {},
+    scheduled_time: opts.scheduledTime ?? null,
+    attachments: [],
+    selected_prompts: null,
+    recording_segments: [],
+  };
+
+  writeManifest(folderPath, manifest);
+  writeRawFile(path.join(folderPath, "prep.md"), getPrepTemplate(config));
+  writeRawFile(path.join(folderPath, "notes.md"), getNotesTemplate(config));
+
+  const logger = createRunLogger(path.join(folderPath, "run.log"), consoleLog);
+  logger.info("Draft run created", { run_id: runId, title, scheduled_time: opts.scheduledTime ?? null });
 
   return { manifest, folderPath, logger };
 }
@@ -208,6 +297,10 @@ export function loadRunManifest(folderPath: string): RunManifest {
     asr_provider: data.asr_provider ?? "",
     llm_provider: data.llm_provider ?? "",
     sections: data.sections ?? {},
+    scheduled_time: (data as Record<string, unknown>).scheduled_time as string ?? null,
+    attachments: (data as Record<string, unknown>).attachments as string[] ?? [],
+    selected_prompts: (data as Record<string, unknown>).selected_prompts as string[] ?? null,
+    recording_segments: (data as Record<string, unknown>).recording_segments as string[] ?? [],
   };
 }
 

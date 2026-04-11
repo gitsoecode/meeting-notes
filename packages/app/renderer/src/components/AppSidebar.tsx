@@ -1,13 +1,23 @@
 import {
   AudioLines,
+  ChevronDown,
+  CirclePlay,
+  FileUp,
   FolderOpen,
   LayoutDashboard,
   MessageSquareText,
+  NotebookPen,
   PlusCircle,
   Settings2,
 } from "lucide-react";
 import { MeetingNotesMark } from "./MeetingNotesMark";
 import { Button } from "./ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -19,11 +29,15 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "./ui/sidebar";
+import { Spinner } from "./ui/spinner";
 
 interface AppSidebarProps {
   activeNav: "record" | "meetings" | "prompts" | "settings" | "activity";
   onNavigate: (route: AppSidebarProps["activeNav"]) => void;
-  onStartMeeting: () => void;
+  onStartNow: () => void;
+  onCreateDraft: () => void;
+  onImport: () => void;
+  quickStarting?: boolean;
 }
 
 const mainItems = [
@@ -40,7 +54,10 @@ const secondaryItems = [
 export function AppSidebar({
   activeNav,
   onNavigate,
-  onStartMeeting,
+  onStartNow,
+  onCreateDraft,
+  onImport,
+  quickStarting,
 }: AppSidebarProps) {
   return (
     <Sidebar>
@@ -54,14 +71,35 @@ export function AppSidebar({
       <SidebarContent>
         <div className="space-y-3">
           <div className="pb-2">
-            <Button
-              size="sm"
-              className="h-9 w-full justify-start rounded-lg border border-[rgba(45,107,63,0.18)] bg-[rgba(45,107,63,0.08)] px-3 text-[var(--text-primary)] shadow-sm hover:bg-[rgba(45,107,63,0.14)] focus-visible:ring-[var(--ring)]"
-              onClick={onStartMeeting}
-            >
-              <PlusCircle className="h-4 w-4" />
-              Quick Create
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  className="h-9 w-full justify-between rounded-lg border border-[rgba(45,107,63,0.18)] bg-[rgba(45,107,63,0.08)] px-3 text-[var(--text-primary)] shadow-sm hover:bg-[rgba(45,107,63,0.14)] focus-visible:ring-[var(--ring)]"
+                  disabled={quickStarting}
+                >
+                  <span className="flex items-center gap-2">
+                    {quickStarting ? <Spinner className="h-3.5 w-3.5" /> : <PlusCircle className="h-4 w-4" />}
+                    Quick Create
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" sideOffset={4} className="w-56">
+                <DropdownMenuItem onClick={onStartNow}>
+                  <CirclePlay className="h-4 w-4" />
+                  Start meeting now
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onCreateDraft}>
+                  <NotebookPen className="h-4 w-4" />
+                  Create draft meeting
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={onImport}>
+                  <FileUp className="h-4 w-4" />
+                  Import recording
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           <SidebarGroup>

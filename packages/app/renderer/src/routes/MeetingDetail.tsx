@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft,
   ExternalLink,
   FileOutput,
   MoreHorizontal,
@@ -25,6 +24,7 @@ import { MarkdownEditor } from "../components/MarkdownEditor";
 import { MarkdownView } from "../components/MarkdownView";
 import { OverviewPanel } from "../components/OverviewPanel";
 import { ConfirmDialog } from "../components/ConfirmDialog";
+import { MeetingHeader } from "../components/MeetingHeader";
 import {
   PipelineStatus,
   applyProgress,
@@ -34,7 +34,7 @@ import {
 } from "../components/PipelineStatus";
 import { TranscriptView } from "../components/TranscriptView";
 import { ChatLauncherModal } from "../components/ChatLauncherModal";
-import { PageIntro, PageScaffold } from "../components/PageScaffold";
+import { PageScaffold } from "../components/PageScaffold";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -68,10 +68,11 @@ interface MeetingDetailProps {
   config: AppConfigDTO;
   onBack: () => void;
   onOpenPromptLibrary: (promptId?: string) => void;
+  onOpenPrep?: (runFolder: string) => void;
   onDirtyChange?: (isDirty: boolean) => void;
 }
 
-type TabKind = "summary" | "analysis" | "notes" | "transcript" | "recording" | "metadata";
+type TabKind = "summary" | "analysis" | "notes" | "transcript" | "recording" | "files" | "metadata";
 
 type PendingConfirmState = {
   title: string;
@@ -90,12 +91,11 @@ function buildAnalysisSignature(detail: RunDetail | null): string {
       id,
       section?.status ?? "",
       section?.filename ?? "",
-      section?.completed_at ?? "",
     ])
-    .sort(([left], [right]) => left.localeCompare(right));
+    .sort(([left], [right]) => (left as string).localeCompare(right as string));
   const files = detail.files
     .filter((file) => file.kind === "document" && file.name.endsWith(".md"))
-    .map((file) => [file.name, file.size])
+    .map((file) => [file.name, file.size] as const)
     .sort(([left], [right]) => left.localeCompare(right));
   return JSON.stringify({ status: detail.status, manifestSections, files });
 }
@@ -132,6 +132,7 @@ export function MeetingDetail({
   config,
   onBack,
   onOpenPromptLibrary,
+  onOpenPrep,
   onDirtyChange,
 }: MeetingDetailProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -329,7 +330,7 @@ export function MeetingDetail({
     return buildMeetingPromptCollections({
       prompts,
       manifestSections: manifest.sections ?? {},
-      files: detail.files,
+      files: detail.files.filter((f): f is typeof f & { kind?: "document" | "log" | "media" } => f.kind !== "attachment"),
     });
   }, [detail, prompts]);
 
@@ -645,9 +646,9 @@ export function MeetingDetail({
           reprocessStarting && sections.length === 0
             ? "Reprocess queued for this meeting"
             : config.llm_provider === "ollama"
-              ? `Processing locally with ${config.ollama.model}`
+              ? "Processing locally"
               : config.llm_provider === "openai"
-                ? `Processing with ${config.openai.model}`
+                ? "Processing with OpenAI"
                 : "Processing meeting outputs"
         }
         description={
@@ -681,50 +682,60 @@ export function MeetingDetail({
 
   return (
     <PageScaffold className="gap-4 md:gap-5">
-      <PageIntro
-        compact
+      <MeetingHeader
+        status={detail.status}
         title={detail.title}
-        description={
-          <div className="space-y-3">
-            <Button
-              variant="ghost"
-              className="w-fit px-0 text-sm"
-              onClick={() => {
-                requestNotesDiscard(onBack);
-              }}
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to meetings
-            </Button>
-            <div className="flex flex-wrap gap-2">
-              <Badge
-                variant={
-                  detail.status === "complete"
-                    ? "success"
-                    : detail.status === "processing"
-                    ? "info"
-                    : detail.status === "error"
-                    ? "destructive"
-                    : "warning"
-                }
-              >
-                {detail.status}
-              </Badge>
-              {detail.duration_minutes != null ? (
-                <Badge variant="neutral">{detail.duration_minutes.toFixed(1)}m</Badge>
-              ) : null}
-            </div>
-            <p className="text-sm text-[var(--text-secondary)]">
-              {new Date(detail.started || detail.date).toLocaleString()}
-            </p>
-          </div>
-        }
+        description={detail.description}
+        duration={detail.duration_minutes}
+        timestamp={detail.started || detail.date}
+        onTitleSave={(v) => {
+          api.runs.updateMeta({ runFolder, title: v }).catch(() => {});
+          setDetail((prev) => prev ? { ...prev, title: v } : prev);
+        }}
+        onDescriptionSave={(v) => {
+          api.runs.updateMeta({ runFolder, description: v.trim() || null }).catch(() => {});
+          setDetail((prev) => prev ? { ...prev, description: v.trim() || null } : prev);
+        }}
+        onBack={() => requestNotesDiscard(onBack)}
         actions={
           <>
+            {detail.status === "complete" && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await api.recording.continueRecording({ runFolder });
+                  } catch (err) {
+                    console.error("Continue recording failed", err);
+                  }
+                }}
+              >
+                <PlayCircle className="h-3.5 w-3.5" />
+                Continue recording
+              </Button>
+            )}
             <Button variant="secondary" size="sm" onClick={() => setChatLauncherOpen(true)}>
               <ExternalLink className="h-3.5 w-3.5" />
               Launch chat
             </Button>
+            {(detail.status === "complete" || detail.status === "error") && onOpenPrep && (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    await api.runs.reopenAsDraft(runFolder);
+                    onOpenPrep(runFolder);
+                  } catch (err) {
+                    console.error("Reopen as draft failed", err);
+                  }
+                }}
+              >
+                <SquarePen className="h-3.5 w-3.5" />
+                Edit
+              </Button>
+            )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon">
@@ -762,6 +773,7 @@ export function MeetingDetail({
           <TabsTrigger value="notes">Notes</TabsTrigger>
           <TabsTrigger value="transcript">Transcript</TabsTrigger>
           <TabsTrigger value="recording">Recording</TabsTrigger>
+          <TabsTrigger value="files">Files</TabsTrigger>
           <TabsTrigger value="metadata">Metadata</TabsTrigger>
         </TabsList>
 
@@ -1085,6 +1097,10 @@ export function MeetingDetail({
               })
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="files">
+          <FilesTab runFolder={runFolder} />
         </TabsContent>
 
         <TabsContent value="metadata">
@@ -1511,5 +1527,79 @@ function AnalysisSidebarItem({
         <div className="absolute left-0 top-2 h-4 w-0.5 rounded-full bg-[var(--accent)]" />
       )}
     </button>
+  );
+}
+
+// ---- Files tab component ----
+
+function FilesTab({ runFolder }: { runFolder: string }) {
+  const [attachments, setAttachments] = useState<Array<{ name: string; size: number }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.runs.listAttachments(runFolder)
+      .then(setAttachments)
+      .catch(() => setAttachments([]))
+      .finally(() => setLoading(false));
+  }, [runFolder]);
+
+  const onAdd = async () => {
+    const result = await api.runs.addAttachment(runFolder);
+    if (result) setAttachments((prev) => [...prev, { name: result.fileName, size: result.size }]);
+  };
+
+  const onRemove = async (name: string) => {
+    await api.runs.removeAttachment(runFolder, name);
+    setAttachments((prev) => prev.filter((a) => a.name !== name));
+  };
+
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  if (loading) {
+    return <div className="py-8 text-center text-sm text-[var(--text-secondary)]">Loading…</div>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">
+          Attached files ({attachments.length})
+        </h3>
+        <Button variant="secondary" size="sm" onClick={onAdd}>
+          Add file
+        </Button>
+      </div>
+      {attachments.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-[var(--border-default)] bg-[var(--bg-secondary)]/50 px-6 py-8 text-center text-sm text-[var(--text-secondary)]">
+          No files attached. Add reference documents, slides, or other materials.
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {attachments.map((a) => (
+            <div
+              key={a.name}
+              className="flex items-center justify-between rounded-lg border border-[var(--border-default)] bg-white px-4 py-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-medium text-[var(--text-primary)]">{a.name}</div>
+                <div className="text-xs text-[var(--text-tertiary)]">{formatSize(a.size)}</div>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onRemove(a.name)}
+                className="ml-2 text-[var(--text-tertiary)] hover:text-[var(--error)]"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

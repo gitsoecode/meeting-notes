@@ -2,9 +2,7 @@
 id: customer-call-recap
 label: Customer Call Recap
 description: Summarize customer goals, pain points, objections, and follow-up actions from a sales or support call.
-category: Customers
 sort_order: 30
-recommended: true
 filename: customer-call-recap.md
 enabled: true
 auto: false

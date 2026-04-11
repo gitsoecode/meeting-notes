@@ -337,6 +337,20 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     ? fs.readFileSync(notesPath, "utf-8")
     : "";
 
+  // Read prep notes and text attachments for pipeline context
+  const prepPath = path.join(runFolder, "prep.md");
+  const prepNotes = fs.existsSync(prepPath) ? fs.readFileSync(prepPath, "utf-8") : "";
+  const attachmentsDir = path.join(runFolder, "attachments");
+  let attachmentContext = "";
+  if (fs.existsSync(attachmentsDir)) {
+    for (const entry of fs.readdirSync(attachmentsDir)) {
+      const ext = path.extname(entry).toLowerCase();
+      if ([".txt", ".md"].includes(ext)) {
+        attachmentContext += `\n\n--- ${entry} ---\n` + fs.readFileSync(path.join(attachmentsDir, entry), "utf-8");
+      }
+    }
+  }
+
   const input: PipelineInput = {
     transcript: buildTranscriptForLlm(transcriptResult),
     manualNotes,
@@ -344,6 +358,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     date,
     meExcerpts: buildSpeakerExcerpts(transcriptResult, "me"),
     othersExcerpts: buildSpeakerExcerpts(transcriptResult, "others"),
+    prepNotes,
+    attachmentContext,
   };
   const llmCall: LlmCallFn = (
     systemPrompt: string,

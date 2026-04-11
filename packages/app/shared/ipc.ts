@@ -3,6 +3,7 @@
 
 export interface RecordingStatus {
   active: boolean;
+  paused?: boolean;
   run_id?: string;
   title?: string;
   started_at?: string;
@@ -64,6 +65,7 @@ export interface RunSummary {
   tags: string[];
   folder_path: string;
   section_ids: string[];
+  scheduled_time?: string | null;
 }
 
 export interface RunSectionState {
@@ -82,7 +84,7 @@ export interface RunManifest {
 
 export interface RunDetail extends RunSummary {
   manifest: RunManifest;
-  files: Array<{ name: string; size: number; kind: "document" | "log" | "media" }>;
+  files: Array<{ name: string; size: number; kind: "document" | "log" | "media" | "attachment" }>;
 }
 
 export interface DownloadMediaResult {
@@ -93,9 +95,7 @@ export interface PromptRow {
   id: string;
   label: string;
   description: string | null;
-  category: string | null;
   sort_order: number | null;
-  recommended: boolean;
   filename: string;
   enabled: boolean;
   auto: boolean;
@@ -118,6 +118,36 @@ export interface StopRecordingRequest {
 export interface StopRecordingResult {
   run_folder?: string;
   deleted?: boolean;
+}
+
+export interface CreateDraftRequest {
+  title: string;
+  description?: string | null;
+  scheduledTime?: string | null;
+}
+
+export interface CreateDraftResult {
+  run_folder: string;
+  run_id: string;
+}
+
+export interface AddAttachmentResult {
+  fileName: string;
+  size: number;
+}
+
+export interface StartRecordingForDraftRequest {
+  runFolder: string;
+}
+
+export interface UpdatePrepRequest {
+  runFolder: string;
+  selectedPrompts?: string[] | null;
+  scheduledTime?: string | null;
+}
+
+export interface ContinueRecordingRequest {
+  runFolder: string;
 }
 
 export interface ProcessRecordingRequest {
@@ -440,6 +470,10 @@ export interface MeetingNotesApi {
     getStatus: () => Promise<RecordingStatus>;
     start: (req: StartRecordingRequest) => Promise<{ run_folder: string; run_id: string }>;
     stop: (req?: StopRecordingRequest) => Promise<StopRecordingResult | null>;
+    startForDraft: (req: StartRecordingForDraftRequest) => Promise<{ run_folder: string; run_id: string }>;
+    pause: () => Promise<void>;
+    resume: () => Promise<void>;
+    continueRecording: (req: ContinueRecordingRequest) => Promise<{ run_folder: string; run_id: string }>;
     listAudioDevices: () => Promise<AudioDevice[]>;
   };
   // Runs
@@ -462,6 +496,14 @@ export interface MeetingNotesApi {
     openInFinder: (runFolder: string) => Promise<void>;
     deleteRun: (runFolder: string) => Promise<void>;
     updateMeta: (req: UpdateMetaRequest) => Promise<void>;
+    createDraft: (req: CreateDraftRequest) => Promise<CreateDraftResult>;
+    writePrep: (runFolder: string, content: string) => Promise<void>;
+    readPrep: (runFolder: string) => Promise<string>;
+    addAttachment: (runFolder: string) => Promise<AddAttachmentResult | null>;
+    removeAttachment: (runFolder: string, fileName: string) => Promise<void>;
+    listAttachments: (runFolder: string) => Promise<Array<{ name: string; size: number }>>;
+    updatePrep: (req: UpdatePrepRequest) => Promise<void>;
+    reopenAsDraft: (runFolder: string) => Promise<void>;
   };
   // Prompts
   prompts: {

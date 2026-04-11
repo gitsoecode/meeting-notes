@@ -30,7 +30,6 @@ test("shipped builtin prompts remain resettable defaults without all being auto 
 
     assert.equal(summary?.builtin, true);
     assert.equal(summary?.auto, true);
-    assert.equal(summary?.recommended, true);
 
     assert.equal(coaching?.builtin, true);
     assert.equal(coaching?.auto, false);

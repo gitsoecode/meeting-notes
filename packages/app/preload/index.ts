@@ -10,6 +10,10 @@ import type {
   ProcessRecordingRequest,
   StartRecordingRequest,
   StopRecordingRequest,
+  StartRecordingForDraftRequest,
+  ContinueRecordingRequest,
+  CreateDraftRequest,
+  UpdatePrepRequest,
   ReprocessRequest,
   BulkReprocessRequest,
   PromptRow,
@@ -37,6 +41,12 @@ const api: MeetingNotesApi = {
     getStatus: () => ipcRenderer.invoke("recording:get-status"),
     start: (req: StartRecordingRequest) => ipcRenderer.invoke("recording:start", req),
     stop: (req?: StopRecordingRequest) => ipcRenderer.invoke("recording:stop", req),
+    startForDraft: (req: StartRecordingForDraftRequest) =>
+      ipcRenderer.invoke("recording:start-for-draft", req),
+    pause: () => ipcRenderer.invoke("recording:pause"),
+    resume: () => ipcRenderer.invoke("recording:resume"),
+    continueRecording: (req: ContinueRecordingRequest) =>
+      ipcRenderer.invoke("recording:continue", req),
     listAudioDevices: () => ipcRenderer.invoke("recording:list-audio-devices"),
   },
   runs: {
@@ -75,6 +85,18 @@ const api: MeetingNotesApi = {
     openInFinder: (runFolder) => ipcRenderer.invoke("runs:open-in-finder", runFolder),
     deleteRun: (runFolder) => ipcRenderer.invoke("runs:delete", runFolder),
     updateMeta: (req) => ipcRenderer.invoke("runs:update-meta", req),
+    createDraft: (req: CreateDraftRequest) => ipcRenderer.invoke("runs:create-draft", req),
+    writePrep: (runFolder: string, content: string) =>
+      ipcRenderer.invoke("runs:write-prep", runFolder, content),
+    readPrep: (runFolder: string) => ipcRenderer.invoke("runs:read-prep", runFolder),
+    addAttachment: (runFolder: string) =>
+      ipcRenderer.invoke("runs:add-attachment", runFolder),
+    removeAttachment: (runFolder: string, fileName: string) =>
+      ipcRenderer.invoke("runs:remove-attachment", runFolder, fileName),
+    listAttachments: (runFolder: string) =>
+      ipcRenderer.invoke("runs:list-attachments", runFolder),
+    updatePrep: (req: UpdatePrepRequest) => ipcRenderer.invoke("runs:update-prep", req),
+    reopenAsDraft: (runFolder: string) => ipcRenderer.invoke("runs:reopen-as-draft", runFolder),
   },
   prompts: {
     list: () => ipcRenderer.invoke("prompts:list"),

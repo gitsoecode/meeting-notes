@@ -86,6 +86,21 @@ export async function reprocessRun(
     ? matter(fs.readFileSync(transcriptPath, "utf-8")).content
     : "";
   const notes = fs.existsSync(notesPath) ? fs.readFileSync(notesPath, "utf-8") : "";
+
+  // Read prep notes and attachments for pipeline context
+  const prepPath = path.join(runFolder, "prep.md");
+  const prepNotes = fs.existsSync(prepPath) ? fs.readFileSync(prepPath, "utf-8") : "";
+  const attachmentsDir = path.join(runFolder, "attachments");
+  let attachmentContext = "";
+  if (fs.existsSync(attachmentsDir)) {
+    for (const entry of fs.readdirSync(attachmentsDir)) {
+      const ext = path.extname(entry).toLowerCase();
+      if ([".txt", ".md"].includes(ext)) {
+        attachmentContext += `\n\n--- ${entry} ---\n` + fs.readFileSync(path.join(attachmentsDir, entry), "utf-8");
+      }
+    }
+  }
+
   const llmCall: LlmCallFn = (
     systemPrompt: string,
     userMessage: string,
@@ -119,6 +134,8 @@ export async function reprocessRun(
       date: manifest.date,
       meExcerpts: "",
       othersExcerpts: "",
+      prepNotes,
+      attachmentContext,
     },
     llmCall,
     logger,
@@ -144,14 +161,33 @@ function collectRunAudioFiles(runFolder: string, sourceMode: string) {
   const audioDir = path.join(runFolder, "audio");
   if (!fs.existsSync(audioDir)) return [];
 
-  const micPath = path.join(audioDir, "mic.wav");
-  const systemPath = path.join(audioDir, "system.wav");
   const audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[] = [];
 
-  if (fs.existsSync(micPath)) audioFiles.push({ path: micPath, speaker: "me" });
-  if (fs.existsSync(systemPath)) audioFiles.push({ path: systemPath, speaker: "others" });
+  // Check for legacy flat layout first (mic.wav / system.wav directly in audio/)
+  const micPath = path.join(audioDir, "mic.wav");
+  const systemPath = path.join(audioDir, "system.wav");
+  if (fs.existsSync(micPath) || fs.existsSync(systemPath)) {
+    if (fs.existsSync(micPath)) audioFiles.push({ path: micPath, speaker: "me" });
+    if (fs.existsSync(systemPath)) audioFiles.push({ path: systemPath, speaker: "others" });
+    return audioFiles;
+  }
+
+  // Walk timestamped segment subdirectories (sorted chronologically)
+  const segmentDirs = fs
+    .readdirSync(audioDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  for (const segDir of segmentDirs) {
+    const segPath = path.join(audioDir, segDir.name);
+    const segMic = path.join(segPath, "mic.wav");
+    const segSystem = path.join(segPath, "system.wav");
+    if (fs.existsSync(segMic)) audioFiles.push({ path: segMic, speaker: "me" });
+    if (fs.existsSync(segSystem)) audioFiles.push({ path: segSystem, speaker: "others" });
+  }
   if (audioFiles.length > 0) return audioFiles;
 
+  // Fallback: loose files in audio/ (imported recordings, etc.)
   const audioEntries = fs
     .readdirSync(audioDir, { withFileTypes: true })
     .filter((entry) => entry.isFile())

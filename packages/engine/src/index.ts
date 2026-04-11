@@ -29,13 +29,15 @@ export { initProject, bootstrapVault } from "./core/init.js";
 
 export {
   createRun,
+  createDraftRun,
+  formatAudioSegmentName,
   updateRunStatus,
   updateSectionState,
   loadRunManifest,
-  manifestToFrontmatter,
   type RunManifest,
   type SectionState,
   type CreateRunOptions,
+  type CreateDraftOptions,
 } from "./core/run.js";
 
 export { processRun } from "./core/process-run.js";
@@ -65,7 +67,6 @@ export {
   buildMarkdown,
   writeMarkdownFile,
   writeRawFile,
-  type Frontmatter,
 } from "./core/markdown.js";
 
 export {

@@ -2,9 +2,7 @@
 id: one-on-one-follow-up
 label: 1:1 Follow-up
 description: Turn a manager or direct-report meeting into a concise recap with support items and follow-ups.
-category: Essentials
 sort_order: 20
-recommended: true
 filename: one-on-one-follow-up.md
 enabled: true
 auto: false

@@ -33,9 +33,10 @@ import { getDefaultPromptModel } from "../lib/prompt-metadata";
 
 interface MeetingsListProps {
   onOpen: (runFolder: string) => void;
+  onOpenPrep?: (runFolder: string) => void;
 }
 
-export function MeetingsList({ onOpen }: MeetingsListProps) {
+export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -280,7 +281,7 @@ export function MeetingsList({ onOpen }: MeetingsListProps) {
                         key={run.folder_path}
                         data-state={selected.has(run.folder_path) ? "selected" : undefined}
                         className="cursor-pointer"
-                        onClick={() => onOpen(run.folder_path)}
+                        onClick={() => run.status === "draft" && onOpenPrep ? onOpenPrep(run.folder_path) : onOpen(run.folder_path)}
                       >
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <Checkbox

@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureMainWindow } from "./index.js";
 import { broadcastAppAction } from "./ipc.js";
-import { getStatus as getRecordingStatus, isRecording } from "./recording.js";
+import { getStatus as getRecordingStatus, isRecording, isPaused } from "./recording.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 let tray: Tray | null = null;
 let idleIcon: Electron.NativeImage | null = null;
 let recordingIcon: Electron.NativeImage | null = null;
+let pausedIcon: Electron.NativeImage | null = null;
 
 async function dispatchTrayAction(): Promise<void> {
   const status = await getRecordingStatus();
@@ -22,31 +23,69 @@ async function dispatchTrayAction(): Promise<void> {
 }
 
 function buildMenu(): Menu {
-  return Menu.buildFromTemplate([
-    {
-      label: isRecording() ? "● Recording…" : "Meeting Notes",
-      enabled: false,
-    },
-    { type: "separator" },
-    {
-      label: "Open Meeting Notes",
-      click: () => {
-        ensureMainWindow();
+  const recording = isRecording();
+  const paused = isPaused();
+
+  if (recording) {
+    return Menu.buildFromTemplate([
+      { label: "● Recording…", enabled: false },
+      { type: "separator" },
+      {
+        label: "Pause Recording",
+        click: () => {
+          ensureMainWindow();
+          broadcastAppAction({ type: "toggle-recording", source: "tray" });
+        },
       },
-    },
+      {
+        label: "End Meeting",
+        click: () => {
+          void dispatchTrayAction();
+        },
+      },
+      { type: "separator" },
+      { label: "Open Meeting Notes", click: () => ensureMainWindow() },
+      { type: "separator" },
+      { label: "Quit Meeting Notes", click: () => app.quit() },
+    ]);
+  }
+
+  if (paused) {
+    return Menu.buildFromTemplate([
+      { label: "⏸ Paused", enabled: false },
+      { type: "separator" },
+      {
+        label: "Resume Recording",
+        click: () => {
+          ensureMainWindow();
+          broadcastAppAction({ type: "toggle-recording", source: "tray" });
+        },
+      },
+      {
+        label: "End Meeting",
+        click: () => {
+          void dispatchTrayAction();
+        },
+      },
+      { type: "separator" },
+      { label: "Open Meeting Notes", click: () => ensureMainWindow() },
+      { type: "separator" },
+      { label: "Quit Meeting Notes", click: () => app.quit() },
+    ]);
+  }
+
+  return Menu.buildFromTemplate([
+    { label: "Meeting Notes", enabled: false },
+    { type: "separator" },
+    { label: "Open Meeting Notes", click: () => ensureMainWindow() },
     {
-      label: isRecording() ? "Stop Recording" : "Start Recording",
+      label: "Quick Record",
       click: () => {
         void dispatchTrayAction();
       },
     },
     { type: "separator" },
-    {
-      label: "Quit Meeting Notes",
-      click: () => {
-        app.quit();
-      },
-    },
+    { label: "Quit Meeting Notes", click: () => app.quit() },
   ]);
 }
 
@@ -58,8 +97,15 @@ export function setupTray(): void {
   recordingIcon = nativeImage.createFromPath(
     path.resolve(__dirname, "../assets/tray-recordingTemplate.png")
   );
+  // Paused icon falls back to idle if the asset doesn't exist yet
+  const pausedPath = path.resolve(__dirname, "../assets/tray-pausedTemplate.png");
+  pausedIcon = nativeImage.createFromPath(pausedPath);
+  if (pausedIcon.isEmpty()) pausedIcon = null;
+
   idleIcon.setTemplateImage(true);
   recordingIcon.setTemplateImage(true);
+  pausedIcon?.setTemplateImage(true);
+
   if (idleIcon.isEmpty()) {
     throw new Error(
       "tray-idleTemplate.png missing from dist/assets — run `npm run build:assets`"
@@ -73,8 +119,25 @@ export function setupTray(): void {
 export function refreshTray(): void {
   if (!tray) return;
   tray.setContextMenu(buildMenu());
-  tray.setToolTip(isRecording() ? "Meeting Notes — Recording" : "Meeting Notes");
+
+  const recording = isRecording();
+  const paused = isPaused();
+
+  tray.setToolTip(
+    recording
+      ? "Meeting Notes — Recording"
+      : paused
+        ? "Meeting Notes — Paused"
+        : "Meeting Notes"
+  );
+
   if (idleIcon && recordingIcon) {
-    tray.setImage(isRecording() ? recordingIcon : idleIcon);
+    if (recording) {
+      tray.setImage(recordingIcon);
+    } else if (paused && pausedIcon) {
+      tray.setImage(pausedIcon);
+    } else {
+      tray.setImage(idleIcon);
+    }
   }
 }

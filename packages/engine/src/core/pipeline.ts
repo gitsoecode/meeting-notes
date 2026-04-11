@@ -54,6 +54,10 @@ export interface PipelineInput {
   meExcerpts: string;
   /** Just the "others"-labeled segments, joined */
   othersExcerpts: string;
+  /** Prep notes written before the meeting (from prep.md). */
+  prepNotes?: string;
+  /** Text content extracted from attached documents, concatenated. */
+  attachmentContext?: string;
 }
 
 export interface PipelineResult {
@@ -104,9 +108,7 @@ export interface ResolvedPrompt {
   id: string;
   label: string;
   description: string | null;
-  category: string | null;
   sortOrder: number | null;
-  recommended: boolean;
   filename: string;
   prompt: string;
   enabled: boolean;
@@ -156,9 +158,7 @@ interface PromptFrontmatter {
   id?: unknown;
   label?: unknown;
   description?: unknown;
-  category?: unknown;
   sort_order?: unknown;
-  recommended?: unknown;
   filename?: unknown;
   enabled?: unknown;
   auto?: unknown;
@@ -220,15 +220,10 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
       typeof fm.description === "string" && fm.description.trim()
         ? fm.description.trim()
         : null,
-    category:
-      typeof fm.category === "string" && fm.category.trim()
-        ? fm.category.trim()
-        : null,
     sortOrder:
       typeof fm.sort_order === "number" && Number.isFinite(fm.sort_order)
         ? fm.sort_order
         : null,
-    recommended: fm.recommended === true,
     filename: fm.filename,
     prompt: body,
     enabled,
@@ -415,6 +410,8 @@ export function renderPromptTemplate(template: string, input: PipelineInput): st
     notes: input.manualNotes,
     me_excerpts: input.meExcerpts,
     others_excerpts: input.othersExcerpts,
+    prep_notes: input.prepNotes ?? "",
+    attachment_context: input.attachmentContext ?? "",
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
@@ -431,6 +428,14 @@ export function buildUserMessage(input: PipelineInput): string {
 
   if (input.manualNotes && input.manualNotes.trim()) {
     message += `## Manual Notes\n\n${input.manualNotes}\n\n`;
+  }
+
+  if (input.prepNotes && input.prepNotes.trim()) {
+    message += `## Prep Notes\n\n${input.prepNotes}\n\n`;
+  }
+
+  if (input.attachmentContext && input.attachmentContext.trim()) {
+    message += `## Attached Documents\n\n${input.attachmentContext}\n\n`;
   }
 
   return message;

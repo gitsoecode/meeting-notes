@@ -13,8 +13,7 @@
   },
   "dependencies": {
     "@meeting-notes/engine": "*",
-    "commander": "^13.1.0",
-    "gray-matter": "^4.0.3"
+    "commander": "^13.1.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

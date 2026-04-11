@@ -2,9 +2,7 @@
 id: next-steps-email
 label: Next Steps Email Draft
 description: Draft a polished follow-up email with recap, decisions, and action items from the meeting.
-category: Communication
 sort_order: 50
-recommended: true
 filename: next-steps-email.md
 enabled: true
 auto: false

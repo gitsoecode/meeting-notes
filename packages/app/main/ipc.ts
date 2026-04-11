@@ -16,6 +16,7 @@ import {
   initProject as engineInitProject,
   moveDataDirectory,
   loadRunManifest,
+  createDraftRun,
   loadAllPrompts,
   updatePromptFrontmatter,
   resetDefaultPrompts,
@@ -69,20 +70,32 @@ import type {
   ChatAppInfo,
   LaunchChatRequest,
   LaunchChatResult,
+  CreateDraftRequest,
+  AddAttachmentResult,
+  StartRecordingForDraftRequest,
+  UpdatePrepRequest,
+  ContinueRecordingRequest,
 } from "../shared/ipc.js";
 import {
   getStatus as getRecordingStatus,
   startRecording,
   stopRecording,
   stopActiveRecording as stopActive,
+  startRecordingForDraft,
+  pauseRecording,
+  resumeRecording,
+  continueRecording,
 } from "./recording.js";
 import {
   resolveRunDocumentPath,
   resolveRunFolderPath,
   resolveRunMediaPath,
+  resolveRunAttachmentPath,
   listRunFiles,
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
+  RUN_PREP_FILE,
+  RUN_ATTACHMENTS_DIR,
 } from "./run-access.js";
 import { bulkReprocessRuns, processRecordedRun, reprocessRun } from "./runs-service.js";
 import { getRunStartedSortValue, validatePromptModelSelection } from "./model-validation.js";
@@ -166,6 +179,7 @@ function toRunSummary(manifest: RunManifest, folderPath: string): RunSummary {
     tags: manifest.tags,
     folder_path: folderPath,
     section_ids: Object.keys(manifest.sections),
+    scheduled_time: manifest.scheduled_time ?? null,
   };
 }
 
@@ -467,6 +481,34 @@ export function registerIpcHandlers(): void {
     return devices.map((name) => ({ name }));
   });
 
+  ipcMain.handle(
+    "recording:start-for-draft",
+    async (_e, req: StartRecordingForDraftRequest) => {
+      const result = await startRecordingForDraft(req.runFolder);
+      broadcastRecordingStatus();
+      return result;
+    }
+  );
+
+  ipcMain.handle("recording:pause", async () => {
+    await pauseRecording();
+    broadcastRecordingStatus();
+  });
+
+  ipcMain.handle("recording:resume", async () => {
+    await resumeRecording();
+    broadcastRecordingStatus();
+  });
+
+  ipcMain.handle(
+    "recording:continue",
+    async (_e, req: ContinueRecordingRequest) => {
+      const result = await continueRecording(req.runFolder);
+      broadcastRecordingStatus();
+      return result;
+    }
+  );
+
   // ---- runs ----
   ipcMain.handle("runs:list", async (): Promise<RunSummary[]> => {
     const config = safeLoadConfig();
@@ -701,6 +743,123 @@ export function registerIpcHandlers(): void {
     }
   );
 
+  // ---- draft / prep ----
+
+  ipcMain.handle("runs:create-draft", async (_e, req: CreateDraftRequest) => {
+    const config = loadConfig();
+    const context = createDraftRun(
+      config,
+      req.title,
+      req.description ?? null,
+      { scheduledTime: req.scheduledTime ?? null, quiet: true }
+    );
+    return { run_folder: context.folderPath, run_id: context.manifest.run_id };
+  });
+
+  ipcMain.handle("runs:write-prep", async (_e, runFolder: string, content: string) => {
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    fs.writeFileSync(path.join(validatedRunFolder, RUN_PREP_FILE), content, "utf-8");
+  });
+
+  ipcMain.handle("runs:read-prep", async (_e, runFolder: string) => {
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    const prepPath = path.join(validatedRunFolder, RUN_PREP_FILE);
+    if (!fs.existsSync(prepPath)) return "";
+    return fs.readFileSync(prepPath, "utf-8");
+  });
+
+  ipcMain.handle(
+    "runs:add-attachment",
+    async (_e, runFolder: string): Promise<AddAttachmentResult | null> => {
+      const config = loadConfig();
+      const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+      const attachDir = path.join(validatedRunFolder, RUN_ATTACHMENTS_DIR);
+      fs.mkdirSync(attachDir, { recursive: true });
+
+      const result = await dialog.showOpenDialog({
+        title: "Add attachment",
+        properties: ["openFile"],
+        filters: [
+          { name: "Documents", extensions: ["pdf", "docx", "doc", "txt", "md", "rtf"] },
+          { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp"] },
+          { name: "Spreadsheets", extensions: ["csv", "xlsx", "xls"] },
+          { name: "All Files", extensions: ["*"] },
+        ],
+      });
+      if (result.canceled || result.filePaths.length === 0) return null;
+
+      const srcPath = result.filePaths[0];
+      const fileName = path.basename(srcPath);
+      const destPath = path.join(attachDir, fileName);
+      fs.copyFileSync(srcPath, destPath);
+      const stat = fs.statSync(destPath);
+
+      // Update manifest attachments list
+      const manifest = loadRunManifest(validatedRunFolder);
+      if (!manifest.attachments.includes(fileName)) {
+        manifest.attachments.push(fileName);
+        const { updateRunStatus: urs } = await import("@meeting-notes/engine");
+        urs(validatedRunFolder, manifest.status, { attachments: manifest.attachments });
+      }
+
+      return { fileName, size: stat.size };
+    }
+  );
+
+  ipcMain.handle("runs:remove-attachment", async (_e, runFolder: string, fileName: string) => {
+    const config = loadConfig();
+    const filePath = resolveRunAttachmentPath(runFolder, fileName, config);
+    fs.rmSync(filePath, { force: true });
+
+    // Update manifest
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    const manifest = loadRunManifest(validatedRunFolder);
+    manifest.attachments = manifest.attachments.filter((n) => n !== fileName);
+    const { updateRunStatus: urs } = await import("@meeting-notes/engine");
+    urs(validatedRunFolder, manifest.status, { attachments: manifest.attachments });
+  });
+
+  ipcMain.handle(
+    "runs:list-attachments",
+    async (_e, runFolder: string): Promise<Array<{ name: string; size: number }>> => {
+      const config = loadConfig();
+      const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+      const attachDir = path.join(validatedRunFolder, RUN_ATTACHMENTS_DIR);
+      if (!fs.existsSync(attachDir)) return [];
+      return fs
+        .readdirSync(attachDir, { withFileTypes: true })
+        .filter((e) => e.isFile() && !e.name.startsWith("."))
+        .map((e) => {
+          const stat = fs.statSync(path.join(attachDir, e.name));
+          return { name: e.name, size: stat.size };
+        });
+    }
+  );
+
+  ipcMain.handle("runs:update-prep", async (_e, req: UpdatePrepRequest) => {
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
+    const manifest = loadRunManifest(validatedRunFolder);
+    const updates: Partial<RunManifest> = {};
+    if ("selectedPrompts" in req) {
+      updates.selected_prompts = req.selectedPrompts ?? null;
+    }
+    if ("scheduledTime" in req) {
+      updates.scheduled_time = req.scheduledTime ?? null;
+    }
+    const { updateRunStatus: urs } = await import("@meeting-notes/engine");
+    urs(validatedRunFolder, manifest.status, updates);
+  });
+
+  ipcMain.handle("runs:reopen-as-draft", async (_e, runFolder: string) => {
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    const { updateRunStatus } = await import("@meeting-notes/engine");
+    updateRunStatus(validatedRunFolder, "draft");
+  });
+
   // ---- prompts ----
   ipcMain.handle("prompts:list", async (): Promise<PromptRow[]> => {
     const config = safeLoadConfig();
@@ -709,9 +868,7 @@ export function registerIpcHandlers(): void {
       id: p.id,
       label: p.label,
       description: p.description,
-      category: p.category,
       sort_order: p.sortOrder,
-      recommended: p.recommended,
       filename: p.filename,
       enabled: p.enabled,
       auto: p.auto,
@@ -748,9 +905,7 @@ export function registerIpcHandlers(): void {
         ...parsed.data,
         ...("label" in patch ? { label: patch.label } : {}),
         ...("description" in patch ? { description: patch.description } : {}),
-        ...("category" in patch ? { category: patch.category } : {}),
         ...("sort_order" in patch ? { sort_order: patch.sort_order } : {}),
-        ...("recommended" in patch ? { recommended: patch.recommended } : {}),
         ...("filename" in patch ? { filename: patch.filename } : {}),
         ...("enabled" in patch ? { enabled: patch.enabled } : {}),
         ...("auto" in patch ? { auto: patch.auto } : {}),

@@ -2,9 +2,7 @@
 id: summary
 label: Summary & Action Items
 description: The default meeting recap with decisions and owner-tagged next steps.
-category: Essentials
 sort_order: 10
-recommended: true
 filename: summary.md
 enabled: true
 auto: true

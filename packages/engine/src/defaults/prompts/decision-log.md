@@ -2,7 +2,6 @@
 id: decision-log
 label: Decision Log
 description: Extract the decisions made, options considered, and unresolved questions from the meeting.
-category: Operations
 sort_order: 40
 filename: decision-log.md
 enabled: true

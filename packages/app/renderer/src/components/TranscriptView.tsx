@@ -1,9 +1,4 @@
-function stripFrontmatter(source: string): string {
-  if (!source.startsWith("---\n")) return source;
-  const end = source.indexOf("\n---\n", 4);
-  if (end === -1) return source;
-  return source.slice(end + 5);
-}
+import { stripFrontmatter } from "../lib/utils";
 
 interface TranscriptEntry {
   timestamp: string | null;

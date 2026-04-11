@@ -2,7 +2,6 @@
 id: coaching
 label: Performance Coaching
 description: Review how you showed up in the conversation and where to improve next time.
-category: Personal Growth
 sort_order: 60
 filename: coaching.md
 enabled: true

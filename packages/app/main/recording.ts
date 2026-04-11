@@ -7,6 +7,8 @@ import {
   createRun,
   processRun,
   updateRunStatus,
+  loadRunManifest,
+  formatAudioSegmentName,
   saveActiveRecording,
   loadActiveRecording,
   clearActiveRecording,
@@ -39,6 +41,8 @@ export interface ActiveRecordingState {
 }
 
 let active: ActiveRecordingState | null = null;
+/** Tracks a paused run so resume can pick it back up. */
+let pausedRunFolder: string | null = null;
 const appLogger = createAppLogger(false);
 
 function isAbortLikeError(err: unknown): boolean {
@@ -49,6 +53,14 @@ export function isRecording(): boolean {
   return active !== null;
 }
 
+export function isPaused(): boolean {
+  return pausedRunFolder !== null;
+}
+
+export function getPausedRunFolder(): string | null {
+  return pausedRunFolder;
+}
+
 export function getActiveState(): ActiveRecordingState | null {
   return active;
 }
@@ -57,12 +69,29 @@ export async function getStatus(): Promise<RecordingStatus> {
   if (active) {
     return {
       active: true,
+      paused: false,
       run_id: active.runId,
       title: active.title,
       started_at: active.startedAt,
       run_folder: active.runFolder,
       system_captured: active.systemCaptured,
     };
+  }
+  if (pausedRunFolder) {
+    try {
+      const manifest = loadRunManifest(pausedRunFolder);
+      return {
+        active: true,
+        paused: true,
+        run_id: manifest.run_id,
+        title: manifest.title,
+        started_at: manifest.started,
+        run_folder: pausedRunFolder,
+        system_captured: false,
+      };
+    } catch {
+      pausedRunFolder = null;
+    }
   }
   // Also surface a CLI-started recording (the CLI writes active-recording.json too).
   const cli = loadActiveRecording();
@@ -337,6 +366,193 @@ export async function stopActiveRecording(_reason: string): Promise<void> {
   }
   clearActiveRecording();
   active = null;
+}
+
+// ---- Shared helper for starting ffmpeg capture into a segment directory ----
+
+async function startCaptureIntoSegment(
+  config: AppConfig,
+  runFolder: string,
+  runId: string,
+  title: string,
+  startedAt: string,
+  logger: Logger
+): Promise<ActiveRecordingState> {
+  const now = new Date();
+  const segmentName = formatAudioSegmentName(now);
+  const segmentDir = path.join(runFolder, "audio", segmentName);
+  fs.mkdirSync(segmentDir, { recursive: true });
+
+  const recorder = new FfmpegRecorder();
+  const session = await recorder.start({
+    micDevice: config.recording.mic_device,
+    systemDevice: config.recording.system_device,
+    outputDir: segmentDir,
+  });
+
+  // Update manifest to add this segment
+  const manifest = loadRunManifest(runFolder);
+  manifest.recording_segments.push(segmentName);
+  updateRunStatus(runFolder, "recording", {
+    recording_segments: manifest.recording_segments,
+  });
+
+  const state: ActiveRecordingState = {
+    session,
+    runFolder,
+    runId,
+    title,
+    startedAt,
+    logger,
+    config,
+    micPath: session.paths.mic,
+    systemPath: session.paths.system,
+    systemCaptured: session.systemCaptured,
+    processIds: [
+      startTrackedProcess({
+        id: session.pids[0] ? `ffmpeg:${session.pids[0]}` : undefined,
+        type: "ffmpeg",
+        label: "Microphone capture",
+        pid: session.pids[0],
+        command: "ffmpeg avfoundation recording",
+        runFolder,
+        status: "running",
+      }),
+      ...(session.systemCaptured && session.pids[1]
+        ? [
+            startTrackedProcess({
+              id: `ffmpeg:${session.pids[1]}`,
+              type: "ffmpeg",
+              label: "System audio capture",
+              pid: session.pids[1],
+              command: "ffmpeg avfoundation recording",
+              runFolder,
+              status: "running",
+            }),
+          ]
+        : []),
+    ],
+  };
+
+  saveActiveRecording({
+    run_id: runId,
+    run_folder: runFolder,
+    title,
+    started_at: startedAt,
+    pids: session.pids,
+    mic_path: session.paths.mic,
+    system_path: session.paths.system,
+    system_captured: session.systemCaptured,
+  });
+
+  logger.info("Capture started", {
+    run_id: runId,
+    segment: segmentName,
+    mic: session.paths.mic,
+    system: session.paths.system ?? "(none)",
+  });
+
+  return state;
+}
+
+// ---- New recording lifecycle functions ----
+
+export async function startRecordingForDraft(
+  runFolder: string
+): Promise<{ run_folder: string; run_id: string }> {
+  if (active) {
+    throw new Error("A recording is already in progress. Stop it first.");
+  }
+  const config = loadConfig();
+  const validated = resolveRunFolderPath(runFolder, config);
+  const manifest = loadRunManifest(validated);
+
+  if (manifest.status !== "draft") {
+    throw new Error(`Cannot start recording: run status is "${manifest.status}", expected "draft".`);
+  }
+
+  const startedAt = new Date().toISOString();
+  updateRunStatus(validated, "recording", { started: startedAt });
+
+  const logger = createRunLogger(path.join(validated, "run.log"), false);
+  active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, startedAt, logger);
+  pausedRunFolder = null;
+
+  appLogger.info("Recording started from draft", {
+    runId: manifest.run_id,
+    runFolder: validated,
+  });
+
+  void openInObsidian(config, path.join(validated, "notes.md"));
+
+  return { run_folder: validated, run_id: manifest.run_id };
+}
+
+export async function pauseRecording(): Promise<void> {
+  if (!active) {
+    throw new Error("No active recording to pause.");
+  }
+  const state = active;
+  active = null;
+
+  try {
+    await state.session.stop();
+  } catch (err) {
+    state.logger.warn("Recorder stop threw during pause", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  for (const processId of state.processIds) {
+    finishTrackedProcess(processId, { status: "exited" });
+  }
+  clearActiveRecording();
+
+  updateRunStatus(state.runFolder, "paused");
+  pausedRunFolder = state.runFolder;
+
+  state.logger.info("Recording paused", { run_folder: state.runFolder });
+  appLogger.info("Recording paused", { runFolder: state.runFolder });
+}
+
+export async function resumeRecording(): Promise<void> {
+  if (active) {
+    throw new Error("A recording is already active.");
+  }
+  if (!pausedRunFolder) {
+    throw new Error("No paused recording to resume.");
+  }
+  const config = loadConfig();
+  const validated = resolveRunFolderPath(pausedRunFolder, config);
+  const manifest = loadRunManifest(validated);
+  const logger = createRunLogger(path.join(validated, "run.log"), false);
+
+  active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, manifest.started, logger);
+  pausedRunFolder = null;
+
+  appLogger.info("Recording resumed", { runFolder: validated });
+}
+
+export async function continueRecording(
+  runFolder: string
+): Promise<{ run_folder: string; run_id: string }> {
+  if (active) {
+    throw new Error("A recording is already in progress. Stop it first.");
+  }
+  const config = loadConfig();
+  const validated = resolveRunFolderPath(runFolder, config);
+  const manifest = loadRunManifest(validated);
+
+  if (manifest.status !== "complete" && manifest.status !== "paused") {
+    throw new Error(`Cannot continue: run status is "${manifest.status}".`);
+  }
+
+  const logger = createRunLogger(path.join(validated, "run.log"), false);
+  active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, manifest.started, logger);
+  pausedRunFolder = null;
+
+  appLogger.info("Recording continued", { runId: manifest.run_id, runFolder: validated });
+
+  return { run_folder: validated, run_id: manifest.run_id };
 }
 
 // Imported lazily so the module is usable standalone for tests.

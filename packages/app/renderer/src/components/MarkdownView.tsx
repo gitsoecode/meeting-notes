@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import { stripFrontmatter } from "../lib/utils";
 
 const md = new MarkdownIt({
   html: true,
@@ -34,13 +35,6 @@ export interface MarkdownViewProps {
   source: string;
   className?: string;
   onWikilinkClick?: (name: string) => void;
-}
-
-function stripFrontmatter(source: string): string {
-  if (!source.startsWith("---\n")) return source;
-  const end = source.indexOf("\n---\n", 4);
-  if (end === -1) return source;
-  return source.slice(end + 5);
 }
 
 export function MarkdownView({ source, className, onWikilinkClick }: MarkdownViewProps) {

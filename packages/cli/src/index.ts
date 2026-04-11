@@ -5,7 +5,6 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
-import matter from "gray-matter";
 import {
   loadConfig,
   saveConfig,
@@ -33,6 +32,7 @@ import {
   getPromptsDir,
   DEFAULT_PROMPTS_DIR,
   getAudioInfo,
+  buildMarkdown,
   FfmpegRecorder,
   saveActiveRecording,
   loadActiveRecording,
@@ -242,6 +242,7 @@ program
       whisper_local: DEFAULT_CONFIG.whisper_local,
       parakeet_mlx: DEFAULT_CONFIG.parakeet_mlx,
       claude: DEFAULT_CONFIG.claude,
+      openai: DEFAULT_CONFIG.openai,
       ollama: DEFAULT_CONFIG.ollama,
       recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: DEFAULT_CONFIG.shortcuts,
@@ -772,7 +773,7 @@ Available variables: {{title}}, {{date}}, {{transcript}}, {{notes}}, {{me_excerp
       enabled: true,
       auto: opts.auto === true,
     };
-    fs.writeFileSync(dest, matter.stringify(`\n${body}`, frontmatter), "utf-8");
+    fs.writeFileSync(dest, buildMarkdown(frontmatter, body), "utf-8");
     console.log(`  Created: ${dest}`);
     console.log(`  Edit the body to define your prompt, then run "meeting-notes prompts list" to verify.`);
   });

@@ -7,8 +7,10 @@ export const RUN_NOTES_FILE = "notes.md";
 export const RUN_TRANSCRIPT_FILE = "transcript.md";
 export const RUN_LOG_FILE = "run.log";
 export const RUN_AUDIO_DIR = "audio";
+export const RUN_PREP_FILE = "prep.md";
+export const RUN_ATTACHMENTS_DIR = "attachments";
 
-export type RunFileKind = "document" | "log" | "media";
+export type RunFileKind = "document" | "log" | "media" | "attachment";
 
 export interface RunFileDescriptor {
   name: string;
@@ -91,6 +93,28 @@ export function resolveRunMediaPath(
   );
 }
 
+export function isAllowedAttachmentName(fileName: string): boolean {
+  if (!fileName || path.basename(fileName) !== fileName) return false;
+  if (fileName.startsWith(".")) return false;
+  return true;
+}
+
+export function resolveRunAttachmentPath(
+  runFolder: string,
+  fileName: string,
+  config: AppConfig = loadConfig()
+): string {
+  if (!isAllowedAttachmentName(fileName)) {
+    throw new Error("Attachment name is invalid.");
+  }
+  const resolvedRunFolder = resolveRunFolderPath(runFolder, config);
+  return assertPathInsideRoot(
+    resolvedRunFolder,
+    path.join(resolvedRunFolder, RUN_ATTACHMENTS_DIR, fileName),
+    "Run attachment"
+  );
+}
+
 export function listRunFiles(
   runFolder: string,
   config: AppConfig = loadConfig()
@@ -110,19 +134,45 @@ export function listRunFiles(
   const audioDir = path.join(resolvedRunFolder, RUN_AUDIO_DIR);
   if (fs.existsSync(audioDir)) {
     for (const entry of fs.readdirSync(audioDir, { withFileTypes: true })) {
-      if (!entry.isFile()) continue;
-      if (entry.name.startsWith("normalized-")) continue;
-      const stat = fs.statSync(path.join(audioDir, entry.name));
+      if (entry.isFile()) {
+        if (entry.name.startsWith("normalized-")) continue;
+        const stat = fs.statSync(path.join(audioDir, entry.name));
+        files.push({
+          name: path.posix.join(RUN_AUDIO_DIR, entry.name),
+          size: stat.size,
+          kind: "media",
+        });
+      } else if (entry.isDirectory()) {
+        // Timestamped segment subdirectories
+        const segDir = path.join(audioDir, entry.name);
+        for (const segEntry of fs.readdirSync(segDir, { withFileTypes: true })) {
+          if (!segEntry.isFile() || segEntry.name.startsWith("normalized-")) continue;
+          const stat = fs.statSync(path.join(segDir, segEntry.name));
+          files.push({
+            name: path.posix.join(RUN_AUDIO_DIR, entry.name, segEntry.name),
+            size: stat.size,
+            kind: "media",
+          });
+        }
+      }
+    }
+  }
+
+  const attachDir = path.join(resolvedRunFolder, RUN_ATTACHMENTS_DIR);
+  if (fs.existsSync(attachDir)) {
+    for (const entry of fs.readdirSync(attachDir, { withFileTypes: true })) {
+      if (!entry.isFile() || entry.name.startsWith(".")) continue;
+      const stat = fs.statSync(path.join(attachDir, entry.name));
       files.push({
-        name: path.posix.join(RUN_AUDIO_DIR, entry.name),
+        name: path.posix.join(RUN_ATTACHMENTS_DIR, entry.name),
         size: stat.size,
-        kind: "media",
+        kind: "attachment",
       });
     }
   }
 
   files.sort((a, b) => {
-    const order = { document: 0, log: 1, media: 2 } as const;
+    const order = { document: 0, log: 1, media: 2, attachment: 3 } as const;
     if (order[a.kind] !== order[b.kind]) return order[a.kind] - order[b.kind];
     return a.name.localeCompare(b.name);
   });

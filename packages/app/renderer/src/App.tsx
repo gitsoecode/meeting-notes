@@ -8,7 +8,6 @@ import { PromptsEditor } from "./routes/PromptsEditor";
 import { Settings } from "./routes/Settings";
 import { SetupWizard } from "./routes/SetupWizard";
 import { ActivityView } from "./routes/ActivityView";
-import { NewMeetingModal } from "./components/NewMeetingModal";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { MeetingNotesMark } from "./components/MeetingNotesMark";
 import { AppSidebar } from "./components/AppSidebar";
@@ -19,6 +18,7 @@ type Route =
   | { name: "record" }
   | { name: "meetings" }
   | { name: "meeting"; runFolder: string }
+  | { name: "prep"; runFolder: string }
   | { name: "prompts"; promptId?: string }
   | { name: "settings" }
   | { name: "activity" };
@@ -31,6 +31,8 @@ function routeToHash(route: Route): string {
       return "#/meetings";
     case "meeting":
       return `#/meeting/${encodeURIComponent(route.runFolder)}`;
+    case "prep":
+      return `#/prep/${encodeURIComponent(route.runFolder)}`;
     case "prompts":
       return route.promptId
         ? `#/prompts/${encodeURIComponent(route.promptId)}`
@@ -58,6 +60,8 @@ function routeFromHash(hash: string): Route | null {
       return { name: "meetings" };
     case "meeting":
       return tail ? { name: "meeting", runFolder: decodeURIComponent(tail) } : null;
+    case "prep":
+      return tail ? { name: "prep", runFolder: decodeURIComponent(tail) } : null;
     case "prompts":
       return tail ? { name: "prompts", promptId: decodeURIComponent(tail) } : { name: "prompts" };
     case "settings":
@@ -73,10 +77,10 @@ export function App() {
   const [config, setConfig] = useState<AppConfigDTO | null | undefined>(undefined);
   const [recording, setRecording] = useState<RecordingStatus>({ active: false });
   const [route, setRoute] = useState<Route>(() => routeFromHash(window.location.hash) ?? { name: "record" });
-  const [newMeetingOpen, setNewMeetingOpen] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const [pendingRoute, setPendingRoute] = useState<Route | null>(null);
-  
+  const [quickStarting, setQuickStarting] = useState(false);
+
   const isDirtyRef = useRef(false);
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -133,14 +137,12 @@ export function App() {
     const unsub = api.on.appAction(async (event) => {
       if (event.type === "open-new-meeting") {
         navigate({ name: "record" });
-        setNewMeetingOpen(true);
         return;
       }
 
       const status = await api.recording.getStatus();
       if (!status.active) {
         navigate({ name: "record" });
-        setNewMeetingOpen(true);
         return;
       }
 
@@ -170,7 +172,45 @@ export function App() {
     };
   }, [navigate]);
 
-  const activeNav = route.name === "meeting" ? "meetings" : route.name;
+  const onQuickStartNow = async () => {
+    setQuickStarting(true);
+    try {
+      const d = new Date();
+      const title = `Meeting — ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      await api.recording.start({ title });
+      navigate({ name: "record" });
+    } catch (err) {
+      console.error("Quick start failed", err);
+    } finally {
+      setQuickStarting(false);
+    }
+  };
+
+  const onQuickCreateDraft = async () => {
+    try {
+      const d = new Date();
+      const title = `Meeting — ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      const result = await api.runs.createDraft({ title });
+      navigate({ name: "prep", runFolder: result.run_folder });
+    } catch (err) {
+      console.error("Draft creation failed", err);
+    }
+  };
+
+  const onQuickImport = async () => {
+    try {
+      const picked = await api.config.pickMediaFile();
+      if (!picked) return;
+      const baseName = picked.name.split(/[\\/]/).pop() ?? picked.name;
+      const title = baseName.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim() || "Imported meeting";
+      const result = await api.runs.processMedia(picked.token, title);
+      navigate({ name: "meeting", runFolder: result.run_folder });
+    } catch (err) {
+      console.error("Import failed", err);
+    }
+  };
+
+  const activeNav = route.name === "meeting" || route.name === "prep" ? "meetings" : route.name;
   const routeLabel = useMemo(() => {
     switch (route.name) {
       case "record":
@@ -179,6 +219,8 @@ export function App() {
         return "Meetings";
       case "meeting":
         return "Meeting";
+      case "prep":
+        return "Meeting Prep";
       case "prompts":
         return "Prompt Library";
       case "settings":
@@ -237,17 +279,23 @@ export function App() {
         <AppSidebar
           activeNav={activeNav}
           onNavigate={(name) => navigate({ name } as Route)}
-          onStartMeeting={() => {
-            navigate({ name: "record" });
-            setNewMeetingOpen(true);
-          }}
+          onStartNow={onQuickStartNow}
+          onCreateDraft={onQuickCreateDraft}
+          onImport={onQuickImport}
+          quickStarting={quickStarting}
         />
         <SidebarInset>
           <SiteHeader
             section={routeLabel}
-            title={route.name === "meeting" ? "Meeting workspace" : routeLabel}
+            title={route.name === "meeting" ? "Meeting workspace" : route.name === "prep" ? "Meeting Prep" : routeLabel}
             subtitle={routeSubtitle}
-            recordingLabel={recording.active ? `Recording${recording.title ? ` · ${recording.title}` : ""}` : null}
+            recordingLabel={
+              recording.active && !recording.paused
+                ? `Recording${recording.title ? ` · ${recording.title}` : ""}`
+                : recording.paused
+                  ? `Paused${recording.title ? ` · ${recording.title}` : ""}`
+                  : null
+            }
             isDirty={isDirty}
           />
           <main className="h-full overflow-y-auto">
@@ -257,10 +305,15 @@ export function App() {
                 config={config}
                 onMeetingStopped={(runFolder) => navigate({ name: "meeting", runFolder })}
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
+                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
+                onViewAllMeetings={() => navigate({ name: "meetings" })}
               />
             )}
             {route.name === "meetings" && (
-              <MeetingsList onOpen={(runFolder) => navigate({ name: "meeting", runFolder })} />
+              <MeetingsList
+                onOpen={(runFolder) => navigate({ name: "meeting", runFolder })}
+                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
+              />
             )}
             {route.name === "meeting" && (
               <MeetingDetail
@@ -268,7 +321,19 @@ export function App() {
                 config={config}
                 onBack={() => navigate({ name: "meetings" })}
                 onOpenPromptLibrary={(promptId) => navigate({ name: "prompts", promptId })}
+                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
                 onDirtyChange={setIsDirty}
+              />
+            )}
+            {route.name === "prep" && (
+              <RecordView
+                recording={recording}
+                config={config}
+                draftRunFolder={route.runFolder}
+                onMeetingStopped={(runFolder) => navigate({ name: "meeting", runFolder })}
+                onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
+                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
+                onViewAllMeetings={() => navigate({ name: "meetings" })}
               />
             )}
             {route.name === "prompts" && (
@@ -289,13 +354,6 @@ export function App() {
           </main>
         </SidebarInset>
       </SidebarMain>
-
-      {newMeetingOpen && (
-        <NewMeetingModal
-          onClose={() => setNewMeetingOpen(false)}
-          onStarted={() => navigate({ name: "record" })}
-        />
-      )}
 
       <ConfirmDialog
         open={!!pendingRoute}
