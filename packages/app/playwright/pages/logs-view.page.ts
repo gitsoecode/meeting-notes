@@ -8,14 +8,11 @@ export class LogsViewPage {
   }
 
   appLogButton() {
-    return this.page.getByRole("option", { name: /App log/i }).or(
-      this.page.getByRole("combobox")
-    );
+    return this.page.getByRole("combobox", { name: "Log source" });
   }
 
   runSelect() {
-    // shadcn Select component — click the trigger to open
-    return this.page.getByRole("combobox");
+    return this.page.getByRole("combobox", { name: "Log source" });
   }
 
   followCheckbox() {
@@ -24,7 +21,7 @@ export class LogsViewPage {
   }
 
   logContent() {
-    return this.page.locator('[class*="font-mono"]').last();
+    return this.page.locator(".font-mono").last();
   }
 
   searchInput() {
@@ -40,14 +37,14 @@ export class LogsViewPage {
   }
 
   processStrip() {
-    return this.page.getByText(/pid/i);
+    return this.page.getByText(/daemon · pid|capture · pid/i).first();
   }
 
   heading() {
-    return this.page.locator("h1");
+    return this.page.getByRole("heading", { name: "Activity" }).first();
   }
 
   jobsHeading() {
-    return this.page.getByText("Jobs");
+    return this.page.getByRole("heading", { name: "Jobs" });
   }
 }

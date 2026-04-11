@@ -14,7 +14,7 @@
     "build:engine": "npm run build --workspace @meeting-notes/engine",
     "build:cli": "npm run build --workspace @meeting-notes/cli",
     "build:app": "npm run build --workspace @meeting-notes/app",
-    "test": "npm run build && node --test packages/app/test/*.test.mjs",
+    "test": "node packages/app/scripts/ensure-better-sqlite3.mjs && npm run build && node --test packages/app/test/*.test.mjs",
     "dev:app": "npm run dev --workspace @meeting-notes/app",
     "start": "npm run start --workspace @meeting-notes/cli"
   },

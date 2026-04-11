@@ -30,11 +30,9 @@ type Fixtures = {
 export const test = base.extend<Fixtures>({
   app: async ({ page }, use) => {
     await installMockApi(page);
-    await page.goto("/");
-    await expect(
-      page.getByText("New meeting")
-    ).toBeVisible();
-    await use(new AppPage(page));
+    const app = new AppPage(page);
+    await app.bootstrapHome();
+    await use(app);
   },
   recordView: async ({ app }, use) => {
     await use(new RecordViewPage(app.page));

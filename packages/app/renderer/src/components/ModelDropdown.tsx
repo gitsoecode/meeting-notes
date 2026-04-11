@@ -106,7 +106,7 @@ export function ModelDropdown({
     onChange(next);
   };
 
-  const selectValue = showCustom ? "__custom__" : known ? value : "__custom__";
+  const selectValue = showCustom ? "__custom__" : known ? value : "";
   const selectedEntry = useMemo(() => findModelEntry(value), [value]);
   const selectedLabel = showCustom
     ? "Custom model"

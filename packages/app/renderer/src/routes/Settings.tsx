@@ -29,6 +29,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Spinner } from "../components/ui/spinner";
 import { Switch } from "../components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Table, TableBody, TableCell, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
 
 const SYSTEM_DEFAULT_DEVICE = "";
@@ -188,6 +189,7 @@ export function Settings({ config, onChange }: SettingsProps) {
           {
             label: "ffmpeg",
             value: deps.ffmpeg ?? "not found — brew install ffmpeg",
+            version: deps.ffmpegVersion ?? null,
             ok: !!deps.ffmpeg,
           },
           {
@@ -198,16 +200,19 @@ export function Settings({ config, onChange }: SettingsProps) {
                 : deps.blackhole === "installed-not-loaded"
                 ? "installed but not loaded"
                 : "not found",
+            version: null,
             ok: deps.blackhole === "loaded",
           },
           {
             label: "Python",
             value: deps.python ?? "not found",
+            version: deps.pythonVersion ?? null,
             ok: !!deps.python,
           },
           {
             label: "Parakeet",
             value: deps.parakeet ?? "not installed",
+            version: null,
             ok: !!deps.parakeet,
           },
           {
@@ -215,6 +220,7 @@ export function Settings({ config, onChange }: SettingsProps) {
             value: deps.ollama.daemon
               ? `running (${deps.ollama.source ?? "unknown"})`
               : "not running",
+            version: deps.ollama.version ?? null,
             ok: deps.ollama.daemon,
           },
         ];
@@ -684,14 +690,9 @@ export function Settings({ config, onChange }: SettingsProps) {
           </Card>
 
           <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 mb-3">
-              <div className="space-y-1">
-                <CardTitle>System Health</CardTitle>
-                <CardDescription>Check status of required background tools.</CardDescription>
-              </div>
-              <Button variant="ghost" size="sm" onClick={refreshDeps} className="h-8">
-                Refresh
-              </Button>
+            <CardHeader className="pb-2 mb-3">
+              <CardTitle>System Health</CardTitle>
+              <CardDescription>Check status of required background tools.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-2">
               {deps == null ? (
@@ -700,18 +701,22 @@ export function Settings({ config, onChange }: SettingsProps) {
                   Checking dependencies…
                 </div>
               ) : (
-                <div className="divide-y divide-[var(--border-default)] rounded-md border border-[var(--border-default)]">
-                  {dependencyRows.map((row) => (
-                    <div
-                      key={row.label}
-                      className="flex items-center justify-between bg-white px-3 py-2 text-sm"
-                    >
-                      <span className="font-medium text-[var(--text-primary)]">{row.label}</span>
-                      <span className={row.ok ? "text-[var(--success)]" : "text-[var(--error)] font-medium"}>
-                        {row.value}
-                      </span>
-                    </div>
-                  ))}
+                <div className="overflow-hidden rounded-md border border-[var(--border-default)]">
+                  <Table>
+                    <TableBody>
+                      {dependencyRows.map((row) => (
+                        <TableRow key={row.label}>
+                          <TableCell className="font-medium">{row.label}</TableCell>
+                          <TableCell className="text-[var(--text-tertiary)]">
+                            {row.version ?? "—"}
+                          </TableCell>
+                          <TableCell className={`text-right ${row.ok ? "text-[var(--success)]" : "text-[var(--error)] font-medium"}`}>
+                            {row.value}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
                 </div>
               )}
             </CardContent>

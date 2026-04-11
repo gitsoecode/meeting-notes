@@ -14,6 +14,7 @@ test.describe("Settings", () => {
   });
 
   test("Obsidian toggle shows and hides vault path", async ({ settings }) => {
+    await settings.openTab("Storage");
     // Initially disabled in mock
     await expect(settings.vaultPathInput()).not.toBeVisible();
 
@@ -28,6 +29,7 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
+    await settings.openTab("Transcription");
     // Audio device selects are shadcn Select components (combobox role)
     await expect(settings.micDeviceSelect()).toBeVisible();
     await expect(settings.systemDeviceSelect()).toBeVisible();
@@ -48,22 +50,18 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
+    await settings.openTab("Transcription");
     // ASR provider is a shadcn Select (combobox), not a native <select>
     await settings.asrProviderSelect().click();
     await page.getByRole("option", { name: /OpenAI/ }).click();
     await expect(settings.openaiWarning()).toBeVisible();
-    // OpenAI key input should appear
-    await expect(page.getByText("OpenAI API key")).toBeVisible();
   });
 
   test("Claude API key save flow", async ({ settings, page }) => {
+    await settings.openTab("Models");
     // Find the Claude key section
-    const claudeSection = page
-      .getByText("Anthropic API key")
-      .locator("..")
-      .locator("..");
-    const keyInput = claudeSection.locator('input[type="password"]');
-    const saveButton = claudeSection.getByRole("button", { name: "Save" });
+    const keyInput = settings.claudeKeyInput();
+    const saveButton = settings.claudeKeySaveButton();
 
     await expect(saveButton).toBeDisabled();
     await keyInput.fill("sk-ant-test-key-123");
@@ -74,15 +72,20 @@ test.describe("Settings", () => {
   });
 
   test("installed local models list with Remove button", async ({
-    settings,
     page,
   }) => {
+    await page.getByRole("tab", { name: "Models" }).click();
     await expect(page.getByText("qwen3.5:9b")).toBeVisible();
     await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
   });
 
   test("pull model modal opens", async ({ settings, page }) => {
-    await settings.pullModelInput().fill("llama3.1:8b");
+    await settings.openTab("Models");
+    await settings.pullModelInput().click();
+    await page.getByRole("option", { name: "Custom…" }).click();
+    await page.keyboard.press("Escape");
+    await expect(settings.pullCustomModelInput()).toBeVisible();
+    await settings.pullCustomModelInput().fill("llama3.1:8b");
     await settings.pullButton().click();
     await expect(page.getByText("Pulling llama3.1:8b")).toBeVisible();
 
@@ -96,26 +99,30 @@ test.describe("Settings", () => {
   });
 
   test("dependencies card shows all rows", async ({ settings, page }) => {
+    await settings.openTab("General");
     await expect(page.getByText("ffmpeg", { exact: true })).toBeVisible();
     await expect(page.getByText("BlackHole (2ch)", { exact: true })).toBeVisible();
     await expect(page.getByText("Python", { exact: true })).toBeVisible();
     await expect(page.getByText("Parakeet", { exact: true })).toBeVisible();
-    await expect(page.getByText("Ollama daemon", { exact: true })).toBeVisible();
+    await expect(page.getByText("Ollama", { exact: true })).toBeVisible();
   });
 
-  test("shortcut section is visible", async ({ page }) => {
+  test("shortcut section is visible", async ({ page, settings }) => {
+    await settings.openTab("General");
     await expect(page.getByText("Toggle recording")).toBeVisible();
     // The shortcut recorder should show current binding
-    await expect(page.getByText("Shortcuts")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
   });
 
-  test("settings page can scroll past shortcuts to system status", async ({ page }) => {
-    const systemStatus = page.getByRole("button", { name: "System Status" });
-    await systemStatus.scrollIntoViewIfNeeded();
-    await expect(systemStatus).toBeVisible();
+  test("settings page can scroll past shortcuts to system health", async ({ page, settings }) => {
+    await settings.openTab("General");
+    const systemHealth = page.getByText("System Health", { exact: true });
+    await systemHealth.scrollIntoViewIfNeeded();
+    await expect(systemHealth).toBeVisible();
   });
 
   test("data directory shows current path", async ({ settings }) => {
+    await settings.openTab("Storage");
     await expect(settings.dataPathInput()).toHaveValue(
       "/Users/test/Meeting Notes"
     );

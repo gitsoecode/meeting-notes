@@ -14,7 +14,7 @@ export class MeetingDetailPage {
   }
 
   meetingTitle() {
-    return this.main.locator("h2").first();
+    return this.page.locator("header h1");
   }
 
   statusBadge() {
@@ -22,7 +22,7 @@ export class MeetingDetailPage {
   }
 
   // Tabs
-  tab(name: "Summary" | "Analysis" | "Notes" | "Transcript" | "Recording" | "Metadata") {
+  tab(name: "Metadata" | "Prep" | "Notes" | "Summary" | "Analysis" | "Transcript" | "Recording" | "Files") {
     return this.page.getByRole("tab", { name });
   }
 
@@ -39,11 +39,11 @@ export class MeetingDetailPage {
   }
 
   refreshSummaryButton() {
-    return this.main.getByRole("button", { name: "Refresh summary" });
+    return this.main.getByRole("button", { name: /Refresh/ });
   }
 
   editSummaryPromptButton() {
-    return this.main.getByRole("button", { name: "Edit summary prompt" });
+    return this.main.getByRole("button", { name: /Edit prompt/ });
   }
 
   // Analysis tab
@@ -74,7 +74,7 @@ export class MeetingDetailPage {
   }
 
   notesReadModeHeading() {
-    return this.main.getByText("View mode");
+    return this.main.getByText("Editing notes").or(this.main.getByText("No notes for this meeting."));
   }
 
   notesEditor() {
@@ -105,15 +105,19 @@ export class MeetingDetailPage {
 
   // Action buttons
   reprocessButton() {
-    return this.main.getByRole("button", { name: "Reprocess" });
+    return this.page.getByRole("menuitem", { name: "Reprocess" });
   }
 
   runPromptButton() {
-    return this.main.getByRole("button", { name: "Run prompt" });
+    return this.main.getByRole("button", { name: "Run prompt", exact: true });
   }
 
   moreActionsButton() {
-    return this.main.locator("svg.lucide-more-horizontal").locator("xpath=ancestor::button[1]");
+    return this.main
+      .getByRole("button", { name: "Launch chat" })
+      .locator("..")
+      .getByRole("button")
+      .last();
   }
 
   openFolderButton() {
@@ -162,6 +166,24 @@ export class MeetingDetailPage {
 
   // Metadata tab
   metadataHeading() {
-    return this.main.getByText("Run details");
+    return this.main.getByRole("heading", { name: "Meeting metadata" });
+  }
+
+  continueRecordingButton() {
+    return this.main.getByRole("button", { name: "Continue recording" });
+  }
+
+  editAsDraftItem() {
+    return this.page.getByRole("menuitem", { name: "Edit as draft" });
+  }
+
+  friendlyError() {
+    return this.main.getByText("This meeting no longer exists on disk.");
+  }
+
+  async waitForReady() {
+    await this.page.locator("header h1").filter({ hasText: "Meeting workspace" }).waitFor();
+    await this.backButton().waitFor();
+    await this.page.getByRole("tablist").waitFor();
   }
 }

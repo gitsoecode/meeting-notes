@@ -12,15 +12,15 @@ export class SetupWizardPage {
   }
 
   progressDots() {
-    return this.page.locator(".wizard-progress-dot");
+    return this.page.locator('div.h-1.flex-1.rounded-full');
   }
 
   activeDot() {
-    return this.page.locator(".wizard-progress-dot.active");
+    return this.page.locator('div.h-1.flex-1.rounded-full.bg-\\[var\\(--accent\\)\\]');
   }
 
   doneDots() {
-    return this.page.locator(".wizard-progress-dot.done");
+    return this.page.locator('div.h-1.flex-1.rounded-full.bg-\\[var\\(--success\\)\\]');
   }
 
   // Step headings
@@ -40,7 +40,7 @@ export class SetupWizardPage {
 
   transcriptionHeading() {
     return this.page.getByRole("heading", {
-      name: "Transcription & API keys",
+      name: "Transcription & Summarization",
     });
   }
 
@@ -67,8 +67,7 @@ export class SetupWizardPage {
 
   // Step 1: Obsidian
   obsidianToggle() {
-    // The checkbox input is hidden (CSS toggle); click the .switch label wrapper
-    return this.page.locator("label.switch").first();
+    return this.page.locator("#wizard-use-obsidian");
   }
 
   vaultPathInput() {
@@ -86,12 +85,11 @@ export class SetupWizardPage {
 
   // Step 3: Transcription
   asrProviderSelect() {
-    return this.page.locator(".wizard-step select").first();
+    return this.page.getByRole("combobox").first();
   }
 
   localLlmToggle() {
-    // Click the .switch label wrapper (not the hidden checkbox input)
-    return this.page.locator("label.switch").last();
+    return this.page.getByRole("combobox").nth(1);
   }
 
   apiKeyInput() {

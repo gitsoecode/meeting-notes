@@ -24,8 +24,7 @@ test.describe("Meetings List", () => {
     meetingsList,
     page,
   }) => {
-    const firstCheckbox = meetingsList.checkboxes().first();
-    await firstCheckbox.check();
+    await meetingsList.meetingCheckbox("Customer call").click();
     await expect(meetingsList.bulkRunButton()).toBeVisible();
 
     await page.screenshot({
@@ -37,7 +36,7 @@ test.describe("Meetings List", () => {
   test("bulk run modal flow: select prompt, run, done", async ({
     meetingsList,
   }) => {
-    await meetingsList.checkboxes().first().check();
+    await meetingsList.meetingCheckbox("Customer call").click();
     await meetingsList.bulkRunButton().click();
 
     await expect(meetingsList.bulkRunModalHeading()).toBeVisible();
@@ -60,7 +59,7 @@ test.describe("Meetings List", () => {
     meetingsList,
     page,
   }) => {
-    await meetingsList.checkboxes().first().check();
+    await meetingsList.meetingCheckbox("Customer call").click();
     await meetingsList.bulkRunButton().click();
 
     await page.getByRole("combobox").click();
@@ -90,8 +89,8 @@ test.describe("Meetings List", () => {
   });
 
   test("status badges show correct values", async ({ meetingsList, page }) => {
-    await expect(page.getByText("complete").first()).toBeVisible();
-    await expect(page.getByText("processing").first()).toBeVisible();
+    await expect(meetingsList.statusBadge("complete")).toBeVisible();
+    await expect(meetingsList.statusBadge("processing")).toBeVisible();
 
     await page.screenshot({
       path: "test-results/screenshots/meetings-list-full.png",

@@ -79,23 +79,23 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
   }) => {
     // Start a recording
     await page.getByRole("button", { name: /Start recording/ }).click();
-    await expect(page.getByText("Recording live").first()).toBeVisible();
+    await expect(page.getByText(/Recording · \d+:\d{2}:\d{2}/).first()).toBeVisible();
 
     const counts = await app.countInteractiveElements();
     const cardCount = await app.countCards();
 
-    const notesEditor = page.getByText("Live notes");
-    const audioMeter = page.getByText("Capture health");
-    const pipelineQueue = page.getByText("Processing queue");
+    const notesEditor = page.locator("main").getByRole("textbox").first();
+    const audioMeter = page.getByText("Mic");
+    const pipelineQueue = page.getByText("Coming up");
 
     const observations: string[] = [
       `Interactive elements during recording: ${counts.total}`,
       `Cards visible during recording: ${cardCount}`,
       `Live notes editor visible: ${await notesEditor.isVisible()}`,
       `Audio meter card visible: ${await audioMeter.isVisible()}`,
-      `Processing queue card visible (premature?): ${await pipelineQueue.isVisible()}`,
-      'OBSERVATION: "Processing queue" card shows during recording but processing hasn\'t started yet — may create confusion about what happens when',
-      "OBSERVATION: The right sidebar has two cards (Capture health + Processing queue) which could be combined or the queue could be deferred until stop",
+      `Upcoming pipeline card visible: ${await pipelineQueue.isVisible()}`,
+      'OBSERVATION: The recording state is communicated through the live "Recording · HH:MM:SS" badge instead of the old "Recording live" copy',
+      "OBSERVATION: The side rail now uses lighter-weight status cards (Mic + Coming up) instead of the older capture-health / queue framing",
     ];
 
     await audit({
@@ -114,7 +114,7 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
   }) => {
     // Start and stop recording
     await page.getByRole("button", { name: /Start recording/ }).click();
-    await expect(page.getByText("Recording live").first()).toBeVisible();
+    await expect(page.getByText(/Recording · \d+:\d{2}:\d{2}/).first()).toBeVisible();
     await page.getByRole("button", { name: /End meeting/ }).click();
     await page.getByRole("button", { name: "End meeting" }).last().click();
 
@@ -150,7 +150,7 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     audit,
   }) => {
     await app.navigateTo("Meetings");
-    await expect(page.getByText("Meetings on disk")).toBeVisible();
+    await expect(page.locator("header h1")).toContainText("Meetings");
 
     const counts = await app.countInteractiveElements();
     const cardCount = await app.countCards();
@@ -201,16 +201,16 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     await page.getByText("Weekly planning").first().click();
     await page.getByRole("tab", { name: "Notes" }).click();
 
-    const editBtn = page.getByRole("button", { name: "Edit notes" });
-    const lockHeading = page.getByText(
-      "Notes are locked for completed meetings"
+    const editBtn = page.getByRole("button", { name: "Edit" });
+    const notesStateHeading = page.getByText("Editing notes").or(
+      page.getByText("No notes for this meeting.")
     );
 
     const observations: string[] = [
       `Edit notes button visible: ${await editBtn.isVisible()}`,
-      `"Notes are locked" heading visible: ${await lockHeading.isVisible()}`,
-      'OBSERVATION: "Notes are locked for completed meetings" heading text is confusing — sounds like notes cannot be edited at all',
-      'RECOMMENDATION: Softer language like "View mode" with "Edit" button, no lock metaphor',
+      `Current notes state heading visible: ${await notesStateHeading.isVisible()}`,
+      'OBSERVATION: Completed meetings now use a simpler "Edit" affordance rather than the older "Edit notes" / "locked" language',
+      'RECOMMENDATION: Keep the lightweight wording — it reads more like an editable workspace and less like a permission boundary',
     ];
 
     // Click edit and check editor state
@@ -233,7 +233,7 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     audit,
   }) => {
     await app.navigateTo("Prompt Library");
-    await expect(page.getByText("Prompt workspace")).toBeVisible();
+    await expect(page.locator("#prompt-title")).toBeVisible();
 
     const counts = await app.countInteractiveElements();
     const cardCount = await app.countCards();
@@ -243,19 +243,15 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     const modelVisible = await modelSection.isVisible();
 
     // Check prompt body editor height
-    const editorContainer = page.locator(".h-\\[420px\\]");
+    const editorContainer = page.locator(".cm-editor, .milkdown").first();
     const editorBox = await editorContainer.boundingBox();
 
     // Check accordion state
-    const detailsAccordion = page.getByText(
-      "Prompt details and file options"
-    );
-    const historyAccordion = page.getByText(
-      "History, reset, and seeded prompt notes"
-    );
+    const detailsAccordion = page.getByRole("button", { name: "Details" });
+    const promptActions = page.getByRole("button", { name: "Prompt actions" });
 
     // Check if save button is visible without scrolling
-    const saveBtn = page.getByRole("button", { name: "Save" });
+    const saveBtn = page.getByRole("button", { name: "Save changes" });
     const saveBtnBox = await saveBtn.boundingBox();
 
     // Check sidebar prompt list for overflow
@@ -268,14 +264,13 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
       `Total interactive elements: ${counts.total} (${counts.buttons} buttons, ${counts.inputs} inputs, ${counts.switches} switches)`,
       `Cards visible: ${cardCount}`,
       `Model selector visible without accordion: ${modelVisible}`,
-      `Prompt body editor height: ${editorBox ? `${editorBox.height}px` : "not found"} (fixed 420px)`,
+      `Prompt body editor height: ${editorBox ? `${editorBox.height}px` : "not found"}`,
       `Save button position from top: ${saveBtnBox ? `${Math.round(saveBtnBox.y)}px` : "not found"}`,
       `Sidebar prompt items: ${sidebarItemCount}`,
       "ISSUE: Model selection is visible but tucked into a small area alongside the filename — not prominent enough for a key feature",
-      `ISSUE: Two accordion sections add hidden depth — user must expand to find Prompt ID, Reset to Default`,
-      `ISSUE: Prompt body editor is fixed at 420px height — gets squeezed on smaller screens while metadata takes more space`,
-      `ISSUE: Sidebar prompt cards have inline auto-run switches + description text — too much information density per item`,
-      `ISSUE: ${counts.buttons} buttons visible simultaneously creates decision paralysis — Save, Run against meeting, New prompt, Open in Finder, accordion triggers`,
+      `Details accordion visible: ${await detailsAccordion.isVisible()}`,
+      `Prompt actions menu visible: ${await promptActions.isVisible()}`,
+      `ISSUE: Sidebar prompt cards have been simplified, but ${counts.buttons} visible buttons still create a fairly dense editing surface`,
       "RECOMMENDATION: Make prompt body editor the dominant element (60%+ of space). Surface model at top alongside title. Group secondary actions (reset, run against, file options) into a dropdown. Simplify sidebar items to name + badge only.",
     ];
 
@@ -422,8 +417,8 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
   });
 
   test("Accessibility: dialogs have correct role", async ({ app, page }) => {
-    // Open the new meeting modal to verify dialog role
-    await app.emitAppAction("open-new-meeting");
+    await app.navigateTo("Prompt Library");
+    await page.getByRole("button", { name: "Create prompt" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel" }).click();
@@ -434,11 +429,11 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     page,
   }) => {
     await app.navigateTo("Prompt Library");
-    await page.getByRole("button", { name: "New prompt" }).click();
+    await page.getByRole("button", { name: "Create prompt" }).click();
 
     const createBtn = page
       .getByRole("dialog")
-      .getByRole("button", { name: "Create prompt" });
+      .getByRole("button", { name: "Create" });
     await expect(createBtn).toBeDisabled();
 
     // Fill just one field — should still be disabled
@@ -447,7 +442,7 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
 
     // Fill all required fields
     await page.locator("#new-prompt-label").fill("Test");
-    await page.locator("#new-prompt-filename").fill("test.md");
+    await page.locator("#new-prompt-fn").fill("test.md");
     await expect(createBtn).toBeEnabled();
   });
 
@@ -455,21 +450,18 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     app,
     page,
   }) => {
-    // New meeting modal
-    await app.emitAppAction("open-new-meeting");
+    await app.navigateTo("Prompt Library");
+    await page.getByRole("button", { name: "Create prompt" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
 
     // Navigate to meeting detail for more modals
-    await page.getByText("Weekly planning").click();
+    await app.navigateRoute({ name: "meeting", runFolder: "/runs/weekly-planning" });
+    await expect(page.locator("header h1")).toContainText("Meeting workspace");
 
     // Reprocess modal
-    await page.getByRole("button", { name: "Reprocess" }).click();
-    await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
-    await expect(page.getByRole("dialog")).not.toBeVisible();
-
-    // Run prompt modal
-    await page.getByRole("button", { name: "Run prompt" }).first().click();
+    await page.getByRole("button", { name: "Launch chat" }).locator("..").getByRole("button").last().click();
+    await page.getByRole("menuitem", { name: "Reprocess" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();
   });

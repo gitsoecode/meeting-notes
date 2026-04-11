@@ -10,15 +10,15 @@ export class MeetingsListPage {
   }
 
   heading() {
-    return this.main.getByText("Recent and imported meetings");
+    return this.page.locator("header h1").filter({ hasText: "Meetings" });
   }
 
   emptyState() {
-    return this.main.getByText("Import your first meeting");
+    return this.main.getByText("No meetings yet");
   }
 
   searchInput() {
-    return this.main.getByPlaceholder("Search meetings");
+    return this.main.getByPlaceholder("Search meetings…");
   }
 
   refreshButton() {
@@ -34,23 +34,27 @@ export class MeetingsListPage {
   }
 
   meetingRow(title: string) {
-    return this.main.getByText(title).first();
+    return this.main.locator("tbody tr").filter({ hasText: new RegExp(title, "i") }).first();
   }
 
   checkboxes() {
-    return this.main.locator('input[type="checkbox"]');
+    return this.main.getByRole("checkbox").filter({ hasNot: this.page.getByLabel("Select all") });
+  }
+
+  meetingCheckbox(title: string) {
+    return this.main.getByRole("checkbox", { name: new RegExp(`Select ${title}`, "i") });
   }
 
   statusBadge(status: string) {
-    return this.main.getByText(status, { exact: true });
+    return this.main.getByText(new RegExp(`^${status}$`, "i")).first();
   }
 
   quickActionsCard() {
-    return this.main.getByText("Import or batch-run");
+    return this.main.getByRole("button", { name: /Import meeting/ });
   }
 
   totalBadge() {
-    return this.main.getByText(/\d+ total/);
+    return this.main.getByText(/\d+ meetings/);
   }
 
   // Bulk run modal
@@ -68,6 +72,20 @@ export class MeetingsListPage {
 
   bulkRunPromptSummary() {
     return this.page.getByTestId("prompt-run-summary");
+  }
+
+  bulkDeleteButton() {
+    return this.main.getByRole("button", { name: /Delete \d+/ });
+  }
+
+  confirmDeleteButton() {
+    return this.page.getByRole("button", { name: /^Delete$/ });
+  }
+
+  async waitForReady() {
+    await this.heading().waitFor();
+    await this.searchInput().waitFor();
+    await this.main.locator("table").waitFor();
   }
 
   // Column header row — the grid structure

@@ -318,8 +318,10 @@ export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 
 export interface DepsCheckResult {
   ffmpeg: string | null;
+  ffmpegVersion?: string | null;
   blackhole: BlackHoleStatus;
   python: string | null;
+  pythonVersion?: string | null;
   /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
   parakeet: string | null;
   /**
@@ -332,6 +334,7 @@ export interface DepsCheckResult {
     daemon: boolean;
     source?: "system-running" | "system-spawned" | "bundled-spawned";
     installedModels: string[];
+    version?: string | null;
   };
 }
 

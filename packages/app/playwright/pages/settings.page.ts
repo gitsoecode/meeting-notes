@@ -10,42 +10,57 @@ export class SettingsPage {
   }
 
   headingText() {
-    return this.page.getByText("Every value here takes effect immediately.");
+    return this.page.getByText("Changes take effect immediately.");
+  }
+
+  tab(name: string) {
+    return this.page.getByRole("tab", { name });
+  }
+
+  async openTab(name: string) {
+    await this.tab(name).click();
+  }
+
+  card(title: string) {
+    return this.main.locator('[class*="rounded"], [class*="Card"]').filter({
+      has: this.page.getByText(title, { exact: true }),
+    }).first();
   }
 
   // General card
   obsidianSwitch() {
-    return this.page.getByRole("switch", { name: "Use Obsidian as viewer" });
+    const card = this.card("Obsidian Integration");
+    return card.getByRole("switch");
   }
 
   vaultPathInput() {
-    return this.page.locator("#settings-vault-path");
+    return this.card("Obsidian Integration").getByPlaceholder("(not set)");
   }
 
   dataPathInput() {
-    return this.page.locator("#settings-data-path");
+    return this.card("Data Storage").locator("input").first();
   }
 
   changeDataDirButton() {
-    return this.page.getByRole("button", { name: "Change…" });
+    return this.page.getByRole("button", { name: "Move…" });
   }
 
   openDataDirButton() {
-    return this.page.getByRole("button", { name: "Open in Finder" });
+    return this.page.getByRole("button").filter({ has: this.page.locator("svg.lucide-folder-open") }).first();
   }
 
   // Audio card
   micDeviceSelect() {
-    return this.page.locator("#settings-mic-device");
+    return this.page.locator("#settings-mic");
   }
 
   systemDeviceSelect() {
-    return this.page.locator("#settings-system-device");
+    return this.page.locator("#settings-sys-audio");
   }
 
   // Transcription card
   asrProviderSelect() {
-    return this.page.locator("#settings-asr-provider");
+    return this.page.locator("#settings-asr");
   }
 
   parakeetInstallButton() {
@@ -60,48 +75,45 @@ export class SettingsPage {
 
   // LLM card
   claudeKeyInput() {
-    return this.page.locator('input[type="password"]').first();
+    return this.card("AI Provider").getByPlaceholder(/paste key|••••• stored/).first();
   }
 
   claudeKeySaveButton() {
-    // The save button next to the Claude key
-    return this.page
-      .locator('[class*="KeyRound"]')
-      .first()
-      .locator("..")
-      .locator("..")
-      .getByRole("button", { name: "Save" });
+    return this.card("AI Provider").getByRole("button", { name: "Save" }).first();
   }
 
   // Local models card
   installedModelsList() {
-    return this.page.getByText("Installed Ollama models");
+    return this.card("Local Models").getByText("Installed models");
   }
 
   modelRemoveButton(modelName: string) {
-    return this.page
-      .getByText(modelName)
-      .locator("..")
-      .locator("..")
+    return this.card("Local Models")
+      .locator("div")
+      .filter({ has: this.page.getByText(modelName, { exact: true }) })
       .getByRole("button", { name: "Remove" });
   }
 
   pullModelInput() {
-    return this.page.locator("#settings-pull-model");
+    return this.card("Local Models").getByRole("combobox").first();
+  }
+
+  pullCustomModelInput() {
+    return this.page.getByPlaceholder(/model id/i).last();
   }
 
   pullButton() {
-    return this.page.getByRole("button", { name: "Pull" });
+    return this.card("Local Models").getByRole("button", { name: "Pull" });
   }
 
   // Shortcuts card
   shortcutRecorder() {
-    return this.page.getByText("Toggle recording").locator("..").locator("..");
+    return this.card("Keyboard Shortcuts").getByText("Toggle recording").locator("..").locator("..");
   }
 
   // Dependencies card
   dependenciesCard() {
-    return this.page.getByText("Dependencies");
+    return this.card("System Health");
   }
 
   depRefreshButton() {
@@ -109,7 +121,7 @@ export class SettingsPage {
   }
 
   depRow(name: string) {
-    return this.page.getByText(name, { exact: false });
+    return this.dependenciesCard().getByText(name, { exact: false });
   }
 
   // Native selects on this page (for UX audit — visual consistency check)

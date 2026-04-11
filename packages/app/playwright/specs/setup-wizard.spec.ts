@@ -49,9 +49,8 @@ test.describe("Setup Wizard", () => {
     await wizard.finishButton().click();
 
     // After finish, the app should load the main view
-    await expect(
-      page.getByText("Start a meeting in the desktop app")
-    ).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "New meeting" })).toBeVisible();
   });
 
   test("forward path with Obsidian toggle", async ({ wizard }) => {
@@ -110,8 +109,9 @@ test.describe("Setup Wizard", () => {
     // Without local LLM and without key, Next should be disabled
     await expect(wizard.nextButton()).toBeDisabled();
 
-    // Toggle local LLM on
+    // Switch summarization to a local Ollama model
     await wizard.localLlmToggle().click();
+    await page.getByRole("option", { name: /Local \(Ollama\)/ }).click();
 
     // Now Next should be enabled without a Claude key
     // (need to wait for model picker to populate)

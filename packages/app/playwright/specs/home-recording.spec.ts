@@ -14,6 +14,7 @@ test.describe("Home & Recording", () => {
   test("end meeting dialog can process and navigate to the meeting workspace", async ({
     recordView,
     page,
+    meetingDetail,
   }) => {
     await recordView.startRecording("Test Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
@@ -26,24 +27,25 @@ test.describe("Home & Recording", () => {
     await expect(page.getByText("Uses Sonnet 4.6")).toBeVisible();
     await recordView.confirmEndMeetingButton().click();
 
-    // Should navigate to meeting detail
-    await expect(page.getByText("Back to meetings")).toBeVisible();
+    await meetingDetail.waitForReady();
   });
 
   test("end meeting dialog can save without processing", async ({
     recordView,
     page,
+    meetingDetail,
   }) => {
     await recordView.startRecording("Saved Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
 
     await recordView.endMeetingButton().click();
     await recordView.saveMeetingOption().click();
-    await expect(page.getByText("run processing later")).toBeVisible();
+    await expect(page.getByText("Keep the recording for later.")).toBeVisible();
     await recordView.saveMeetingButton().click();
 
-    await expect(page.getByText("Back to meetings")).toBeVisible();
-    await expect(page.getByText("No summary has been generated for this meeting yet.")).toBeVisible();
+    await meetingDetail.waitForReady();
+    await expect(page.getByText("draft").first()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible();
   });
 
   test("end and delete confirms before discarding the live meeting", async ({
@@ -82,10 +84,12 @@ test.describe("Home & Recording", () => {
 
   test("live view shows audio meter, pipeline status, and notes editor", async ({
     recordView,
+    page,
   }) => {
     await recordView.startRecording("Test");
     await expect(recordView.audioMeterCard()).toBeVisible();
-    await expect(recordView.pipelineStatusCard()).toBeVisible();
+    await expect(page.getByText("Live notes")).toBeVisible();
+    await expect(page.getByText("System audio capturing")).toBeVisible();
     await expect(recordView.liveNotesEditor()).toBeVisible();
   });
 

@@ -37,11 +37,12 @@ test.describe("Navigation", () => {
 
   test("meeting detail highlights Meetings in sidebar", async ({
     app,
-    page,
+    meetingsList,
   }) => {
     await app.navigateTo("Meetings");
-    await page.getByText("Weekly planning").click();
-    await expect(page.getByRole("tab", { name: "Analysis" })).toBeVisible();
+    await meetingsList.waitForReady();
+    await meetingsList.meetingRow("Weekly planning").click();
+    await expect(app.page.getByRole("tab", { name: "Analysis" })).toBeVisible();
 
     // The Meetings nav button should be functionally active (meeting detail routes
     // set activeNav to "meetings")

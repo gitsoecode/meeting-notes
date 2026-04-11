@@ -28,7 +28,15 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 ## How To Work In This Repo
 
 - Build and regression-check with `npm test`.
+- Read `docs/testing-playbook.md` before changing app flows, Playwright fixtures, page objects, IPC-backed UI behavior, or run-lifecycle behavior.
 - Use `docs/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.
+- For app changes, prefer this test sequence unless the task clearly calls for something narrower:
+  1. `npm run test --workspace @meeting-notes/app`
+  2. targeted Playwright specs for the changed area
+  3. `npm run test:e2e --workspace @meeting-notes/app`
+  4. `npm test`
+- Keep Playwright’s `mock-api.ts`, shared fixtures, and page objects aligned with real app behavior. If a feature changes route behavior, IPC semantics, or meeting-state transitions, update the test harness in the same task.
+- Add or update resilience coverage for run-scoped features that can encounter stale, missing, partial, or interrupted state.
 - Prefer small shared helpers over growing `packages/app/main/ipc.ts` with more business logic.
 - For renderer UI work, prefer `shadcn/ui` primitives and composition patterns as the default approach. Favor extending the shared component layer under `packages/app/renderer/src/components/ui` over introducing new bespoke controls or one-off styling patterns.
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:

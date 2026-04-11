@@ -9,8 +9,8 @@ export class PromptsEditorPage {
     this.main = page.locator("main");
   }
 
-  workspaceBadge() {
-    return this.main.getByText("Workspace", { exact: true });
+  libraryHeading() {
+    return this.main.getByRole("heading", { name: "Library" });
   }
 
   promptSidebarItem(label: string) {
@@ -31,6 +31,10 @@ export class PromptsEditorPage {
 
   customPromptsGroup() {
     return this.main.getByTestId("prompt-custom-group");
+  }
+
+  customPromptItem(label: string) {
+    return this.customPromptsGroup().getByRole("button").filter({ hasText: label }).first();
   }
 
   titleInput() {
@@ -70,7 +74,7 @@ export class PromptsEditorPage {
   }
 
   newPromptButton() {
-    return this.main.getByRole("button", { name: "New prompt" }).first();
+    return this.main.getByRole("button", { name: "Create prompt" }).first();
   }
 
   runAgainstMeetingItem() {

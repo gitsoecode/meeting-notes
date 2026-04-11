@@ -5,11 +5,11 @@ test.describe("Prompt Library", () => {
     await app.navigateTo("Prompt Library");
   });
 
-  test("initial load shows workspace badge and summary selected", async ({
+  test("initial load shows library and summary selected", async ({
     promptsEditor,
     page,
   }) => {
-    await expect(promptsEditor.workspaceBadge()).toBeVisible();
+    await expect(promptsEditor.libraryHeading()).toBeVisible();
     await expect(promptsEditor.rootPromptItem()).toContainText("Summary + Action Items");
     await expect(promptsEditor.titleInput()).toHaveValue("Summary + Action Items");
     await expect(promptsEditor.modelCombobox()).toContainText("Qwen 3.5 9B");
@@ -27,7 +27,7 @@ test.describe("Prompt Library", () => {
     await expect(promptsEditor.rootPromptItem()).toContainText("Primary prompt");
     await expect(promptsEditor.preloadedPromptsGroup()).toContainText("1:1 Follow-up");
     await expect(promptsEditor.preloadedPromptsGroup()).toContainText("Decision Log");
-    await expect(promptsEditor.customPromptsGroup()).toContainText("None yet");
+    await expect(promptsEditor.customPromptsGroup()).toContainText("Follow-up Brief");
   });
 
   test("route deep link selects the summary prompt", async ({ app, promptsEditor }) => {
@@ -140,10 +140,10 @@ test.describe("Prompt Library", () => {
     promptsEditor,
     page,
   }) => {
-    page.on("dialog", (dialog) => dialog.accept());
     await promptsEditor.moreButton().click();
     await promptsEditor.resetToDefaultItem().click();
-    await expect(promptsEditor.workspaceBadge()).toBeVisible();
+    await page.getByRole("button", { name: "Reset prompt" }).click();
+    await expect(promptsEditor.titleInput()).toHaveValue("Summary + Action Items");
   });
 
   test("dirty state is clearly marked after editing", async ({

@@ -1,92 +1,88 @@
-import { expect, test } from "@playwright/test";
-import { installMockApi } from "./mock-api";
+import { test, expect } from "./fixtures/base.fixture";
 
-test.beforeEach(async ({ page }) => {
-  await installMockApi(page);
-  await page.goto("/");
-});
-
-test("runs through home, modal, recording, meeting tabs, and prompts workflows", async ({
+test("runs through home, recording, meeting workspace, and prompt workflows", async ({
+  app,
+  recordView,
+  meetingDetail,
+  promptsEditor,
   page,
 }) => {
-  await expect(page.getByText("Start or import a meeting")).toBeVisible();
+  await recordView.waitForHomeReady();
 
-  await page.evaluate(() => {
-    window.__MEETING_NOTES_TEST.emitAppAction("open-new-meeting", "tray");
-  });
+  await app.emitAppAction("open-new-meeting", "tray");
   await expect(page.getByRole("heading", { name: "New meeting" })).toBeVisible();
-  await page.getByRole("button", { name: "Cancel" }).click();
 
-  await page.getByRole("button", { name: "Start recording" }).click();
-  await expect(page.getByRole("button", { name: "End meeting" })).toBeVisible();
-  await page.getByRole("button", { name: "End meeting" }).click();
-  await expect(page.getByRole("heading", { name: "End meeting" })).toBeVisible();
-  await page.getByRole("button", { name: "End meeting" }).last().click();
+  await recordView.startRecording("Cross-team sync");
+  await expect(recordView.recordingLiveBadge()).toBeVisible();
 
-  await expect(page.getByRole("tab", { name: "Summary" })).toHaveAttribute(
-    "data-state",
-    "active"
-  );
-  await page.getByRole("tab", { name: "Transcript" }).click();
+  await recordView.endMeetingButton().click();
+  await expect(recordView.endMeetingDialogTitle()).toBeVisible();
+  await recordView.confirmEndMeetingButton().click();
+
+  await meetingDetail.waitForReady();
+  await meetingDetail.tab("Summary").click();
+  await expect(meetingDetail.tab("Summary")).toHaveAttribute("data-state", "active");
+
+  await meetingDetail.tab("Transcript").click();
   await expect(page.getByText("Welcome everyone.")).toBeVisible();
 
-  await page.getByRole("tab", { name: "Notes" }).click();
-  await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
-  await page.getByRole("button", { name: "Edit" }).click();
-  await expect(page.getByRole("button", { name: "Save" })).toBeVisible();
-  await page.getByRole("button", { name: "Cancel" }).click();
+  await meetingDetail.tab("Analysis").click();
+  await meetingDetail.promptSidebarItem("Decision Log").click();
+  await meetingDetail.runPromptButton().click();
+  await expect(page.getByRole("heading", { name: "Decision Log" })).toBeVisible();
 
-  await page.getByRole("tab", { name: "Analysis" }).click();
-  await page.getByRole("button", { name: /Decision Log/ }).click();
-  await page.getByRole("button", { name: "Run prompt", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Decisions" })).toBeVisible();
+  await meetingDetail.tab("Metadata").click();
+  await expect(meetingDetail.metadataHeading()).toBeVisible();
 
-  await page.getByRole("tab", { name: "Metadata" }).click();
-  await expect(page.getByText("Run details")).toBeVisible();
-
-  await page.locator("aside").getByRole("button", { name: "Prompt Library" }).click();
-  await expect(page.getByRole("heading", { name: "Prompt Library" })).toBeVisible();
-  await page.getByRole("button", { name: "Decision Log" }).click();
-  await page.getByRole("switch", { name: "Auto-run" }).click();
-  await expect(page.getByRole("switch", { name: "Auto-run" })).toHaveAttribute("aria-checked", "true");
-  await page.getByRole("button", { name: "More actions" }).click();
-  await page.getByRole("menuitem", { name: "Run against meeting" }).click();
-  await expect(page.getByRole("heading", { name: /Run "Decision Log"/ })).toBeVisible();
-  await page.getByRole("button", { name: "Cancel" }).click();
-  await page.getByRole("button", { name: "New prompt" }).click();
-  const newPromptDialog = page.getByRole("dialog");
-  await expect(
-    newPromptDialog.getByRole("heading", { name: "New prompt" })
-  ).toBeVisible();
-  await newPromptDialog.getByLabel("ID").fill("follow-up-email");
-  await newPromptDialog.getByLabel("Label").fill("Follow-up email");
-  await newPromptDialog.getByLabel("Output filename").fill("follow-up-email.md");
-  await newPromptDialog.getByRole("button", { name: "Create" }).click();
+  await app.navigateTo("Prompt Library");
+  await expect(promptsEditor.titleInput()).toBeVisible();
+  await promptsEditor.promptSidebarItem("Decision Log").click();
+  await promptsEditor.activeAutoRunSwitch().click();
+  await expect(promptsEditor.activeAutoRunSwitch()).toHaveAttribute("aria-checked", "true");
+  await promptsEditor.moreButton().click();
+  await promptsEditor.runAgainstMeetingItem().click();
+  await expect(promptsEditor.runAgainstModalHeading()).toBeVisible();
+  await promptsEditor.runAgainstModalCancel().click();
+  await promptsEditor.newPromptButton().click();
+  await expect(promptsEditor.newPromptDialog()).toBeVisible();
+  await promptsEditor.newPromptIdInput().fill("follow-up-email");
+  await promptsEditor.newPromptLabelInput().fill("Follow-up email");
+  await promptsEditor.newPromptFilenameInput().fill("follow-up-email.md");
+  await promptsEditor.createPromptButton().click();
   await expect(page.getByText("Follow-up email")).toBeVisible();
 });
 
-test("covers meetings list, bulk run, import, settings, logs, and processing states", async ({
+test("covers meetings list, import, bulk actions, and activity states", async ({
+  app,
+  meetingsList,
+  meetingDetail,
   page,
 }) => {
-  await page.locator("aside").getByRole("button", { name: "Meetings" }).click();
-  await expect(page.getByRole("heading", { name: "Meetings" })).toBeVisible();
+  await app.navigateTo("Meetings");
+  await meetingsList.waitForReady();
 
-  await page.getByPlaceholder("Search meetings").fill("customer");
-  await expect(page.getByText("Customer call").first()).toBeVisible();
-  await page.getByPlaceholder("Search meetings").fill("");
+  await meetingsList.searchInput().fill("customer");
+  await expect(meetingsList.meetingRow("Customer call")).toBeVisible();
+  await meetingsList.searchInput().fill("");
 
-  await page.getByLabel("Select Customer call").first().check({ force: true });
-  await page.getByRole("button", { name: /Run prompt on 1/ }).click();
-  await expect(page.getByRole("heading", { name: /Run prompt on 1 meetings/ })).toBeVisible();
-  await page.getByRole("button", { name: "Run" }).click();
-  await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
-  await page.getByRole("button", { name: "Done" }).click();
+  await meetingsList.meetingCheckbox("Customer call").click();
+  await meetingsList.bulkRunButton().click();
+  await expect(meetingsList.bulkRunModalHeading()).toBeVisible();
+  await meetingsList.bulkRunModalRunButton().click();
+  await expect(meetingsList.bulkRunModalDoneButton()).toBeVisible();
+  await meetingsList.bulkRunModalDoneButton().click();
 
-  await page.getByRole("button", { name: "Import meeting" }).click();
-  await expect(page.getByRole("heading", { name: "mock meeting" })).toBeVisible();
+  await meetingsList.importButton().click();
+  await meetingDetail.waitForReady();
+  await expect(page.getByText("mock meeting")).toBeVisible();
 
-  await page.locator("aside").getByRole("button", { name: "Meetings" }).click();
-  await page.getByText("Customer call").first().click();
-  await expect(page.getByText("Processing locally with qwen3.5:9b")).toBeVisible();
+  await app.navigateTo("Meetings");
+  await meetingsList.waitForReady();
+  await meetingsList.meetingRow("Customer call").click();
+  await meetingDetail.waitForReady();
+  await expect(page.getByText("Processing").first()).toBeVisible();
 
+  await app.navigateTo("Activity");
+  await expect(page.getByRole("heading", { name: "Jobs" })).toBeVisible();
+  await expect(page.getByText("Processing imported media").first()).toBeVisible();
 });

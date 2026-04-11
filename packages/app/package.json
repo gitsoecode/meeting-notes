@@ -15,7 +15,7 @@
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
     "package:mac": "npm run build && npm run check:bundle && electron-builder --mac --config.directories.output=release",
-    "test": "npm run build --workspace @meeting-notes/engine && npm run build:main && node --test test/*.test.mjs",
+    "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @meeting-notes/engine && npm run build:main && node --test test/*.test.mjs",
     "test:e2e": "npm run build:renderer && playwright test",
     "dev": "npm run build:assets && concurrently -k -r \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run start:electron\"",
     "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",

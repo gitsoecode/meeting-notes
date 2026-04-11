@@ -565,13 +565,23 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("runs:read-document", async (_e, runFolder: string, fileName: string) => {
     const config = loadConfig();
     const filePath = resolveRunDocumentPath(runFolder, fileName, config);
-    return fs.readFileSync(filePath, "utf-8");
+    try {
+      return fs.readFileSync(filePath, "utf-8");
+    } catch (err: any) {
+      if (err.code === "ENOENT") return "";
+      throw err;
+    }
   });
 
   ipcMain.handle("runs:get-media-source", async (_e, runFolder: string, fileName: string) => {
     const config = loadConfig();
-    const filePath = resolveRunMediaPath(runFolder, fileName, config);
-    return pathToFileURL(filePath).toString();
+    try {
+      const filePath = resolveRunMediaPath(runFolder, fileName, config);
+      if (!fs.existsSync(filePath)) return null;
+      return pathToFileURL(filePath).toString();
+    } catch {
+      return null;
+    }
   });
 
   ipcMain.handle("runs:download-media", async (_e, runFolder: string, fileName: string) => {
@@ -1326,7 +1336,23 @@ export function registerIpcHandlers(): void {
   // ---- deps check ----
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
     const ffmpeg = await whichCmd("ffmpeg");
+    let ffmpegVersion: string | null = null;
+    if (ffmpeg) {
+      try {
+        const { stdout } = await execFileAsync(ffmpeg, ["-version"]);
+        const m = stdout.match(/ffmpeg version (\S+)/);
+        if (m) ffmpegVersion = m[1];
+      } catch { /* ignore */ }
+    }
     const python = (await whichCmd("python3.12")) ?? (await whichCmd("python3.11")) ?? (await whichCmd("python3"));
+    let pythonVersion: string | null = null;
+    if (python) {
+      try {
+        const { stdout } = await execFileAsync(python, ["--version"]);
+        const m = stdout.match(/Python (\S+)/);
+        if (m) pythonVersion = m[1];
+      } catch { /* ignore */ }
+    }
     // BlackHole detection is two-step. First, is the HAL driver file on
     // disk? brew puts it at /Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver.
     // Second, has CoreAudio actually loaded it? We answer that by asking
@@ -1401,15 +1427,29 @@ export function registerIpcHandlers(): void {
     } catch {
       ollamaDaemonUp = false;
     }
+    let ollamaVersion: string | null = null;
+    if (ollamaDaemonUp) {
+      try {
+        const ollamaBin = await whichCmd("ollama");
+        if (ollamaBin) {
+          const { stdout } = await execFileAsync(ollamaBin, ["--version"]);
+          const m = stdout.match(/(\d+\.\d+\S*)/);
+          if (m) ollamaVersion = m[1];
+        }
+      } catch { /* ignore */ }
+    }
     return {
       ffmpeg,
+      ffmpegVersion,
       python,
+      pythonVersion,
       blackhole,
       parakeet,
       ollama: {
         daemon: ollamaDaemonUp,
         source: ollamaSource,
         installedModels,
+        version: ollamaVersion,
       },
     };
   });

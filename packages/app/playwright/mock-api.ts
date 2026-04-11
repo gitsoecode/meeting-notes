@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test";
 
 export async function installMockApi(page: Page) {
   await page.addInitScript(() => {
+    const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
     const listeners = {
       recordingStatus: new Set(),
       pipelineProgress: new Set(),
@@ -13,6 +14,8 @@ export async function installMockApi(page: Page) {
       logEntry: new Set(),
       processUpdate: new Set(),
     };
+    const stateStorageKey = "__meeting_notes_mock_state__";
+    const promptsStorageKey = "__meeting_notes_prompts__";
 
     const config = {
       data_path: "/Users/test/Meeting Notes",
@@ -288,6 +291,105 @@ export async function installMockApi(page: Page) {
           "---\nsource: mock\n---\n### Others\n\n`00:00` We need clarification on pricing.\n",
       },
     };
+    const prepDocs = {
+      "/runs/weekly-planning": "# Prep\n\n- Review backlog\n- Confirm owners\n",
+      "/runs/customer-call": "# Customer prep\n\n- Bring pricing notes\n",
+    };
+    const attachmentsByRun = {
+      "/runs/weekly-planning": [{ name: "agenda.pdf", size: 32000 }],
+      "/runs/customer-call": [],
+    } as Record<string, Array<{ name: string; size: number }>>;
+    const missingFolders = new Set<string>();
+    const missingAttachmentDirs = new Set<string>();
+    const failedPromptOutputs: Record<string, string> = {};
+
+    const hydrateArray = <T,>(target: T[], source: T[]) => {
+      target.splice(0, target.length, ...clone(source));
+    };
+    const hydrateObject = <T extends object>(target: T, source: T) => {
+      Object.keys(target).forEach((key) => delete (target as Record<string, unknown>)[key]);
+      Object.assign(target, clone(source));
+    };
+    const snapshotState = () => ({
+      config: clone(config),
+      hasClaude,
+      hasOpenai,
+      recording: clone(recording),
+      nextRunCounter,
+      nextJobCounter,
+      installedLocalModels: clone(installedLocalModels),
+      jobs: clone(jobs),
+      appLogEntries: clone(appLogEntries),
+      processes: clone(processes),
+      runs: clone(runs),
+      manifests: clone(manifests),
+      files: clone(files),
+      docs: clone(docs),
+      prepDocs: clone(prepDocs),
+      attachmentsByRun: clone(attachmentsByRun),
+      missingFolders: [...missingFolders],
+      missingAttachmentDirs: [...missingAttachmentDirs],
+      failedPromptOutputs: clone(failedPromptOutputs),
+    });
+    const persistState = () => {
+      try {
+        window.sessionStorage.setItem(stateStorageKey, JSON.stringify(snapshotState()));
+      } catch {}
+    };
+    const restoreState = () => {
+      try {
+        const saved = window.sessionStorage.getItem(stateStorageKey);
+        if (!saved) return;
+        const parsed = JSON.parse(saved);
+        hydrateObject(config, parsed.config ?? config);
+        hasClaude = parsed.hasClaude ?? hasClaude;
+        hasOpenai = parsed.hasOpenai ?? hasOpenai;
+        recording = parsed.recording ?? recording;
+        nextRunCounter = parsed.nextRunCounter ?? nextRunCounter;
+        nextJobCounter = parsed.nextJobCounter ?? nextJobCounter;
+        hydrateArray(installedLocalModels, parsed.installedLocalModels ?? installedLocalModels);
+        hydrateArray(jobs, parsed.jobs ?? jobs);
+        hydrateArray(appLogEntries, parsed.appLogEntries ?? appLogEntries);
+        hydrateArray(processes, parsed.processes ?? processes);
+        hydrateArray(runs, parsed.runs ?? runs);
+        hydrateObject(manifests, parsed.manifests ?? manifests);
+        hydrateObject(files, parsed.files ?? files);
+        hydrateObject(docs, parsed.docs ?? docs);
+        hydrateObject(prepDocs, parsed.prepDocs ?? prepDocs);
+        hydrateObject(attachmentsByRun, parsed.attachmentsByRun ?? attachmentsByRun);
+        missingFolders.clear();
+        (parsed.missingFolders ?? []).forEach((folder: string) => missingFolders.add(folder));
+        missingAttachmentDirs.clear();
+        (parsed.missingAttachmentDirs ?? []).forEach((folder: string) => missingAttachmentDirs.add(folder));
+        Object.keys(failedPromptOutputs).forEach((key) => delete failedPromptOutputs[key]);
+        Object.assign(failedPromptOutputs, parsed.failedPromptOutputs ?? {});
+      } catch {}
+    };
+    const pruneRun = (runFolder: string) => {
+      const runIndex = runs.findIndex((run) => run.folder_path === runFolder);
+      if (runIndex !== -1) runs.splice(runIndex, 1);
+      delete manifests[runFolder];
+      delete files[runFolder];
+      delete docs[runFolder];
+      delete prepDocs[runFolder];
+      delete attachmentsByRun[runFolder];
+      missingFolders.delete(runFolder);
+      missingAttachmentDirs.delete(runFolder);
+      Object.keys(failedPromptOutputs)
+        .filter((key) => key.startsWith(`${runFolder}::`))
+        .forEach((key) => delete failedPromptOutputs[key]);
+      persistState();
+    };
+    const ensureRunAvailable = (runFolder: string, { prune = false }: { prune?: boolean } = {}) => {
+      if (!missingFolders.has(runFolder)) return;
+      if (prune) pruneRun(runFolder);
+      throw new Error("This meeting no longer exists on disk.");
+    };
+    const persistPrompts = (promptsToPersist: unknown[]) => {
+      try {
+        window.sessionStorage.setItem(promptsStorageKey, JSON.stringify(promptsToPersist));
+      } catch {}
+    };
 
     const emit = (kind, payload) => {
       listeners[kind].forEach((handler) => handler(payload));
@@ -302,20 +404,24 @@ export async function installMockApi(page: Page) {
       const index = jobs.findIndex((item) => item.id === job.id);
       if (index === -1) jobs.unshift(job);
       else jobs[index] = job;
+      persistState();
       emit("jobUpdate", clone(job));
     };
     const upsertProcess = (process) => {
       const index = processes.findIndex((item) => item.id === process.id);
       if (index === -1) processes.unshift(process);
       else processes[index] = process;
+      persistState();
       emit("processUpdate", clone(process));
     };
     const pushLogEntry = (entry) => {
       appLogEntries.unshift(entry);
+      persistState();
       emit("logEntry", clone(entry));
     };
 
     const getRun = (runFolder) => {
+      ensureRunAvailable(runFolder, { prune: true });
       const run = runs.find((item) => item.folder_path === runFolder);
       if (!run) throw new Error("Run not found");
       return {
@@ -325,8 +431,6 @@ export async function installMockApi(page: Page) {
       };
     };
 
-    const clone = (value) => JSON.parse(JSON.stringify(value));
-    const promptsStorageKey = "__meeting_notes_prompts__";
     const loadPromptState = () => {
       try {
         const saved = window.sessionStorage.getItem(promptsStorageKey);
@@ -339,10 +443,9 @@ export async function installMockApi(page: Page) {
     };
     const prompts = loadPromptState();
     const persistPromptState = () => {
-      try {
-        window.sessionStorage.setItem(promptsStorageKey, JSON.stringify(prompts));
-      } catch {}
+      persistPrompts(prompts);
     };
+    restoreState();
 
     const getPromptDefinition = (promptId) =>
       prompts.find((prompt) => prompt.id === promptId) ?? prompts[0];
@@ -394,12 +497,12 @@ export async function installMockApi(page: Page) {
       return prompt;
     };
 
-    const buildRunComplete = (runFolder, succeeded) => {
+    const buildRunComplete = (runFolder, succeeded, failed = []) => {
       emit("pipelineProgress", {
         type: "run-complete",
         runFolder,
         succeeded,
-        failed: [],
+        failed,
       });
     };
 
@@ -431,6 +534,7 @@ export async function installMockApi(page: Page) {
       upsertJob(job);
 
       const execute = () => {
+        ensureRunAvailable(req.runFolder, { prune: true });
         if (run) {
           run.status = "processing";
           run.prompt_output_ids = promptIds;
@@ -489,7 +593,9 @@ export async function installMockApi(page: Page) {
         });
 
         selectedPrompts.forEach((prompt) => {
-          ensurePromptSection(req.runFolder, prompt.id, "running");
+          const failureKey = `${req.runFolder}::${prompt.id}`;
+          const configuredFailure = failedPromptOutputs[failureKey];
+          ensurePromptSection(req.runFolder, prompt.id, configuredFailure ? "failed" : "running");
           emit("pipelineProgress", {
             type: "output-start",
             runFolder: req.runFolder,
@@ -498,6 +604,23 @@ export async function installMockApi(page: Page) {
             filename: prompt.filename,
             model: prompt.model ?? undefined,
           });
+          if (configuredFailure) {
+            manifests[req.runFolder].prompt_outputs[prompt.id] = {
+              ...manifests[req.runFolder].prompt_outputs[prompt.id],
+              status: "failed",
+              error: configuredFailure,
+            };
+            emit("pipelineProgress", {
+              type: "output-failed",
+              runFolder: req.runFolder,
+              promptOutputId: prompt.id,
+              label: prompt.label,
+              filename: prompt.filename,
+              error: configuredFailure,
+              latencyMs: 800,
+            });
+            return;
+          }
           writePromptOutput(req.runFolder, prompt.id);
           emit("pipelineProgress", {
             type: "output-complete",
@@ -509,20 +632,28 @@ export async function installMockApi(page: Page) {
           });
         });
 
-        if (run) run.status = "complete";
-        buildRunComplete(req.runFolder, promptIds);
+        const failed = selectedPrompts
+          .map((prompt) => prompt.id)
+          .filter((promptId) => failedPromptOutputs[`${req.runFolder}::${promptId}`]);
+        const succeeded = selectedPrompts
+          .map((prompt) => prompt.id)
+          .filter((promptId) => !failedPromptOutputs[`${req.runFolder}::${promptId}`]);
+        if (run) run.status = failed.length > 0 ? "error" : "complete";
+        buildRunComplete(req.runFolder, succeeded, failed);
+        persistState();
         upsertJob({
           ...job,
-          status: "completed",
+          status: failed.length > 0 ? "failed" : "completed",
           cancelable: false,
           endedAt: new Date().toISOString(),
           progress: {
-            completedOutputs: totalOutputs,
-            failedOutputs: 0,
+            completedOutputs: 1 + succeeded.length,
+            failedOutputs: failed.length,
             totalOutputs,
             currentOutputLabel:
               selectedPrompts[selectedPrompts.length - 1]?.label ?? "Build transcript",
           },
+          error: failed.length > 0 ? failedPromptOutputs[`${req.runFolder}::${failed[0]}`] : undefined,
         });
       };
 
@@ -545,6 +676,33 @@ export async function installMockApi(page: Page) {
       },
       navigate() {},
       navigateRoute() {},
+      resetState() {
+        window.sessionStorage.removeItem(stateStorageKey);
+        window.sessionStorage.removeItem(promptsStorageKey);
+      },
+      removeRunFolder(runFolder) {
+        missingFolders.add(runFolder);
+        persistState();
+      },
+      removeAttachmentDirectory(runFolder) {
+        missingAttachmentDirs.add(runFolder);
+        persistState();
+      },
+      removeDocument(runFolder, fileName) {
+        if (docs[runFolder]) delete docs[runFolder][fileName];
+        if (files[runFolder]) {
+          files[runFolder] = files[runFolder].filter((file) => file.name !== fileName);
+        }
+        persistState();
+      },
+      failPromptOutput(runFolder, promptId, error = "Mock prompt failure") {
+        failedPromptOutputs[`${runFolder}::${promptId}`] = error;
+        persistState();
+      },
+      clearPromptFailure(runFolder, promptId) {
+        delete failedPromptOutputs[`${runFolder}::${promptId}`];
+        persistState();
+      },
     };
 
     window.api = {
@@ -580,25 +738,29 @@ export async function installMockApi(page: Page) {
           return clone(recording);
         },
         async start(req) {
+          const liveFolder = "/runs/live-meeting";
           recording = {
             active: true,
             run_id: "run-recording",
             title: req.title,
             started_at: "2026-04-08T20:00:00.000Z",
-            run_folder: "/runs/live-meeting",
+            run_folder: liveFolder,
             system_captured: true,
           };
-          docs["/runs/live-meeting"] = {
+          missingFolders.delete(liveFolder);
+          docs[liveFolder] = {
             "notes.md": "# Live Meeting\n\n",
             "transcript.md": "---\nsource: mock\n---\n",
           };
-          files["/runs/live-meeting"] = [
+          prepDocs[liveFolder] = "";
+          attachmentsByRun[liveFolder] ??= [];
+          files[liveFolder] = [
             { name: "notes.md", size: 32, kind: "document" },
             { name: "transcript.md", size: 24, kind: "document" },
             { name: "audio/mic.wav", size: 3200000, kind: "media" },
             { name: "audio/system.wav", size: 5200000, kind: "media" },
           ];
-          manifests["/runs/live-meeting"] = {
+          manifests[liveFolder] = {
             description: req.description,
             participants: [],
             tags: [],
@@ -607,54 +769,112 @@ export async function installMockApi(page: Page) {
             llm_provider: "ollama",
             prompt_outputs: {},
           };
+          persistState();
           emit("recordingStatus", clone(recording));
-          return { run_folder: "/runs/live-meeting", run_id: "run-recording" };
+          return { run_folder: liveFolder, run_id: "run-recording" };
+        },
+        async startForDraft(req) {
+          ensureRunAvailable(req.runFolder, { prune: true });
+          const existing = runs.find((run) => run.folder_path === req.runFolder);
+          recording = {
+            active: true,
+            run_id: existing?.run_id ?? `run-${nextRunCounter}`,
+            title: existing?.title ?? "Draft meeting",
+            started_at: existing?.started ?? "2026-04-08T20:00:00.000Z",
+            run_folder: req.runFolder,
+            system_captured: true,
+          };
+          if (existing) existing.status = "recording";
+          files[req.runFolder] ??= [];
+          if (!files[req.runFolder].some((file) => file.name === "audio/mic.wav")) {
+            files[req.runFolder].push({ name: "audio/mic.wav", size: 3200000, kind: "media" });
+          }
+          if (!files[req.runFolder].some((file) => file.name === "audio/system.wav")) {
+            files[req.runFolder].push({ name: "audio/system.wav", size: 5200000, kind: "media" });
+          }
+          docs[req.runFolder] ??= { "notes.md": "# Draft meeting\n\n" };
+          manifests[req.runFolder] ??= {
+            description: existing?.description ?? null,
+            participants: [],
+            tags: existing?.tags ?? [],
+            source_mode: existing?.source_mode ?? "both",
+            asr_provider: "parakeet-mlx",
+            llm_provider: "ollama",
+            prompt_outputs: {},
+          };
+          persistState();
+          emit("recordingStatus", clone(recording));
+          return { run_folder: req.runFolder, run_id: recording.run_id };
+        },
+        async continueRecording(req) {
+          return this.startForDraft(req);
+        },
+        async pause() {
+          recording = { ...recording, paused: true };
+          persistState();
+          emit("recordingStatus", clone(recording));
+        },
+        async resume() {
+          recording = { ...recording, paused: false };
+          persistState();
+          emit("recordingStatus", clone(recording));
         },
         async stop(req) {
+          const currentFolder = recording.run_folder ?? "/runs/live-meeting";
+          ensureRunAvailable(currentFolder, { prune: false });
           if (req?.mode === "delete") {
-            delete docs["/runs/live-meeting"];
-            delete files["/runs/live-meeting"];
-            delete manifests["/runs/live-meeting"];
-            const liveRunIndex = runs.findIndex((run) => run.folder_path === "/runs/live-meeting");
-            if (liveRunIndex !== -1) runs.splice(liveRunIndex, 1);
+            pruneRun(currentFolder);
             recording = { active: false };
             emit("recordingStatus", clone(recording));
             return { deleted: true };
           }
 
+          const existingRun = runs.find((run) => run.folder_path === currentFolder);
           const liveRun = {
-            run_id: "run-recording",
-            title: recording.title ?? "Untitled Meeting",
-            description: null,
+            run_id: existingRun?.run_id ?? "run-recording",
+            title: existingRun?.title ?? recording.title ?? "Untitled Meeting",
+            description: existingRun?.description ?? null,
             date: "2026-04-08",
-            started: "2026-04-08T20:00:00.000Z",
+            started: existingRun?.started ?? recording.started_at ?? "2026-04-08T20:00:00.000Z",
             ended: "2026-04-08T20:30:00.000Z",
-            status: "complete",
-            source_mode: "both",
+            status: req?.mode === "process" || !req?.mode ? "processing" : "draft",
+            source_mode: existingRun?.source_mode ?? "both",
             duration_minutes: 30,
-            tags: [],
-            folder_path: "/runs/live-meeting",
+            tags: existingRun?.tags ?? [],
+            folder_path: currentFolder,
             prompt_output_ids: req?.mode === "process" || !req?.mode ? ["summary"] : [],
           };
-          runs.unshift(liveRun);
-          manifests["/runs/live-meeting"].prompt_outputs = {};
-          docs["/runs/live-meeting"]["transcript.md"] =
+          if (existingRun) Object.assign(existingRun, liveRun);
+          else runs.unshift(liveRun);
+          manifests[currentFolder] ??= {
+            description: liveRun.description,
+            participants: [],
+            tags: liveRun.tags,
+            source_mode: liveRun.source_mode,
+            asr_provider: "parakeet-mlx",
+            llm_provider: "ollama",
+            prompt_outputs: {},
+          };
+          manifests[currentFolder].prompt_outputs = {};
+          docs[currentFolder] ??= {};
+          docs[currentFolder]["transcript.md"] =
             "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:18` Let's lock the next steps before we wrap.\n";
-          files["/runs/live-meeting"] = [
+          files[currentFolder] = [
             { name: "notes.md", size: 32, kind: "document" },
             { name: "transcript.md", size: 120, kind: "document" },
             { name: "audio/mic.wav", size: 3200000, kind: "media" },
             { name: "audio/system.wav", size: 5200000, kind: "media" },
           ];
           recording = { active: false };
+          persistState();
           emit("recordingStatus", clone(recording));
           if (req?.mode === "process" || !req?.mode) {
             processRecordedRun(
-              { runFolder: "/runs/live-meeting", onlyIds: ["summary"] },
+              { runFolder: currentFolder, onlyIds: ["summary"] },
               { background: true }
             );
           }
-          return { run_folder: "/runs/live-meeting" };
+          return { run_folder: currentFolder };
         },
         async listAudioDevices() {
           return [{ name: "Built-in Mic" }, { name: "BlackHole 2ch" }];
@@ -662,29 +882,37 @@ export async function installMockApi(page: Page) {
       },
       runs: {
         async list() {
+          [...missingFolders].forEach((folder) => pruneRun(folder));
           return clone(runs);
         },
         async get(runFolder) {
           return clone(getRun(runFolder));
         },
         async readDocument(runFolder, fileName) {
+          ensureRunAvailable(runFolder, { prune: true });
           const content = docs[runFolder]?.[fileName];
           if (content == null) {
             throw new Error(`ENOENT: no such file or directory, open '${runFolder}/${fileName}'`);
           }
           return content;
         },
-        async getMediaSource(_runFolder, fileName) {
+        async getMediaSource(runFolder, fileName) {
+          ensureRunAvailable(runFolder, { prune: true });
           return `mock-media://${fileName}`;
         },
-        async downloadMedia() {
+        async downloadMedia(runFolder) {
+          ensureRunAvailable(runFolder, { prune: true });
           return { canceled: false };
         },
         async deleteMedia(runFolder, fileName) {
+          ensureRunAvailable(runFolder, { prune: true });
           files[runFolder] = (files[runFolder] ?? []).filter((file) => file.name !== fileName);
+          persistState();
         },
         async writeNotes(runFolder, content) {
+          ensureRunAvailable(runFolder, { prune: true });
           docs[runFolder]["notes.md"] = content;
+          persistState();
         },
         async startProcessRecording(req) {
           processRecordedRun(req, { background: true });
@@ -693,6 +921,7 @@ export async function installMockApi(page: Page) {
           return processRecordedRun(req, { background: false });
         },
         async startReprocess(req) {
+          ensureRunAvailable(req.runFolder, { prune: true });
           const run = runs.find((item) => item.folder_path === req.runFolder);
           const selectedPromptId = req.onlyIds?.[0] ?? "summary";
           const selectedPrompt = getPromptDefinition(selectedPromptId);
@@ -719,7 +948,9 @@ export async function installMockApi(page: Page) {
           upsertJob(job);
           setTimeout(() => {
             if (run) run.status = "processing";
-            ensurePromptSection(req.runFolder, selectedPromptId, "running");
+            const failureKey = `${req.runFolder}::${selectedPromptId}`;
+            const configuredFailure = failedPromptOutputs[failureKey];
+            ensurePromptSection(req.runFolder, selectedPromptId, configuredFailure ? "failed" : "running");
             emit("pipelineProgress", {
               type: "output-start",
               runFolder: req.runFolder,
@@ -728,37 +959,64 @@ export async function installMockApi(page: Page) {
               filename: selectedPrompt.filename,
               model: "qwen3.5:9b",
             });
-            writePromptOutput(req.runFolder, selectedPromptId);
-            emit("pipelineProgress", {
-              type: "output-complete",
-              runFolder: req.runFolder,
-              promptOutputId: selectedPrompt.id,
-              label: selectedPrompt.label,
-              filename: selectedPrompt.filename,
-              latencyMs: 800,
-            });
-            if (run) run.status = "complete";
-            emit("pipelineProgress", {
-              type: "run-complete",
-              runFolder: req.runFolder,
-              succeeded: req.onlyIds ?? ["summary"],
-              failed: [],
-            });
+            if (configuredFailure) {
+              manifests[req.runFolder].prompt_outputs[selectedPrompt.id] = {
+                ...manifests[req.runFolder].prompt_outputs[selectedPrompt.id],
+                status: "failed",
+                error: configuredFailure,
+              };
+              emit("pipelineProgress", {
+                type: "output-failed",
+                runFolder: req.runFolder,
+                promptOutputId: selectedPrompt.id,
+                label: selectedPrompt.label,
+                filename: selectedPrompt.filename,
+                error: configuredFailure,
+                latencyMs: 800,
+              });
+              if (run) run.status = "error";
+              emit("pipelineProgress", {
+                type: "run-complete",
+                runFolder: req.runFolder,
+                succeeded: [],
+                failed: [selectedPromptId],
+              });
+            } else {
+              writePromptOutput(req.runFolder, selectedPromptId);
+              emit("pipelineProgress", {
+                type: "output-complete",
+                runFolder: req.runFolder,
+                promptOutputId: selectedPrompt.id,
+                label: selectedPrompt.label,
+                filename: selectedPrompt.filename,
+                latencyMs: 800,
+              });
+              if (run) run.status = "complete";
+              emit("pipelineProgress", {
+                type: "run-complete",
+                runFolder: req.runFolder,
+                succeeded: req.onlyIds ?? ["summary"],
+                failed: [],
+              });
+            }
+            persistState();
             upsertJob({
               ...job,
-              status: "completed",
+              status: configuredFailure ? "failed" : "completed",
               cancelable: false,
               endedAt: new Date().toISOString(),
               progress: {
-                completedOutputs: 1,
-                failedOutputs: 0,
+                completedOutputs: configuredFailure ? 0 : 1,
+                failedOutputs: configuredFailure ? 1 : 0,
                 totalOutputs: req.onlyIds?.length ?? 1,
                 currentOutputLabel: selectedPrompt.label,
               },
+              error: configuredFailure || undefined,
             });
           }, 0);
         },
         async reprocess(req) {
+          ensureRunAvailable(req.runFolder, { prune: true });
           const run = runs.find((item) => item.folder_path === req.runFolder);
           const selectedPromptId = req.onlyIds?.[0] ?? "summary";
           const selectedPrompt = getPromptDefinition(selectedPromptId);
@@ -784,7 +1042,9 @@ export async function installMockApi(page: Page) {
           };
           upsertJob(job);
           if (run) run.status = "processing";
-          ensurePromptSection(req.runFolder, selectedPromptId, "running");
+          const failureKey = `${req.runFolder}::${selectedPromptId}`;
+          const configuredFailure = failedPromptOutputs[failureKey];
+          ensurePromptSection(req.runFolder, selectedPromptId, configuredFailure ? "failed" : "running");
           emit("pipelineProgress", {
             type: "output-start",
             runFolder: req.runFolder,
@@ -793,46 +1053,83 @@ export async function installMockApi(page: Page) {
             filename: selectedPrompt.filename,
             model: "qwen3.5:9b",
           });
-          writePromptOutput(req.runFolder, selectedPromptId);
-          emit("pipelineProgress", {
-            type: "output-complete",
-            runFolder: req.runFolder,
-            promptOutputId: selectedPrompt.id,
-            label: selectedPrompt.label,
-            filename: selectedPrompt.filename,
-            latencyMs: 800,
-          });
-          if (run) run.status = "complete";
-          emit("pipelineProgress", {
-            type: "run-complete",
-            runFolder: req.runFolder,
-            succeeded: req.onlyIds ?? ["summary"],
-            failed: [],
-          });
+          if (configuredFailure) {
+            manifests[req.runFolder].prompt_outputs[selectedPrompt.id] = {
+              ...manifests[req.runFolder].prompt_outputs[selectedPrompt.id],
+              status: "failed",
+              error: configuredFailure,
+            };
+            emit("pipelineProgress", {
+              type: "output-failed",
+              runFolder: req.runFolder,
+              promptOutputId: selectedPrompt.id,
+              label: selectedPrompt.label,
+              filename: selectedPrompt.filename,
+              error: configuredFailure,
+              latencyMs: 800,
+            });
+            if (run) run.status = "error";
+            emit("pipelineProgress", {
+              type: "run-complete",
+              runFolder: req.runFolder,
+              succeeded: [],
+              failed: [selectedPromptId],
+            });
+          } else {
+            writePromptOutput(req.runFolder, selectedPromptId);
+            emit("pipelineProgress", {
+              type: "output-complete",
+              runFolder: req.runFolder,
+              promptOutputId: selectedPrompt.id,
+              label: selectedPrompt.label,
+              filename: selectedPrompt.filename,
+              latencyMs: 800,
+            });
+            if (run) run.status = "complete";
+            emit("pipelineProgress", {
+              type: "run-complete",
+              runFolder: req.runFolder,
+              succeeded: req.onlyIds ?? ["summary"],
+              failed: [],
+            });
+          }
+          persistState();
           upsertJob({
             ...job,
-            status: "completed",
+            status: configuredFailure ? "failed" : "completed",
             cancelable: false,
             endedAt: new Date().toISOString(),
             progress: {
-              completedOutputs: 1,
-              failedOutputs: 0,
+              completedOutputs: configuredFailure ? 0 : 1,
+              failedOutputs: configuredFailure ? 1 : 0,
               totalOutputs: req.onlyIds?.length ?? 1,
               currentOutputLabel: selectedPrompt.label,
             },
+            error: configuredFailure || undefined,
           });
           return {
             runFolder: req.runFolder,
-            succeeded: req.onlyIds ?? ["summary"],
-            failed: [],
+            succeeded: configuredFailure ? [] : req.onlyIds ?? ["summary"],
+            failed: configuredFailure ? [selectedPromptId] : [],
           };
         },
         async bulkReprocess(req) {
-          return req.runFolders.map((runFolder) => ({
-            runFolder,
-            succeeded: req.onlyIds ?? ["summary"],
-            failed: [],
-          }));
+          return req.runFolders.map((runFolder) => {
+            if (missingFolders.has(runFolder)) {
+              pruneRun(runFolder);
+              return {
+                runFolder,
+                succeeded: [],
+                failed: [],
+                error: "This meeting no longer exists on disk.",
+              };
+            }
+            return {
+              runFolder,
+              succeeded: req.onlyIds ?? ["summary"],
+              failed: [],
+            };
+          });
         },
         async processMedia(_token, title) {
           const folder = `/runs/imported-${nextRunCounter++}`;
@@ -868,6 +1165,9 @@ export async function installMockApi(page: Page) {
             "notes.md": "# Imported meeting\n\n",
             "transcript.md": "---\nsource: mock\n---\n### Others\n\n`00:00` Imported transcript\n",
           };
+          prepDocs[folder] = "";
+          attachmentsByRun[folder] = [];
+          persistState();
           upsertJob({
             id: `job-${nextJobCounter++}`,
             kind: "process-import",
@@ -895,18 +1195,105 @@ export async function installMockApi(page: Page) {
         async openInObsidian() {},
         async openInFinder() {},
         async deleteRun(runFolder) {
-          const index = runs.findIndex((run) => run.folder_path === runFolder);
-          if (index !== -1) runs.splice(index, 1);
+          pruneRun(runFolder);
         },
         async bulkDelete(runFolders) {
           for (const folder of runFolders) {
-            const index = runs.findIndex((run) => run.folder_path === folder);
-            if (index !== -1) runs.splice(index, 1);
+            pruneRun(folder);
           }
         },
+        async createDraft(req) {
+          const folder = `/runs/draft-${nextRunCounter++}`;
+          const run = {
+            run_id: `run-draft-${nextRunCounter}`,
+            title: req.title,
+            description: req.description ?? null,
+            date: "2026-04-08",
+            started: req.scheduledTime ?? "2026-04-08T22:00:00.000Z",
+            ended: null,
+            status: "draft",
+            source_mode: "both",
+            duration_minutes: null,
+            tags: [],
+            folder_path: folder,
+            prompt_output_ids: [],
+            scheduled_time: req.scheduledTime ?? null,
+          };
+          runs.unshift(run);
+          manifests[folder] = {
+            description: run.description,
+            participants: [],
+            tags: [],
+            source_mode: "both",
+            asr_provider: "parakeet-mlx",
+            llm_provider: "ollama",
+            prompt_outputs: {},
+          };
+          docs[folder] = { "notes.md": "# Draft notes\n\n" };
+          prepDocs[folder] = "";
+          files[folder] = [{ name: "notes.md", size: 18, kind: "document" }];
+          attachmentsByRun[folder] = [];
+          persistState();
+          return { run_folder: folder, run_id: run.run_id };
+        },
+        async writePrep(runFolder, content) {
+          ensureRunAvailable(runFolder, { prune: true });
+          prepDocs[runFolder] = content;
+          persistState();
+        },
+        async readPrep(runFolder) {
+          ensureRunAvailable(runFolder, { prune: true });
+          return prepDocs[runFolder] ?? "";
+        },
+        async addAttachment(runFolder) {
+          ensureRunAvailable(runFolder, { prune: true });
+          const next = {
+            fileName: `attachment-${(attachmentsByRun[runFolder]?.length ?? 0) + 1}.pdf`,
+            size: 20480,
+          };
+          attachmentsByRun[runFolder] ??= [];
+          attachmentsByRun[runFolder].push({ name: next.fileName, size: next.size });
+          persistState();
+          return next;
+        },
+        async removeAttachment(runFolder, fileName) {
+          ensureRunAvailable(runFolder, { prune: true });
+          attachmentsByRun[runFolder] = (attachmentsByRun[runFolder] ?? []).filter((file) => file.name !== fileName);
+          persistState();
+        },
+        async listAttachments(runFolder) {
+          if (missingFolders.has(runFolder) || missingAttachmentDirs.has(runFolder)) {
+            if (missingFolders.has(runFolder)) pruneRun(runFolder);
+            return [];
+          }
+          return clone(attachmentsByRun[runFolder] ?? []);
+        },
+        async updatePrep(req) {
+          ensureRunAvailable(req.runFolder, { prune: true });
+          const run = runs.find((item) => item.folder_path === req.runFolder);
+          if (run && "scheduledTime" in req) {
+            run.scheduled_time = req.scheduledTime ?? null;
+          }
+          persistState();
+        },
         async updateMeta(req) {
+          ensureRunAvailable(req.runFolder, { prune: true });
           const run = runs.find((item) => item.folder_path === req.runFolder);
           if (run && "description" in req) run.description = req.description;
+          if (run && "title" in req && req.title) run.title = req.title;
+          persistState();
+        },
+        async reopenAsDraft(runFolder) {
+          ensureRunAvailable(runFolder, { prune: true });
+          const run = runs.find((item) => item.folder_path === runFolder);
+          if (run) run.status = "draft";
+          persistState();
+        },
+        async markComplete(runFolder) {
+          ensureRunAvailable(runFolder, { prune: true });
+          const run = runs.find((item) => item.folder_path === runFolder);
+          if (run) run.status = "complete";
+          persistState();
         },
       },
       prompts: {

@@ -46,7 +46,7 @@ export class RecordViewPage {
   }
 
   saveMeetingOption() {
-    return this.page.locator("label", { hasText: "Save recording without processing" });
+    return this.page.locator("label", { hasText: "Save without processing" });
   }
 
   deleteMeetingOption() {
@@ -78,31 +78,31 @@ export class RecordViewPage {
   }
 
   recordingLiveBadge() {
-    return this.main.getByText("Recording live").first();
+    return this.main.getByText(/Recording · \d+:\d{2}:\d{2}/).first();
   }
 
   elapsedTimer() {
-    return this.main.getByText(/\d+:\d{2}/);
+    return this.main.getByText(/\d+:\d{2}:\d{2}/);
   }
 
   newRecordingBadge() {
-    return this.main.getByText("New recording");
+    return this.main.getByRole("heading", { name: "New meeting" });
   }
 
   importRecordingBadge() {
-    return this.main.getByText("import a recording", { exact: false });
+    return this.main.getByRole("button", { name: /import a recording/i });
   }
 
   audioMeterCard() {
-    return this.main.getByText("Capture health");
+    return this.main.getByText("Mic");
   }
 
   pipelineStatusCard() {
-    return this.main.getByText("What happens next");
+    return this.main.getByText("Coming up");
   }
 
   liveNotesEditor() {
-    return this.main.getByText("Live notes");
+    return this.main.getByRole("textbox").first();
   }
 
   errorMessage() {
@@ -115,5 +115,11 @@ export class RecordViewPage {
       await this.titleInput().fill(title);
     }
     await this.startButton().click();
+    await this.endMeetingButton().waitFor();
+  }
+
+  async waitForHomeReady() {
+    await this.page.getByRole("heading", { name: "New meeting" }).waitFor();
+    await this.startButton().waitFor();
   }
 }

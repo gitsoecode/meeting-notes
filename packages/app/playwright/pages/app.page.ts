@@ -71,6 +71,7 @@ export class AppPage {
     } else {
       await this.navButton(route).click();
     }
+    await this.waitForRoute(route);
     if (isNarrow) {
       // Wait for navigation then close the overlay if still open
       await this.page.waitForTimeout(200);
@@ -81,6 +82,39 @@ export class AppPage {
         await backdrop.click();
         await this.page.waitForTimeout(300);
       }
+    }
+  }
+
+  async waitForRoute(
+    route: "Home" | "Meetings" | "Prompt Library" | "Activity" | "Settings",
+    options?: { timeout?: number }
+  ) {
+    const timeout = options?.timeout;
+    await this.routeHeading().filter({ hasText: route }).waitFor({ timeout });
+    if (route === "Home") {
+      await this.page.getByRole("heading", { name: "New meeting" }).waitFor({ timeout });
+    }
+    if (route === "Meetings") {
+      await this.page.getByPlaceholder("Search meetings…").waitFor({ timeout });
+    }
+    if (route === "Prompt Library") {
+      await this.page.locator("#prompt-title").waitFor({ timeout });
+    }
+    if (route === "Activity") {
+      await this.page.getByRole("heading", { name: "Jobs" }).waitFor({ timeout });
+    }
+    if (route === "Settings") {
+      await this.page.getByText("Changes take effect immediately.").waitFor({ timeout });
+    }
+  }
+
+  async bootstrapHome() {
+    await this.page.goto("/", { waitUntil: "domcontentloaded" });
+    try {
+      await this.waitForRoute("Home", { timeout: 15000 });
+    } catch {
+      await this.page.reload({ waitUntil: "domcontentloaded" });
+      await this.waitForRoute("Home", { timeout: 15000 });
     }
   }
 
@@ -104,6 +138,46 @@ export class AppPage {
     await this.page.evaluate((nextRoute) => {
       (window as any).__MEETING_NOTES_TEST.navigateRoute(nextRoute);
     }, route);
+  }
+
+  async resetMockState() {
+    await this.page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.resetState();
+    });
+  }
+
+  async removeRunFolder(runFolder: string) {
+    await this.page.evaluate((targetRunFolder) => {
+      (window as any).__MEETING_NOTES_TEST.removeRunFolder(targetRunFolder);
+    }, runFolder);
+  }
+
+  async removeAttachmentDirectory(runFolder: string) {
+    await this.page.evaluate((targetRunFolder) => {
+      (window as any).__MEETING_NOTES_TEST.removeAttachmentDirectory(targetRunFolder);
+    }, runFolder);
+  }
+
+  async removeDocument(runFolder: string, fileName: string) {
+    await this.page.evaluate(
+      ([targetRunFolder, targetFileName]) => {
+        (window as any).__MEETING_NOTES_TEST.removeDocument(targetRunFolder, targetFileName);
+      },
+      [runFolder, fileName] as const
+    );
+  }
+
+  async failPromptOutput(runFolder: string, promptId: string, error?: string) {
+    await this.page.evaluate(
+      ([targetRunFolder, targetPromptId, message]) => {
+        (window as any).__MEETING_NOTES_TEST.failPromptOutput(
+          targetRunFolder,
+          targetPromptId,
+          message
+        );
+      },
+      [runFolder, promptId, error] as const
+    );
   }
 
   async countInteractiveElements(scope?: Locator) {

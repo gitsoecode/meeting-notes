@@ -327,9 +327,6 @@ export function MeetingHeader({
         </Button>
       )}
 
-      {/* Status line */}
-      <StatusLine status={status} elapsed={elapsed} duration={duration} />
-
       {/* Title + actions row */}
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -346,8 +343,8 @@ export function MeetingHeader({
         )}
       </div>
 
-      {/* Description + scheduled time / timestamp line */}
-      <div className="flex items-center gap-x-3 min-w-0">
+      {/* Description + scheduled time / timestamp + status line */}
+      <div className="flex items-center gap-x-3 min-w-0 flex-wrap">
         {onDescriptionSave ? (
           <div className="min-w-0 flex-shrink">
             <EditableDescription value={description ?? ""} onSave={onDescriptionSave} />
@@ -373,6 +370,12 @@ export function MeetingHeader({
             </span>
           </>
         )}
+
+        {/* Status chip */}
+        <span className="text-[var(--text-tertiary)] shrink-0">·</span>
+        <div className="shrink-0">
+          <StatusLine status={status} elapsed={elapsed} duration={duration} />
+        </div>
       </div>
     </div>
   );
