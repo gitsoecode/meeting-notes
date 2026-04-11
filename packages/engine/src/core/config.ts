@@ -73,6 +73,8 @@ export interface AppConfig {
   shortcuts: ShortcutsConfig;
   chat_launcher?: {
     default_prompt: string;
+    draft_prompt?: string;
+    recording_prompt?: string;
   };
 }
 

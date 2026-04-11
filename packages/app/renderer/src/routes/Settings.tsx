@@ -612,7 +612,7 @@ export function Settings({ config, onChange }: SettingsProps) {
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[var(--text-secondary)]">
-                  Default starting prompt
+                  Completed meeting prompt
                 </label>
                 <Textarea
                   value={config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT}
@@ -629,7 +629,55 @@ export function Settings({ config, onChange }: SettingsProps) {
                   className="resize-none"
                 />
                 <p className="text-xs text-[var(--text-secondary)]">
-                  This prompt is pre-filled in the Launch chat modal on each meeting page. You can edit it per-launch.
+                  Pre-filled when launching chat from a completed meeting.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  Draft meeting prompt
+                </label>
+                <Textarea
+                  value={config.chat_launcher?.draft_prompt ?? ""}
+                  onChange={(e) =>
+                    void save({
+                      ...config,
+                      chat_launcher: {
+                        default_prompt: config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT,
+                        ...config.chat_launcher,
+                        draft_prompt: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  rows={2}
+                  className="resize-none"
+                  placeholder="Help me prepare for this meeting — suggest talking points and questions."
+                />
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Pre-filled when launching chat from a draft meeting.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  During-recording prompt
+                </label>
+                <Textarea
+                  value={config.chat_launcher?.recording_prompt ?? ""}
+                  onChange={(e) =>
+                    void save({
+                      ...config,
+                      chat_launcher: {
+                        default_prompt: config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT,
+                        ...config.chat_launcher,
+                        recording_prompt: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  rows={2}
+                  className="resize-none"
+                  placeholder="Help me with real-time questions and action items."
+                />
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Pre-filled when launching chat during an active recording.
                 </p>
               </div>
             </CardContent>

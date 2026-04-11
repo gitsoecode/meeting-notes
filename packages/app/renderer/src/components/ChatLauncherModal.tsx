@@ -32,8 +32,10 @@ import { Badge } from "./ui/badge";
 
 interface ChatLauncherModalProps {
   runFolder: string;
-  detail: RunDetail;
+  detail?: RunDetail | null;
+  availableFiles?: string[];
   config: AppConfigDTO;
+  meetingStatus?: string;
   onClose: () => void;
 }
 
@@ -42,10 +44,29 @@ const DEFAULT_PROMPT =
   "Please review it and be ready to answer questions, generate follow-ups, " +
   "or help me take action on what was discussed.";
 
+const DEFAULT_DRAFT_PROMPT =
+  "Below is my meeting prep and notes so far. " +
+  "Help me prepare for this meeting — suggest talking points, questions, " +
+  "or things to review.";
+
+const DEFAULT_RECORDING_PROMPT =
+  "Below is context from a meeting that is currently in progress. " +
+  "Help me with real-time questions, capture action items, " +
+  "or clarify what's being discussed.";
+
+function getDefaultPromptForStatus(config: AppConfigDTO, status?: string): string {
+  const cl = config.chat_launcher;
+  if (status === "draft") return cl?.draft_prompt || DEFAULT_DRAFT_PROMPT;
+  if (status === "recording" || status === "paused") return cl?.recording_prompt || DEFAULT_RECORDING_PROMPT;
+  return cl?.default_prompt || DEFAULT_PROMPT;
+}
+
 export function ChatLauncherModal({
   runFolder,
   detail,
+  availableFiles,
   config,
+  meetingStatus,
   onClose,
 }: ChatLauncherModalProps) {
   const [apps, setApps] = useState<ChatAppInfo[]>([]);
@@ -53,21 +74,16 @@ export function ChatLauncherModal({
   const [selectedApp, setSelectedApp] = useState<ChatAppId | null>(null);
   const [customAppName, setCustomAppName] = useState("");
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [prompt, setPrompt] = useState(
-    config.chat_launcher?.default_prompt || DEFAULT_PROMPT
-  );
+  const [prompt, setPrompt] = useState(getDefaultPromptForStatus(config, meetingStatus));
   const [launching, setLaunching] = useState(false);
   const [result, setResult] = useState<LaunchChatResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const mdFiles = useMemo(
-    () =>
-      detail.files
-        .filter((f) => f.kind === "document" && f.name.endsWith(".md"))
-        .map((f) => f.name)
-        .sort(),
-    [detail.files]
-  );
+  const mdFiles = useMemo(() => {
+    if (availableFiles) return [...availableFiles].sort();
+    if (detail) return detail.files.filter((f) => f.kind === "document" && f.name.endsWith(".md")).map((f) => f.name).sort();
+    return [];
+  }, [detail, availableFiles]);
 
   // Initialize: detect apps and pre-select all md files
   useEffect(() => {
@@ -114,11 +130,11 @@ export function ChatLauncherModal({
   const estimatedChars = useMemo(() => {
     let total = prompt.length;
     for (const name of selectedFiles) {
-      const file = detail.files.find((f) => f.name === name);
-      total += (file?.size ?? 0) + name.length + 10;
+      const file = detail?.files.find((f) => f.name === name);
+      total += (file?.size ?? 500) + name.length + 10;
     }
     return total;
-  }, [prompt, selectedFiles, detail.files]);
+  }, [prompt, selectedFiles, detail?.files]);
 
   const canLaunch =
     selectedApp != null &&
@@ -260,7 +276,7 @@ export function ChatLauncherModal({
                 ) : (
                   mdFiles.map((name) => {
                     const checked = selectedFiles.includes(name);
-                    const file = detail.files.find((f) => f.name === name);
+                    const file = detail?.files.find((f) => f.name === name);
                     return (
                       <label
                         key={name}

@@ -860,6 +860,13 @@ export function registerIpcHandlers(): void {
     updateRunStatus(validatedRunFolder, "draft");
   });
 
+  ipcMain.handle("runs:mark-complete", async (_e, runFolder: string) => {
+    const config = loadConfig();
+    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    const { updateRunStatus } = await import("@meeting-notes/engine");
+    updateRunStatus(validatedRunFolder, "complete");
+  });
+
   // ---- prompts ----
   ipcMain.handle("prompts:list", async (): Promise<PromptRow[]> => {
     const config = safeLoadConfig();

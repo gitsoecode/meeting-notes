@@ -428,6 +428,8 @@ export interface AppConfigDTO {
   };
   chat_launcher?: {
     default_prompt: string;
+    draft_prompt?: string;
+    recording_prompt?: string;
   };
 }
 
@@ -504,6 +506,7 @@ export interface MeetingNotesApi {
     listAttachments: (runFolder: string) => Promise<Array<{ name: string; size: number }>>;
     updatePrep: (req: UpdatePrepRequest) => Promise<void>;
     reopenAsDraft: (runFolder: string) => Promise<void>;
+    markComplete: (runFolder: string) => Promise<void>;
   };
   // Prompts
   prompts: {

@@ -112,8 +112,8 @@ function EditableDescription({
   }
 
   return (
-    <div className="group flex items-center gap-1.5">
-      <span className="text-sm text-[var(--text-secondary)]">{value}</span>
+    <div className="group flex items-center gap-1.5 min-w-0">
+      <span className="text-sm text-[var(--text-secondary)] truncate max-w-xs" title={value}>{value}</span>
       <button
         type="button"
         onClick={() => setEditing(true)}
@@ -223,16 +223,18 @@ function StatusLine({
 }) {
   const durationLabel = duration != null ? `${duration.toFixed(1)}m` : null;
 
+  const chipBase = "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium";
+
   switch (status) {
     case "draft":
-      return <span className="text-sm font-medium text-[var(--text-secondary)]">Draft</span>;
+      return <span className={`${chipBase} bg-[var(--bg-secondary)] text-[var(--text-secondary)]`}>Draft</span>;
 
     case "recording":
       return (
-        <span className="flex items-center gap-2 text-sm font-medium text-[var(--accent)]">
-          <span className="relative flex h-2.5 w-2.5">
+        <span className={`${chipBase} bg-red-50 text-red-700`}>
+          <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75" />
-            <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-red-500" />
           </span>
           Recording{elapsed ? ` · ${elapsed}` : ""}
         </span>
@@ -240,37 +242,37 @@ function StatusLine({
 
     case "paused":
       return (
-        <span className="flex items-center gap-2 text-sm font-medium text-amber-600">
-          <span className="inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+        <span className={`${chipBase} bg-amber-50 text-amber-700`}>
+          <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
           Paused
         </span>
       );
 
     case "processing":
       return (
-        <span className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
-          <Spinner className="h-3.5 w-3.5" />
+        <span className={`${chipBase} bg-blue-50 text-blue-700`}>
+          <Spinner className="h-3 w-3" />
           Processing…
         </span>
       );
 
     case "complete":
       return (
-        <span className="text-sm text-[var(--text-secondary)]">
+        <span className={`${chipBase} bg-emerald-50 text-emerald-700`}>
           Complete{durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       );
 
     case "error":
       return (
-        <span className="text-sm text-[var(--error)]">
+        <span className={`${chipBase} bg-red-50 text-red-700`}>
           Error{durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       );
 
     default:
       return (
-        <span className="text-sm text-[var(--text-secondary)]">
+        <span className={`${chipBase} bg-[var(--bg-secondary)] text-[var(--text-secondary)]`}>
           {status}{durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       );
@@ -317,7 +319,7 @@ export function MeetingHeader({
   actions,
 }: MeetingHeaderProps) {
   return (
-    <div className="space-y-1.5">
+    <div className="space-y-1">
       {/* Breadcrumb */}
       {onBack && (
         <Button variant="ghost" className="w-fit px-0 text-sm -mb-1" onClick={onBack}>
@@ -345,24 +347,28 @@ export function MeetingHeader({
       </div>
 
       {/* Description + scheduled time / timestamp line */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="flex items-center gap-x-3 min-w-0">
         {onDescriptionSave ? (
-          <EditableDescription value={description ?? ""} onSave={onDescriptionSave} />
+          <div className="min-w-0 flex-shrink">
+            <EditableDescription value={description ?? ""} onSave={onDescriptionSave} />
+          </div>
         ) : description ? (
-          <span className="text-sm text-[var(--text-secondary)]">{description}</span>
+          <span className="text-sm text-[var(--text-secondary)] truncate min-w-0 flex-shrink" title={description}>{description}</span>
         ) : null}
 
         {onScheduledTimeChange && (
           <>
-            {(description || onDescriptionSave) && <span className="text-[var(--text-tertiary)]">·</span>}
-            <InlineScheduledTime value={scheduledTime ?? null} onChange={onScheduledTimeChange} />
+            {(description || onDescriptionSave) && <span className="text-[var(--text-tertiary)] shrink-0">·</span>}
+            <div className="shrink-0">
+              <InlineScheduledTime value={scheduledTime ?? null} onChange={onScheduledTimeChange} />
+            </div>
           </>
         )}
 
         {timestamp && !onScheduledTimeChange && (
           <>
-            {(description || onDescriptionSave) && <span className="text-[var(--text-tertiary)]">·</span>}
-            <span className="text-sm text-[var(--text-secondary)]">
+            {(description || onDescriptionSave) && <span className="text-[var(--text-tertiary)] shrink-0">·</span>}
+            <span className="text-sm text-[var(--text-secondary)] shrink-0 whitespace-nowrap">
               {new Date(timestamp).toLocaleString()}
             </span>
           </>

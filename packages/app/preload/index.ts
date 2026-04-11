@@ -97,6 +97,7 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("runs:list-attachments", runFolder),
     updatePrep: (req: UpdatePrepRequest) => ipcRenderer.invoke("runs:update-prep", req),
     reopenAsDraft: (runFolder: string) => ipcRenderer.invoke("runs:reopen-as-draft", runFolder),
+    markComplete: (runFolder: string) => ipcRenderer.invoke("runs:mark-complete", runFolder),
   },
   prompts: {
     list: () => ipcRenderer.invoke("prompts:list"),

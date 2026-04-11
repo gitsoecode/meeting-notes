@@ -3,7 +3,7 @@ import { api } from "./ipc-client";
 import type { AppConfigDTO, RecordingStatus } from "../../shared/ipc";
 import { RecordView } from "./routes/RecordView";
 import { MeetingsList } from "./routes/MeetingsList";
-import { MeetingDetail } from "./routes/MeetingDetail";
+import { MeetingWorkspace } from "./routes/MeetingWorkspace";
 import { PromptsEditor } from "./routes/PromptsEditor";
 import { Settings } from "./routes/Settings";
 import { SetupWizard } from "./routes/SetupWizard";
@@ -18,7 +18,6 @@ type Route =
   | { name: "record" }
   | { name: "meetings" }
   | { name: "meeting"; runFolder: string }
-  | { name: "prep"; runFolder: string }
   | { name: "prompts"; promptId?: string }
   | { name: "settings" }
   | { name: "activity" };
@@ -31,8 +30,6 @@ function routeToHash(route: Route): string {
       return "#/meetings";
     case "meeting":
       return `#/meeting/${encodeURIComponent(route.runFolder)}`;
-    case "prep":
-      return `#/prep/${encodeURIComponent(route.runFolder)}`;
     case "prompts":
       return route.promptId
         ? `#/prompts/${encodeURIComponent(route.promptId)}`
@@ -61,7 +58,8 @@ function routeFromHash(hash: string): Route | null {
     case "meeting":
       return tail ? { name: "meeting", runFolder: decodeURIComponent(tail) } : null;
     case "prep":
-      return tail ? { name: "prep", runFolder: decodeURIComponent(tail) } : null;
+      // Backward compat: #/prep/:runFolder maps to the unified meeting route
+      return tail ? { name: "meeting", runFolder: decodeURIComponent(tail) } : null;
     case "prompts":
       return tail ? { name: "prompts", promptId: decodeURIComponent(tail) } : { name: "prompts" };
     case "settings":
@@ -176,7 +174,7 @@ export function App() {
     setQuickStarting(true);
     try {
       const d = new Date();
-      const title = `Meeting — ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      const title = `Meeting - ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
       await api.recording.start({ title });
       navigate({ name: "record" });
     } catch (err) {
@@ -189,9 +187,9 @@ export function App() {
   const onQuickCreateDraft = async () => {
     try {
       const d = new Date();
-      const title = `Meeting — ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
+      const title = `Meeting - ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
       const result = await api.runs.createDraft({ title });
-      navigate({ name: "prep", runFolder: result.run_folder });
+      navigate({ name: "meeting", runFolder: result.run_folder });
     } catch (err) {
       console.error("Draft creation failed", err);
     }
@@ -210,7 +208,7 @@ export function App() {
     }
   };
 
-  const activeNav = route.name === "meeting" || route.name === "prep" ? "meetings" : route.name;
+  const activeNav = route.name === "meeting" ? "meetings" : route.name;
   const routeLabel = useMemo(() => {
     switch (route.name) {
       case "record":
@@ -219,8 +217,6 @@ export function App() {
         return "Meetings";
       case "meeting":
         return "Meeting";
-      case "prep":
-        return "Meeting Prep";
       case "prompts":
         return "Prompt Library";
       case "settings":
@@ -287,7 +283,7 @@ export function App() {
         <SidebarInset>
           <SiteHeader
             section={routeLabel}
-            title={route.name === "meeting" ? "Meeting workspace" : route.name === "prep" ? "Meeting Prep" : routeLabel}
+            title={route.name === "meeting" ? "Meeting workspace" : routeLabel}
             subtitle={routeSubtitle}
             recordingLabel={
               recording.active && !recording.paused
@@ -305,35 +301,25 @@ export function App() {
                 config={config}
                 onMeetingStopped={(runFolder) => navigate({ name: "meeting", runFolder })}
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
-                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
+                onOpenPrep={(runFolder) => navigate({ name: "meeting", runFolder })}
                 onViewAllMeetings={() => navigate({ name: "meetings" })}
               />
             )}
             {route.name === "meetings" && (
               <MeetingsList
                 onOpen={(runFolder) => navigate({ name: "meeting", runFolder })}
-                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
+                onOpenPrep={(runFolder) => navigate({ name: "meeting", runFolder })}
               />
             )}
             {route.name === "meeting" && (
-              <MeetingDetail
+              <MeetingWorkspace
                 runFolder={route.runFolder}
-                config={config}
-                onBack={() => navigate({ name: "meetings" })}
-                onOpenPromptLibrary={(promptId) => navigate({ name: "prompts", promptId })}
-                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
-                onDirtyChange={setIsDirty}
-              />
-            )}
-            {route.name === "prep" && (
-              <RecordView
                 recording={recording}
                 config={config}
-                draftRunFolder={route.runFolder}
-                onMeetingStopped={(runFolder) => navigate({ name: "meeting", runFolder })}
+                onBack={() => navigate({ name: "meetings" })}
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
-                onOpenPrep={(runFolder) => navigate({ name: "prep", runFolder })}
-                onViewAllMeetings={() => navigate({ name: "meetings" })}
+                onOpenPromptLibrary={(promptId) => navigate({ name: "prompts", promptId })}
+                onDirtyChange={setIsDirty}
               />
             )}
             {route.name === "prompts" && (
