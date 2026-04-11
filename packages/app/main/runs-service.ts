@@ -26,6 +26,7 @@ import type {
 } from "../shared/ipc.js";
 import { resolveRunDocumentPath, resolveRunFolderPath, RUN_NOTES_FILE, RUN_TRANSCRIPT_FILE } from "./run-access.js";
 import { validatePromptModelSelection } from "./model-validation.js";
+import { getStore } from "./store.js";
 
 function normalizeModelId(id: string | null | undefined): string | null {
   if (!id) return null;
@@ -43,7 +44,8 @@ export async function reprocessRun(
 ): Promise<ReprocessResult> {
   const config = loadConfig();
   const runFolder = resolveRunFolderPath(req.runFolder, config);
-  const manifest = loadRunManifest(runFolder);
+  const store = getStore();
+  const manifest = store.loadManifest(runFolder);
   const defaultModel =
     config.llm_provider === "ollama" ? config.ollama.model : config.claude.model;
   const apiKey = await getSecret("claude");
@@ -112,11 +114,12 @@ export async function reprocessRun(
     onlyFailed: req.onlyFailed,
     skipComplete: req.skipComplete,
     autoOnly: req.autoOnly,
+    store,
   });
   onProgress?.({
     type: "run-planned",
     steps: plannedPrompts.map((prompt) => ({
-      sectionId: prompt.id,
+      promptOutputId: prompt.id,
       label: prompt.label,
       filename: prompt.filename,
       model: prompt.model ?? undefined,
@@ -147,13 +150,14 @@ export async function reprocessRun(
       onProgress,
       signal,
       plannedPrompts,
+      store,
     }
   );
 
   return {
     runFolder,
-    succeeded: results.filter((result) => result.success).map((result) => result.sectionId),
-    failed: results.filter((result) => !result.success).map((result) => result.sectionId),
+    succeeded: results.filter((result) => result.success).map((result) => result.promptOutputId),
+    failed: results.filter((result) => !result.success).map((result) => result.promptOutputId),
   };
 }
 
@@ -207,7 +211,8 @@ export async function processRecordedRun(
 ): Promise<ReprocessResult> {
   const config = loadConfig();
   const runFolder = resolveRunFolderPath(req.runFolder, config);
-  const manifest = loadRunManifest(runFolder);
+  const store = getStore();
+  const manifest = store.loadManifest(runFolder);
   const logger = createRunLogger(path.join(runFolder, "run.log"), false);
   const prompts = loadAllPrompts(config);
   const requestedPromptIds = req.onlyIds ?? [];
@@ -234,6 +239,7 @@ export async function processRecordedRun(
     onlyIds: req.onlyIds ?? [],
     onProgress,
     signal,
+    store,
   });
 
   return {

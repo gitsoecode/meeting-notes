@@ -4,6 +4,7 @@
 export {
   loadConfig,
   saveConfig,
+  invalidateConfigCache,
   getConfigDir,
   getConfigPath,
   getAppLogPath,
@@ -32,13 +33,20 @@ export {
   createDraftRun,
   formatAudioSegmentName,
   updateRunStatus,
-  updateSectionState,
+  updatePromptOutput,
   loadRunManifest,
   type RunManifest,
-  type SectionState,
+  type RunStatus,
+  type PromptOutputState,
+  type PromptOutputStatus,
+  manifestToFrontmatter,
+  buildIndexBody,
   type CreateRunOptions,
   type CreateDraftOptions,
 } from "./core/run.js";
+
+export { type RunStore } from "./core/run-store.js";
+export { FilesystemRunStore, walkRunFolders } from "./core/filesystem-run-store.js";
 
 export { processRun } from "./core/process-run.js";
 

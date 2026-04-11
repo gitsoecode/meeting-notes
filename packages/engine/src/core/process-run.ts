@@ -2,14 +2,15 @@ import fs from "node:fs";
 import path from "node:path";
 import type { AppConfig } from "./config.js";
 import { updateRunStatus, loadRunManifest } from "./run.js";
+import type { RunStore } from "./run-store.js";
 
 /**
  * Compute (ended - started) in fractional minutes from the on-disk
  * manifest. Returns null if either timestamp is missing or invalid.
  */
-function computeDurationMinutes(runFolder: string, endedIso: string): number | null {
+function computeDurationMinutes(runFolder: string, endedIso: string, store?: RunStore): number | null {
   try {
-    const m = loadRunManifest(runFolder);
+    const m = store ? store.loadManifest(runFolder) : loadRunManifest(runFolder);
     if (!m.started) return null;
     const startMs = Date.parse(m.started);
     const endMs = Date.parse(endedIso);
@@ -147,6 +148,8 @@ interface ProcessRunOptions {
   /** Live progress callback forwarded to the pipeline. */
   onProgress?: (event: PipelineProgressEvent) => void;
   signal?: AbortSignal;
+  /** Optional RunStore for state persistence. */
+  store?: RunStore;
 }
 
 export async function processRun(opts: ProcessRunOptions): Promise<{
@@ -164,28 +167,29 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     autoOnly = true,
     onProgress,
     signal,
+    store,
   } = opts;
   const transcriptStep: PipelinePlannedStep = {
-    sectionId: "__transcript__",
+    promptOutputId: "__transcript__",
     label: "Build transcript",
     filename: "transcript.md",
     kind: "transcript",
   };
   const hasExplicitPromptSelection = onlyIds !== undefined;
 
-  updateRunStatus(runFolder, "processing");
+  updateRunStatus(runFolder, "processing", undefined, store);
   throwIfAborted(signal);
   const plannedPrompts = hasExplicitPromptSelection
     ? onlyIds.length > 0
-      ? await planPipelineSteps(config, runFolder, logger, { onlyIds })
+      ? await planPipelineSteps(config, runFolder, logger, { onlyIds, store })
       : []
-    : await planPipelineSteps(config, runFolder, logger, { autoOnly });
+    : await planPipelineSteps(config, runFolder, logger, { autoOnly, store });
   onProgress?.({
     type: "run-planned",
     steps: [
       transcriptStep,
       ...plannedPrompts.map((prompt) => ({
-        sectionId: prompt.id,
+        promptOutputId: prompt.id,
         label: prompt.label,
         filename: prompt.filename,
         model: prompt.model ?? undefined,
@@ -194,8 +198,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     ],
   });
   onProgress?.({
-    type: "section-start",
-    sectionId: transcriptStep.sectionId,
+    type: "output-start",
+    promptOutputId: transcriptStep.promptOutputId,
     label: transcriptStep.label,
     filename: transcriptStep.filename,
   });
@@ -226,8 +230,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     const msg = err instanceof Error ? err.message : String(err);
     logger.error("Transcription failed", { error: msg });
     onProgress?.({
-      type: "section-failed",
-      sectionId: transcriptStep.sectionId,
+      type: "output-failed",
+      promptOutputId: transcriptStep.promptOutputId,
       label: transcriptStep.label,
       filename: transcriptStep.filename,
       error: msg,
@@ -237,8 +241,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       const endedIso = new Date().toISOString();
       updateRunStatus(runFolder, "error", {
         ended: endedIso,
-        duration_minutes: computeDurationMinutes(runFolder, endedIso),
-      });
+        duration_minutes: computeDurationMinutes(runFolder, endedIso, store),
+      }, store);
     }
     throw err;
   }
@@ -256,8 +260,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     formatTranscriptMarkdown(transcriptResult)
   );
   onProgress?.({
-    type: "section-complete",
-    sectionId: transcriptStep.sectionId,
+    type: "output-complete",
+    promptOutputId: transcriptStep.promptOutputId,
     label: transcriptStep.label,
     filename: transcriptStep.filename,
     latencyMs: Date.now() - transcriptStartedAt,
@@ -313,8 +317,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       const endedIso = new Date().toISOString();
       updateRunStatus(runFolder, "complete", {
         ended: endedIso,
-        duration_minutes: computeDurationMinutes(runFolder, endedIso),
-      });
+        duration_minutes: computeDurationMinutes(runFolder, endedIso, store),
+      }, store);
     }
     return { succeeded: [], failed: [] };
   }
@@ -327,8 +331,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       const endedIso = new Date().toISOString();
       updateRunStatus(runFolder, "complete", {
         ended: endedIso,
-        duration_minutes: computeDurationMinutes(runFolder, endedIso),
-      });
+        duration_minutes: computeDurationMinutes(runFolder, endedIso, store),
+      }, store);
     }
     return { succeeded: [], failed: [] };
   }
@@ -372,8 +376,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     const endedIso = new Date().toISOString();
     updateRunStatus(runFolder, "complete", {
       ended: endedIso,
-      duration_minutes: computeDurationMinutes(runFolder, endedIso),
-    });
+      duration_minutes: computeDurationMinutes(runFolder, endedIso, store),
+    }, store);
     return { succeeded: [], failed: [] };
   }
 
@@ -389,18 +393,19 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       onProgress,
       signal,
       plannedPrompts,
+      store,
     }
   );
 
-  const succeeded = results.filter((r) => r.success).map((r) => r.sectionId);
-  const failed = results.filter((r) => !r.success).map((r) => r.sectionId);
+  const succeeded = results.filter((r) => r.success).map((r) => r.promptOutputId);
+  const failed = results.filter((r) => !r.success).map((r) => r.promptOutputId);
 
   {
     const endedIso = new Date().toISOString();
     updateRunStatus(runFolder, failed.length === 0 ? "complete" : "error", {
       ended: endedIso,
-      duration_minutes: computeDurationMinutes(runFolder, endedIso),
-    });
+      duration_minutes: computeDurationMinutes(runFolder, endedIso, store),
+    }, store);
   }
 
   return { succeeded, failed };

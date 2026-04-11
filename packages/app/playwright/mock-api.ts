@@ -67,10 +67,10 @@ export async function installMockApi(page: Page) {
         provider: "ollama",
         model: "qwen3.5:9b",
         progress: {
-          completedSections: 0,
-          failedSections: 0,
-          totalSections: 1,
-          currentSectionLabel: "Summary + Action Items",
+          completedOutputs: 0,
+          failedOutputs: 0,
+          totalOutputs: 1,
+          currentOutputLabel: "Summary + Action Items",
         },
       },
     ];
@@ -197,7 +197,7 @@ export async function installMockApi(page: Page) {
         duration_minutes: 40,
         tags: ["planning"],
         folder_path: "/runs/weekly-planning",
-        section_ids: ["summary", "decision-log"],
+        prompt_output_ids: ["summary", "decision-log"],
       },
       {
         run_id: "run-2",
@@ -211,7 +211,7 @@ export async function installMockApi(page: Page) {
         duration_minutes: 32,
         tags: ["customer"],
         folder_path: "/runs/customer-call",
-        section_ids: ["summary"],
+        prompt_output_ids: ["summary"],
       },
     ];
 
@@ -223,7 +223,7 @@ export async function installMockApi(page: Page) {
         source_mode: "both",
         asr_provider: "parakeet-mlx",
         llm_provider: "ollama",
-        sections: {
+        prompt_outputs: {
           summary: {
             status: "complete",
             label: "Summary + Action Items",
@@ -243,7 +243,7 @@ export async function installMockApi(page: Page) {
         source_mode: "file",
         asr_provider: "parakeet-mlx",
         llm_provider: "ollama",
-        sections: {
+        prompt_outputs: {
           summary: {
             status: "running",
             label: "Summary + Action Items",
@@ -369,16 +369,16 @@ export async function installMockApi(page: Page) {
         source_mode: "both",
         asr_provider: "parakeet-mlx",
         llm_provider: "ollama",
-        sections: {},
+        prompt_outputs: {},
       };
-      manifests[runFolder].sections[prompt.id] = {
+      manifests[runFolder].prompt_outputs[prompt.id] = {
         status,
         label: prompt.label,
         filename: prompt.filename,
       };
       const run = runs.find((item) => item.folder_path === runFolder);
-      if (run && !run.section_ids.includes(prompt.id)) {
-        run.section_ids.push(prompt.id);
+      if (run && !run.prompt_output_ids.includes(prompt.id)) {
+        run.prompt_output_ids.push(prompt.id);
       }
       return prompt;
     };
@@ -407,7 +407,7 @@ export async function installMockApi(page: Page) {
       const run = runs.find((item) => item.folder_path === req.runFolder);
       const promptIds = req.onlyIds ?? [];
       const selectedPrompts = promptIds.map((promptId) => getPromptDefinition(promptId));
-      const totalSections = 1 + selectedPrompts.length;
+      const totalOutputs = 1 + selectedPrompts.length;
       const job = {
         id: `job-${nextJobCounter++}`,
         kind: "process-recording",
@@ -422,10 +422,10 @@ export async function installMockApi(page: Page) {
         provider: "ollama",
         model: "qwen3.5:9b",
         progress: {
-          completedSections: 0,
-          failedSections: 0,
-          totalSections,
-          currentSectionLabel: "Build transcript",
+          completedOutputs: 0,
+          failedOutputs: 0,
+          totalOutputs,
+          currentOutputLabel: "Build transcript",
         },
       };
       upsertJob(job);
@@ -433,7 +433,7 @@ export async function installMockApi(page: Page) {
       const execute = () => {
         if (run) {
           run.status = "processing";
-          run.section_ids = promptIds;
+          run.prompt_output_ids = promptIds;
         }
         manifests[req.runFolder] ??= {
           description: null,
@@ -442,21 +442,21 @@ export async function installMockApi(page: Page) {
           source_mode: "both",
           asr_provider: "parakeet-mlx",
           llm_provider: "ollama",
-          sections: {},
+          prompt_outputs: {},
         };
-        manifests[req.runFolder].sections = {};
+        manifests[req.runFolder].prompt_outputs = {};
         emit("pipelineProgress", {
           type: "run-planned",
           runFolder: req.runFolder,
           steps: [
             {
-              sectionId: "__transcript__",
+              promptOutputId: "__transcript__",
               label: "Build transcript",
               filename: "transcript.md",
               kind: "transcript",
             },
             ...selectedPrompts.map((prompt) => ({
-              sectionId: prompt.id,
+              promptOutputId: prompt.id,
               label: prompt.label,
               filename: prompt.filename,
               model: prompt.model ?? undefined,
@@ -465,9 +465,9 @@ export async function installMockApi(page: Page) {
           ],
         });
         emit("pipelineProgress", {
-          type: "section-start",
+          type: "output-start",
           runFolder: req.runFolder,
-          sectionId: "__transcript__",
+          promptOutputId: "__transcript__",
           label: "Build transcript",
           filename: "transcript.md",
         });
@@ -480,9 +480,9 @@ export async function installMockApi(page: Page) {
           ...((files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md")),
         ].filter((file, index, all) => all.findIndex((candidate) => candidate.name === file.name) === index);
         emit("pipelineProgress", {
-          type: "section-complete",
+          type: "output-complete",
           runFolder: req.runFolder,
-          sectionId: "__transcript__",
+          promptOutputId: "__transcript__",
           label: "Build transcript",
           filename: "transcript.md",
           latencyMs: 500,
@@ -491,18 +491,18 @@ export async function installMockApi(page: Page) {
         selectedPrompts.forEach((prompt) => {
           ensurePromptSection(req.runFolder, prompt.id, "running");
           emit("pipelineProgress", {
-            type: "section-start",
+            type: "output-start",
             runFolder: req.runFolder,
-            sectionId: prompt.id,
+            promptOutputId: prompt.id,
             label: prompt.label,
             filename: prompt.filename,
             model: prompt.model ?? undefined,
           });
           writePromptOutput(req.runFolder, prompt.id);
           emit("pipelineProgress", {
-            type: "section-complete",
+            type: "output-complete",
             runFolder: req.runFolder,
-            sectionId: prompt.id,
+            promptOutputId: prompt.id,
             label: prompt.label,
             filename: prompt.filename,
             latencyMs: 800,
@@ -517,10 +517,10 @@ export async function installMockApi(page: Page) {
           cancelable: false,
           endedAt: new Date().toISOString(),
           progress: {
-            completedSections: totalSections,
-            failedSections: 0,
-            totalSections,
-            currentSectionLabel:
+            completedOutputs: totalOutputs,
+            failedOutputs: 0,
+            totalOutputs,
+            currentOutputLabel:
               selectedPrompts[selectedPrompts.length - 1]?.label ?? "Build transcript",
           },
         });
@@ -605,7 +605,7 @@ export async function installMockApi(page: Page) {
             source_mode: "both",
             asr_provider: "parakeet-mlx",
             llm_provider: "ollama",
-            sections: {},
+            prompt_outputs: {},
           };
           emit("recordingStatus", clone(recording));
           return { run_folder: "/runs/live-meeting", run_id: "run-recording" };
@@ -634,10 +634,10 @@ export async function installMockApi(page: Page) {
             duration_minutes: 30,
             tags: [],
             folder_path: "/runs/live-meeting",
-            section_ids: req?.mode === "process" || !req?.mode ? ["summary"] : [],
+            prompt_output_ids: req?.mode === "process" || !req?.mode ? ["summary"] : [],
           };
           runs.unshift(liveRun);
-          manifests["/runs/live-meeting"].sections = {};
+          manifests["/runs/live-meeting"].prompt_outputs = {};
           docs["/runs/live-meeting"]["transcript.md"] =
             "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:18` Let's lock the next steps before we wrap.\n";
           files["/runs/live-meeting"] = [
@@ -710,10 +710,10 @@ export async function installMockApi(page: Page) {
             provider: "ollama",
             model: "qwen3.5:9b",
             progress: {
-              completedSections: 0,
-              failedSections: 0,
-              totalSections: req.onlyIds?.length ?? 1,
-              currentSectionLabel: selectedPrompt.label,
+              completedOutputs: 0,
+              failedOutputs: 0,
+              totalOutputs: req.onlyIds?.length ?? 1,
+              currentOutputLabel: selectedPrompt.label,
             },
           };
           upsertJob(job);
@@ -721,18 +721,18 @@ export async function installMockApi(page: Page) {
             if (run) run.status = "processing";
             ensurePromptSection(req.runFolder, selectedPromptId, "running");
             emit("pipelineProgress", {
-              type: "section-start",
+              type: "output-start",
               runFolder: req.runFolder,
-              sectionId: selectedPrompt.id,
+              promptOutputId: selectedPrompt.id,
               label: selectedPrompt.label,
               filename: selectedPrompt.filename,
               model: "qwen3.5:9b",
             });
             writePromptOutput(req.runFolder, selectedPromptId);
             emit("pipelineProgress", {
-              type: "section-complete",
+              type: "output-complete",
               runFolder: req.runFolder,
-              sectionId: selectedPrompt.id,
+              promptOutputId: selectedPrompt.id,
               label: selectedPrompt.label,
               filename: selectedPrompt.filename,
               latencyMs: 800,
@@ -750,10 +750,10 @@ export async function installMockApi(page: Page) {
               cancelable: false,
               endedAt: new Date().toISOString(),
               progress: {
-                completedSections: 1,
-                failedSections: 0,
-                totalSections: req.onlyIds?.length ?? 1,
-                currentSectionLabel: selectedPrompt.label,
+                completedOutputs: 1,
+                failedOutputs: 0,
+                totalOutputs: req.onlyIds?.length ?? 1,
+                currentOutputLabel: selectedPrompt.label,
               },
             });
           }, 0);
@@ -776,28 +776,28 @@ export async function installMockApi(page: Page) {
             provider: "ollama",
             model: "qwen3.5:9b",
             progress: {
-              completedSections: 0,
-              failedSections: 0,
-              totalSections: req.onlyIds?.length ?? 1,
-              currentSectionLabel: selectedPrompt.label,
+              completedOutputs: 0,
+              failedOutputs: 0,
+              totalOutputs: req.onlyIds?.length ?? 1,
+              currentOutputLabel: selectedPrompt.label,
             },
           };
           upsertJob(job);
           if (run) run.status = "processing";
           ensurePromptSection(req.runFolder, selectedPromptId, "running");
           emit("pipelineProgress", {
-            type: "section-start",
+            type: "output-start",
             runFolder: req.runFolder,
-            sectionId: selectedPrompt.id,
+            promptOutputId: selectedPrompt.id,
             label: selectedPrompt.label,
             filename: selectedPrompt.filename,
             model: "qwen3.5:9b",
           });
           writePromptOutput(req.runFolder, selectedPromptId);
           emit("pipelineProgress", {
-            type: "section-complete",
+            type: "output-complete",
             runFolder: req.runFolder,
-            sectionId: selectedPrompt.id,
+            promptOutputId: selectedPrompt.id,
             label: selectedPrompt.label,
             filename: selectedPrompt.filename,
             latencyMs: 800,
@@ -815,10 +815,10 @@ export async function installMockApi(page: Page) {
             cancelable: false,
             endedAt: new Date().toISOString(),
             progress: {
-              completedSections: 1,
-              failedSections: 0,
-              totalSections: req.onlyIds?.length ?? 1,
-              currentSectionLabel: selectedPrompt.label,
+              completedOutputs: 1,
+              failedOutputs: 0,
+              totalOutputs: req.onlyIds?.length ?? 1,
+              currentOutputLabel: selectedPrompt.label,
             },
           });
           return {
@@ -848,7 +848,7 @@ export async function installMockApi(page: Page) {
             duration_minutes: 15,
             tags: [],
             folder_path: folder,
-            section_ids: [],
+            prompt_output_ids: [],
           });
           manifests[folder] = {
             description: "Imported meeting",
@@ -857,7 +857,7 @@ export async function installMockApi(page: Page) {
             source_mode: "file",
             asr_provider: "parakeet-mlx",
             llm_provider: "ollama",
-            sections: {},
+            prompt_outputs: {},
           };
           files[folder] = [
             { name: "notes.md", size: 48, kind: "document" },
@@ -881,10 +881,10 @@ export async function installMockApi(page: Page) {
             provider: "ollama",
             model: "qwen3.5:9b",
             progress: {
-              completedSections: 0,
-              failedSections: 0,
-              totalSections: 1,
-              currentSectionLabel: "Summary + Action Items",
+              completedOutputs: 0,
+              failedOutputs: 0,
+              totalOutputs: 1,
+              currentOutputLabel: "Summary + Action Items",
             },
           });
           return { run_folder: folder };
@@ -897,6 +897,12 @@ export async function installMockApi(page: Page) {
         async deleteRun(runFolder) {
           const index = runs.findIndex((run) => run.folder_path === runFolder);
           if (index !== -1) runs.splice(index, 1);
+        },
+        async bulkDelete(runFolders) {
+          for (const folder of runFolders) {
+            const index = runs.findIndex((run) => run.folder_path === folder);
+            if (index !== -1) runs.splice(index, 1);
+          }
         },
         async updateMeta(req) {
           const run = runs.find((item) => item.folder_path === req.runFolder);

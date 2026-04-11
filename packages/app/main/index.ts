@@ -13,6 +13,10 @@ import { ensureOllamaDaemon, stopOllamaDaemon } from "./ollama-daemon.js";
 import { DEFAULT_CONFIG, loadConfig } from "@meeting-notes/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
+import { getCachedAudioDevices } from "./device-cache.js";
+import { getDb, closeDb } from "./db/connection.js";
+import { isEmptyDatabase } from "./db/migrate.js";
+import { seedDbFromFilesystem } from "./db/seed.js";
 import { registerWindowContextMenu } from "./context-menu.js";
 import { handleStructuredAppLog } from "./activity-monitor.js";
 
@@ -103,7 +107,7 @@ async function dispatchWindowAction(source: "shortcut" | "tray"): Promise<void> 
   win.focus();
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const dockIcon = loadAppIcon();
   if (process.platform === "darwin" && app.dock && dockIcon) {
     app.dock.setIcon(dockIcon);
@@ -111,11 +115,31 @@ app.whenReady().then(() => {
 
   registerIpcHandlers();
   appLogger.info("App ready");
+
+  // Initialize SQLite database — seed from filesystem on first run.
+  try {
+    const db = getDb();
+    if (isEmptyDatabase(db)) {
+      const config = loadConfig();
+      const { resolveRunsPath } = await import("@meeting-notes/engine");
+      seedDbFromFilesystem(db, resolveRunsPath(config));
+    }
+  } catch (err) {
+    // Non-fatal — the app works without existing data on first run.
+    appLogger.warn("Database init skipped", {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   mainWindow = createMainWindow();
   setupTray();
 
   // Kick an initial status broadcast so the renderer can sync.
   broadcastRecordingStatus();
+
+  // Warm the audio device cache so the first recording start doesn't pay
+  // the ffmpeg device-enumeration cost (~200-400ms).
+  void getCachedAudioDevices().catch(() => {});
 
   setToggleRecordingHandler(() => {
     void dispatchWindowAction("shortcut");
@@ -171,6 +195,7 @@ app.on("before-quit", async (event) => {
   } catch {
     // Best effort.
   }
+  closeDb();
   globalShortcut.unregisterAll();
   appLogger.info("App quit complete");
   app.exit(0);

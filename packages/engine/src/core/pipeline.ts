@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 import matter from "gray-matter";
 import { AppConfig, getConfigDir } from "./config.js";
 import { writeMarkdownFile } from "./markdown.js";
-import { updateSectionState } from "./run.js";
+import { updatePromptOutput } from "./run.js";
+import type { RunStore } from "./run-store.js";
 import { migrateVaultPromptsToHome } from "./migrate-prompts.js";
 import { Logger } from "../logging/logger.js";
 import { throwIfAborted } from "./abort.js";
@@ -20,18 +21,18 @@ export type PipelineProgressEvent =
       type: "run-planned";
       steps: PipelinePlannedStep[];
     }
-  | { type: "section-start"; sectionId: string; label: string; filename: string; model?: string }
+  | { type: "output-start"; promptOutputId: string; label: string; filename: string; model?: string }
   | {
-      type: "section-complete";
-      sectionId: string;
+      type: "output-complete";
+      promptOutputId: string;
       label: string;
       filename: string;
       latencyMs: number;
       tokensUsed?: number;
     }
   | {
-      type: "section-failed";
-      sectionId: string;
+      type: "output-failed";
+      promptOutputId: string;
       label: string;
       filename: string;
       error: string;
@@ -61,7 +62,7 @@ export interface PipelineInput {
 }
 
 export interface PipelineResult {
-  sectionId: string;
+  promptOutputId: string;
   filename: string;
   content: string;
   success: boolean;
@@ -72,7 +73,7 @@ export interface PipelineResult {
 }
 
 export interface PipelinePlannedStep {
-  sectionId: string;
+  promptOutputId: string;
   label: string;
   filename: string;
   model?: string;
@@ -99,6 +100,8 @@ export interface PipelineRunOptions {
   signal?: AbortSignal;
   /** Optional precomputed prompt plan so callers can publish roadmap state once up front. */
   plannedPrompts?: ResolvedPrompt[];
+  /** Optional RunStore for state persistence (SQLite in app, filesystem in CLI). */
+  store?: RunStore;
 }
 
 /**
@@ -465,7 +468,7 @@ async function callWithRetry(
   userMessage: string,
   maxAttempts: number,
   logger: Logger,
-  sectionId: string,
+  promptOutputId: string,
   model?: string,
   signal?: AbortSignal
 ): Promise<{ content: string; tokensUsed?: number; attempts: number }> {
@@ -483,7 +486,7 @@ async function callWithRetry(
       const errorMsg = err instanceof Error ? err.message : String(err);
 
       if (!retryable || attempt >= maxAttempts) {
-        logger.warn(`Section ${sectionId} failed (attempt ${attempt}/${maxAttempts}, no retry)`, {
+        logger.warn(`Prompt output ${promptOutputId} failed (attempt ${attempt}/${maxAttempts}, no retry)`, {
           error: errorMsg,
           retryable,
         });
@@ -491,7 +494,7 @@ async function callWithRetry(
       }
 
       const delayMs = Math.min(2000 * Math.pow(2, attempt - 1), 30000);
-      logger.warn(`Section ${sectionId} failed (attempt ${attempt}/${maxAttempts}, retrying in ${delayMs}ms)`, {
+      logger.warn(`Prompt output ${promptOutputId} failed (attempt ${attempt}/${maxAttempts}, retrying in ${delayMs}ms)`, {
         error: errorMsg,
       });
       await new Promise((r) => setTimeout(r, delayMs));
@@ -515,6 +518,7 @@ export async function runPipeline(
     onProgress,
     signal,
     plannedPrompts,
+    store,
   } = options;
 
   const allPrompts =
@@ -530,8 +534,8 @@ export async function runPipeline(
     return [];
   }
 
-  logger.info(`Running pipeline with ${allPrompts.length} sections`, {
-    sections: allPrompts.map((p) => p.id),
+  logger.info(`Running pipeline with ${allPrompts.length} prompt outputs`, {
+    promptOutputIds: allPrompts.map((p) => p.id),
     maxAttempts,
     autoOnly: autoOnly ?? false,
   });
@@ -541,22 +545,22 @@ export async function runPipeline(
 
   for (const prompt of allPrompts) {
     throwIfAborted(signal);
-    updateSectionState(runFolderPath, prompt.id, {
+    updatePromptOutput(runFolderPath, prompt.id, {
       status: "running",
       filename: prompt.filename,
       label: prompt.label,
       builtin: prompt.builtin,
-    });
+    }, store);
     onProgress?.({
-      type: "section-start",
-      sectionId: prompt.id,
+      type: "output-start",
+      promptOutputId: prompt.id,
       label: prompt.label,
       filename: prompt.filename,
       model: prompt.model ?? undefined,
     });
 
     const start = Date.now();
-    logger.info(`Starting section: ${prompt.id}`, { label: prompt.label });
+    logger.info(`Starting prompt output: ${prompt.id}`, { label: prompt.label });
     const renderedPrompt = renderPromptTemplate(prompt.prompt, input);
 
     try {
@@ -577,7 +581,7 @@ export async function runPipeline(
         path.join(runFolderPath, prompt.filename),
         {
           type: "meeting-output",
-          section_id: prompt.id,
+          prompt_output_id: prompt.id,
           label: prompt.label,
           generated_at: new Date().toISOString(),
           builtin: prompt.builtin,
@@ -587,7 +591,7 @@ export async function runPipeline(
         response.content
       );
 
-      updateSectionState(runFolderPath, prompt.id, {
+      updatePromptOutput(runFolderPath, prompt.id, {
         status: "complete",
         filename: prompt.filename,
         label: prompt.label,
@@ -595,17 +599,17 @@ export async function runPipeline(
         latency_ms: latencyMs,
         tokens_used: response.tokensUsed,
         completed_at: new Date().toISOString(),
-      });
+      }, store);
 
-      logger.info(`Completed section: ${prompt.id}`, {
+      logger.info(`Completed prompt output: ${prompt.id}`, {
         latencyMs,
         tokensUsed: response.tokensUsed,
         attempts: response.attempts,
       });
 
       onProgress?.({
-        type: "section-complete",
-        sectionId: prompt.id,
+        type: "output-complete",
+        promptOutputId: prompt.id,
         label: prompt.label,
         filename: prompt.filename,
         latencyMs,
@@ -613,7 +617,7 @@ export async function runPipeline(
       });
 
       results.push({
-        sectionId: prompt.id,
+        promptOutputId: prompt.id,
         filename: prompt.filename,
         content: response.content,
         success: true,
@@ -625,20 +629,20 @@ export async function runPipeline(
       throwIfAborted(signal);
       const latencyMs = Date.now() - start;
       const errorMsg = err instanceof Error ? err.message : String(err);
-      logger.error(`Failed section: ${prompt.id}`, { error: errorMsg, latencyMs });
+      logger.error(`Failed prompt output: ${prompt.id}`, { error: errorMsg, latencyMs });
 
-      updateSectionState(runFolderPath, prompt.id, {
+      updatePromptOutput(runFolderPath, prompt.id, {
         status: "failed",
         filename: prompt.filename,
         label: prompt.label,
         builtin: prompt.builtin,
         error: errorMsg,
         latency_ms: latencyMs,
-      });
+      }, store);
 
       onProgress?.({
-        type: "section-failed",
-        sectionId: prompt.id,
+        type: "output-failed",
+        promptOutputId: prompt.id,
         label: prompt.label,
         filename: prompt.filename,
         error: errorMsg,
@@ -646,7 +650,7 @@ export async function runPipeline(
       });
 
       results.push({
-        sectionId: prompt.id,
+        promptOutputId: prompt.id,
         filename: prompt.filename,
         content: "",
         success: false,
@@ -663,13 +667,13 @@ export async function planPipelineSteps(
   config: AppConfig,
   runFolderPath: string,
   logger: Logger,
-  options: Pick<PipelineRunOptions, "onlyIds" | "skipComplete" | "onlyFailed" | "autoOnly"> = {}
+  options: Pick<PipelineRunOptions, "onlyIds" | "skipComplete" | "onlyFailed" | "autoOnly" | "store"> = {}
 ): Promise<ResolvedPrompt[]> {
-  const { onlyIds, skipComplete, onlyFailed, autoOnly } = options;
+  const { onlyIds, skipComplete, onlyFailed, autoOnly, store } = options;
   let allPrompts = loadAllPrompts(config, logger);
 
   const { loadRunManifest } = await import("./run.js");
-  const manifest = loadRunManifest(runFolderPath);
+  const manifest = store ? store.loadManifest(runFolderPath) : loadRunManifest(runFolderPath);
 
   if (onlyIds && onlyIds.length > 0) {
     allPrompts = allPrompts.filter((p) => onlyIds.includes(p.id));
@@ -680,9 +684,9 @@ export async function planPipelineSteps(
   }
 
   if (onlyFailed) {
-    allPrompts = allPrompts.filter((p) => manifest.sections[p.id]?.status === "failed");
+    allPrompts = allPrompts.filter((p) => manifest.prompt_outputs[p.id]?.status === "failed");
   } else if (skipComplete) {
-    allPrompts = allPrompts.filter((p) => manifest.sections[p.id]?.status !== "complete");
+    allPrompts = allPrompts.filter((p) => manifest.prompt_outputs[p.id]?.status !== "complete");
   }
 
   return allPrompts;

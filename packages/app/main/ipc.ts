@@ -103,6 +103,8 @@ import { syncToggleRecordingShortcut } from "./shortcuts.js";
 import { assertImportMediaPath, type PickedMediaFile } from "./media-import.js";
 import { broadcastToAll } from "./events.js";
 import { cancelJob, getJobLog, listJobs, scheduleJob, updateJobProgress } from "./jobs.js";
+import { getCachedAudioDevices, invalidateDeviceCache } from "./device-cache.js";
+import { getStore } from "./store.js";
 
 export { stopActive as stopActiveRecording };
 
@@ -178,7 +180,7 @@ function toRunSummary(manifest: RunManifest, folderPath: string): RunSummary {
     duration_minutes: manifest.duration_minutes,
     tags: manifest.tags,
     folder_path: folderPath,
-    section_ids: Object.keys(manifest.sections),
+    prompt_output_ids: Object.keys(manifest.prompt_outputs),
     scheduled_time: manifest.scheduled_time ?? null,
   };
 }
@@ -232,17 +234,20 @@ async function handleReprocess(req: ReprocessRequest): Promise<ReprocessResult> 
     kind === "run-prompt"
       ? "Running a selected prompt for this meeting"
       : "Reprocessing meeting outputs";
+  const config = loadConfig();
+  const store = getStore();
+  const manifest = store.loadManifest(resolveRunFolderPath(req.runFolder, config));
   return scheduleJob({
     kind,
-    title: loadRunManifest(resolveRunFolderPath(req.runFolder, loadConfig())).title,
+    title: manifest.title,
     subtitle,
     runFolder: req.runFolder,
     promptIds: req.onlyIds,
-    provider: loadConfig().llm_provider,
+    provider: config.llm_provider,
     model:
-      loadConfig().llm_provider === "ollama"
-        ? loadConfig().ollama.model
-        : loadConfig().claude.model,
+      config.llm_provider === "ollama"
+        ? config.ollama.model
+        : config.claude.model,
     task: async ({ signal, updateProgress }) => {
       const result = await reprocessRun(
         req,
@@ -277,7 +282,7 @@ function startReprocessInBackground(req: ReprocessRequest): void {
 async function handleProcessRecording(req: ProcessRecordingRequest): Promise<ReprocessResult> {
   const config = loadConfig();
   const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
-  const manifest = loadRunManifest(validatedRunFolder);
+  const manifest = getStore().loadManifest(validatedRunFolder);
   const subtitle =
     req.onlyIds && req.onlyIds.length > 0
       ? "Processing selected meeting outputs"
@@ -476,8 +481,9 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("recording:list-audio-devices", async () => {
-    const recorder = new FfmpegRecorder();
-    const devices = await recorder.listAudioDevices();
+    const devices = await getCachedAudioDevices();
+    // Trigger a background refresh so the next call picks up any changes.
+    invalidateDeviceCache();
     return devices.map((name) => ({ name }));
   });
 
@@ -511,31 +517,44 @@ export function registerIpcHandlers(): void {
 
   // ---- runs ----
   ipcMain.handle("runs:list", async (): Promise<RunSummary[]> => {
-    const config = safeLoadConfig();
-    if (!config) return [];
-    const runsRoot = resolveRunsPath(config);
-    const folders = walkRunFolders(runsRoot);
-    const out: RunSummary[] = [];
-    for (const folder of folders) {
-      try {
-        const manifest = loadRunManifest(folder);
-        out.push(toRunSummary(manifest, folder));
-      } catch {
-        // Skip unreadable runs.
+    try {
+      const store = getStore();
+      const all = store.listRuns();
+      // Prune stale DB entries whose folders no longer exist on disk
+      const stale: string[] = [];
+      const valid: RunSummary[] = [];
+      for (const { manifest, folderPath } of all) {
+        if (fs.existsSync(path.join(folderPath, "index.md"))) {
+          valid.push(toRunSummary(manifest, folderPath));
+        } else {
+          stale.push(folderPath);
+        }
       }
+      if (stale.length > 0) {
+        store.deleteRuns(stale);
+      }
+      return valid.sort(
+        (a, b) =>
+          getRunStartedSortValue(b.started, b.date) -
+          getRunStartedSortValue(a.started, a.date)
+      );
+    } catch {
+      return [];
     }
-    out.sort(
-      (a, b) =>
-        getRunStartedSortValue(b.started, b.date) -
-        getRunStartedSortValue(a.started, a.date)
-    );
-    return out;
   });
 
   ipcMain.handle("runs:get", async (_e, runFolder: string): Promise<RunDetail> => {
     const config = loadConfig();
-    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
-    const manifest = loadRunManifest(validatedRunFolder);
+    let validatedRunFolder: string;
+    try {
+      validatedRunFolder = resolveRunFolderPath(runFolder, config);
+    } catch {
+      // Folder is gone — prune from DB and throw a user-friendly error
+      getStore().deleteRun(runFolder);
+      throw new Error("This meeting no longer exists on disk.");
+    }
+    const store = getStore();
+    const manifest = store.loadManifest(validatedRunFolder);
     return {
       ...toRunSummary(manifest, validatedRunFolder),
       manifest,
@@ -647,6 +666,7 @@ export function registerIpcHandlers(): void {
     }
 
     const runContext = createRun(config, title, { sourceMode: "file", quiet: true });
+    getStore().insertRun(runContext.manifest, runContext.folderPath);
     const audioDir = path.join(runContext.folderPath, "audio");
     fs.mkdirSync(audioDir, { recursive: true });
     const destMedia = path.join(audioDir, path.basename(validatedMediaPath));
@@ -716,9 +736,33 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("runs:delete", async (_e, runFolder: string) => {
+    // Always clean DB entry, even if folder is already gone
+    getStore().deleteRun(runFolder);
+    try {
+      const config = loadConfig();
+      const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+      fs.rmSync(validatedRunFolder, { recursive: true, force: true });
+    } catch {
+      // Folder already gone — DB cleanup was the important part
+    }
+  });
+
+  ipcMain.handle("runs:bulk-delete", async (_e, runFolders: string[]) => {
     const config = loadConfig();
-    const validatedRunFolder = resolveRunFolderPath(runFolder, config);
-    fs.rmSync(validatedRunFolder, { recursive: true, force: true });
+    const store = getStore();
+    const validatedFolders: string[] = [];
+    for (const rf of runFolders) {
+      try {
+        validatedFolders.push(resolveRunFolderPath(rf, config));
+      } catch {
+        // Already gone — still remove from DB
+        validatedFolders.push(rf);
+      }
+    }
+    store.deleteRuns(validatedFolders);
+    for (const folder of validatedFolders) {
+      fs.rmSync(folder, { recursive: true, force: true });
+    }
   });
 
   ipcMain.handle(
@@ -728,9 +772,9 @@ export function registerIpcHandlers(): void {
       req: { runFolder: string; title?: string; description?: string | null }
     ) => {
       const config = loadConfig();
-      const { updateRunStatus } = await import("@meeting-notes/engine");
       const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
-      const manifest = loadRunManifest(validatedRunFolder);
+      const store = getStore();
+      const manifest = store.loadManifest(validatedRunFolder);
       const updates: Partial<RunManifest> = {};
       if (typeof req.title === "string" && req.title.trim()) {
         updates.title = req.title.trim();
@@ -738,8 +782,7 @@ export function registerIpcHandlers(): void {
       if ("description" in req) {
         updates.description = req.description && req.description.trim() ? req.description.trim() : null;
       }
-      // Re-write the manifest while preserving status.
-      updateRunStatus(validatedRunFolder, manifest.status, updates);
+      store.updateStatus(validatedRunFolder, manifest.status, updates);
     }
   );
 
@@ -753,6 +796,7 @@ export function registerIpcHandlers(): void {
       req.description ?? null,
       { scheduledTime: req.scheduledTime ?? null, quiet: true }
     );
+    getStore().insertRun(context.manifest, context.folderPath);
     return { run_folder: context.folderPath, run_id: context.manifest.run_id };
   });
 
@@ -797,11 +841,11 @@ export function registerIpcHandlers(): void {
       const stat = fs.statSync(destPath);
 
       // Update manifest attachments list
-      const manifest = loadRunManifest(validatedRunFolder);
+      const store = getStore();
+      const manifest = store.loadManifest(validatedRunFolder);
       if (!manifest.attachments.includes(fileName)) {
         manifest.attachments.push(fileName);
-        const { updateRunStatus: urs } = await import("@meeting-notes/engine");
-        urs(validatedRunFolder, manifest.status, { attachments: manifest.attachments });
+        store.updateStatus(validatedRunFolder, manifest.status, { attachments: manifest.attachments });
       }
 
       return { fileName, size: stat.size };
@@ -815,33 +859,39 @@ export function registerIpcHandlers(): void {
 
     // Update manifest
     const validatedRunFolder = resolveRunFolderPath(runFolder, config);
-    const manifest = loadRunManifest(validatedRunFolder);
+    const store = getStore();
+    const manifest = store.loadManifest(validatedRunFolder);
     manifest.attachments = manifest.attachments.filter((n) => n !== fileName);
-    const { updateRunStatus: urs } = await import("@meeting-notes/engine");
-    urs(validatedRunFolder, manifest.status, { attachments: manifest.attachments });
+    store.updateStatus(validatedRunFolder, manifest.status, { attachments: manifest.attachments });
   });
 
   ipcMain.handle(
     "runs:list-attachments",
     async (_e, runFolder: string): Promise<Array<{ name: string; size: number }>> => {
-      const config = loadConfig();
-      const validatedRunFolder = resolveRunFolderPath(runFolder, config);
-      const attachDir = path.join(validatedRunFolder, RUN_ATTACHMENTS_DIR);
-      if (!fs.existsSync(attachDir)) return [];
-      return fs
-        .readdirSync(attachDir, { withFileTypes: true })
-        .filter((e) => e.isFile() && !e.name.startsWith("."))
-        .map((e) => {
-          const stat = fs.statSync(path.join(attachDir, e.name));
-          return { name: e.name, size: stat.size };
-        });
+      try {
+        const config = loadConfig();
+        const validatedRunFolder = resolveRunFolderPath(runFolder, config);
+        const attachDir = path.join(validatedRunFolder, RUN_ATTACHMENTS_DIR);
+        if (!fs.existsSync(attachDir)) return [];
+        return fs
+          .readdirSync(attachDir, { withFileTypes: true })
+          .filter((e) => e.isFile() && !e.name.startsWith("."))
+          .map((e) => {
+            const stat = fs.statSync(path.join(attachDir, e.name));
+            return { name: e.name, size: stat.size };
+          });
+      } catch {
+        // Folder may have been deleted — return empty gracefully
+        return [];
+      }
     }
   );
 
   ipcMain.handle("runs:update-prep", async (_e, req: UpdatePrepRequest) => {
     const config = loadConfig();
     const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
-    const manifest = loadRunManifest(validatedRunFolder);
+    const store = getStore();
+    const manifest = store.loadManifest(validatedRunFolder);
     const updates: Partial<RunManifest> = {};
     if ("selectedPrompts" in req) {
       updates.selected_prompts = req.selectedPrompts ?? null;
@@ -849,22 +899,19 @@ export function registerIpcHandlers(): void {
     if ("scheduledTime" in req) {
       updates.scheduled_time = req.scheduledTime ?? null;
     }
-    const { updateRunStatus: urs } = await import("@meeting-notes/engine");
-    urs(validatedRunFolder, manifest.status, updates);
+    store.updateStatus(validatedRunFolder, manifest.status, updates);
   });
 
   ipcMain.handle("runs:reopen-as-draft", async (_e, runFolder: string) => {
     const config = loadConfig();
     const validatedRunFolder = resolveRunFolderPath(runFolder, config);
-    const { updateRunStatus } = await import("@meeting-notes/engine");
-    updateRunStatus(validatedRunFolder, "draft");
+    getStore().updateStatus(validatedRunFolder, "draft");
   });
 
   ipcMain.handle("runs:mark-complete", async (_e, runFolder: string) => {
     const config = loadConfig();
     const validatedRunFolder = resolveRunFolderPath(runFolder, config);
-    const { updateRunStatus } = await import("@meeting-notes/engine");
-    updateRunStatus(validatedRunFolder, "complete");
+    getStore().updateStatus(validatedRunFolder, "complete");
   });
 
   // ---- prompts ----

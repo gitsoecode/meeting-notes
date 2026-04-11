@@ -6,6 +6,7 @@
   "type": "module",
   "main": "dist/main/index.js",
   "scripts": {
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer && npm run build:assets",
     "build:assets": "npm run build:icons && node -e \"require('fs').cpSync('assets','dist/assets',{recursive:true});\"",
     "build:icons": "/usr/bin/python3 scripts/generate-icons.py",
@@ -40,6 +41,7 @@
     "@radix-ui/react-switch": "^1.2.6",
     "@radix-ui/react-tabs": "^1.1.13",
     "@uiw/react-codemirror": "^4.23.7",
+    "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
@@ -52,8 +54,10 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.1",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4.2.2",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.12",

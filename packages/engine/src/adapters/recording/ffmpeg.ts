@@ -49,14 +49,16 @@ export class FfmpegRecorder implements Recorder {
     const startedAt = Date.now();
     const recordings: SpawnedRecording[] = [];
 
+    // Use pre-enumerated device list if provided, otherwise spawn ffmpeg to enumerate.
+    const knownDevices = options.devices ?? await this.listAudioDevices();
+
     // Resolve "system default" (empty mic device) to whatever AVFoundation
     // currently lists first. This makes hot-swapping mics work without a
     // settings round-trip — unplug your USB mic and the next start picks
     // up the built-in input.
     let micDevice = options.micDevice;
     if (!micDevice || micDevice.trim() === "") {
-      const devices = await this.listAudioDevices();
-      micDevice = devices[0] ?? "";
+      micDevice = knownDevices[0] ?? "";
       if (!micDevice) {
         throw new Error("No audio input devices available (system default requested but ffmpeg listed none)");
       }
@@ -70,7 +72,7 @@ export class FfmpegRecorder implements Recorder {
     // Try to start system recording (best-effort)
     let systemAvailable = false;
     if (options.systemDevice) {
-      systemAvailable = await this.isSystemCaptureAvailable(options.systemDevice);
+      systemAvailable = knownDevices.some((d) => d === options.systemDevice || d.includes(options.systemDevice));
       if (systemAvailable) {
         const systemPath = path.join(audioDir, "system.wav");
         const systemChild = spawnFfmpegRecord(options.systemDevice, systemPath);

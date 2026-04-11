@@ -32,7 +32,7 @@ export const test = base.extend<Fixtures>({
     await installMockApi(page);
     await page.goto("/");
     await expect(
-      page.getByText("Start or import a meeting")
+      page.getByText("New meeting")
     ).toBeVisible();
     await use(new AppPage(page));
   },

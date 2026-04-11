@@ -8,3 +8,4 @@ dist/
 packages/app/build/
 packages/app/playwright-report/
 packages/app/test-results/
+test-results/

@@ -84,6 +84,7 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("runs:open-in-obsidian", runFolder, fileName),
     openInFinder: (runFolder) => ipcRenderer.invoke("runs:open-in-finder", runFolder),
     deleteRun: (runFolder) => ipcRenderer.invoke("runs:delete", runFolder),
+    bulkDelete: (runFolders: string[]) => ipcRenderer.invoke("runs:bulk-delete", runFolders),
     updateMeta: (req) => ipcRenderer.invoke("runs:update-meta", req),
     createDraft: (req: CreateDraftRequest) => ipcRenderer.invoke("runs:create-draft", req),
     writePrep: (runFolder: string, content: string) =>

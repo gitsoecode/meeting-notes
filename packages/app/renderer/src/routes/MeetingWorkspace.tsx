@@ -50,8 +50,8 @@ import {
   PipelineStatus,
   applyProgress,
   CancelJobButton,
-  sectionsFromJobSteps,
-  type SectionStatus,
+  outputsFromJobSteps,
+  type PromptOutputStatus,
 } from "../components/PipelineStatus";
 import { TranscriptView } from "../components/TranscriptView";
 import { Button } from "../components/ui/button";
@@ -175,14 +175,14 @@ function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem): string {
 
 function buildAnalysisSignature(detail: RunDetail | null): string {
   if (!detail) return "";
-  const manifestSections = Object.entries(detail.manifest?.sections ?? {})
+  const manifestOutputs = Object.entries(detail.manifest?.prompt_outputs ?? {})
     .map(([id, section]) => [id, section?.status ?? "", section?.filename ?? ""])
     .sort(([left], [right]) => (left as string).localeCompare(right as string));
   const files = detail.files
     .filter((file) => file.kind === "document" && file.name.endsWith(".md"))
     .map((file) => [file.name, file.size] as const)
     .sort(([left], [right]) => left.localeCompare(right));
-  return JSON.stringify({ status: detail.status, manifestSections, files });
+  return JSON.stringify({ status: detail.status, manifestOutputs, files });
 }
 
 // ---------------------------------------------------------------------------
@@ -236,7 +236,7 @@ export function MeetingWorkspace({
   const [loadingPrompts, setLoadingPrompts] = useState(true);
 
   // ---- Pipeline / reprocess state ----
-  const [sections, setSections] = useState<SectionStatus[]>([]);
+  const [sections, setSections] = useState<PromptOutputStatus[]>([]);
   const [activeJob, setActiveJob] = useState<JobSummary | null>(null);
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [reprocessStarting, setReprocessStarting] = useState(false);
@@ -283,17 +283,17 @@ export function MeetingWorkspace({
   // Detect "reopened from complete" drafts
   const wasCompleted = useMemo(() => {
     if (!isDraft || !detail) return false;
-    const sections = detail.manifest?.sections ?? {};
+    const sections = detail.manifest?.prompt_outputs ?? {};
     return Object.values(sections).some((s) => s?.status === "complete");
   }, [isDraft, detail]);
 
   const effectiveStatus = isRecording ? "recording" : isPaused ? "paused" : (detail?.status ?? "draft");
 
   // ---- Load detail ----
-  const invalidateAnalysisCache = (sectionId?: string | null) => {
+  const invalidateAnalysisCache = (promptOutputId?: string | null) => {
     setTabContents((prev) => {
-      if (sectionId) {
-        const cacheKey = sectionId === PRIMARY_PROMPT_ID ? "summary" : `prompt:${sectionId}`;
+      if (promptOutputId) {
+        const cacheKey = promptOutputId === PRIMARY_PROMPT_ID ? "summary" : `prompt:${promptOutputId}`;
         if (!(cacheKey in prev)) return prev;
         const next = { ...prev };
         delete next[cacheKey];
@@ -387,10 +387,10 @@ export function MeetingWorkspace({
       if (event.runFolder !== runFolder) return;
       setReprocessStarting(false);
       if (event.type === "run-failed") setPipelineError(event.error);
-      else if (event.type === "section-start" || event.type === "run-complete") setPipelineError(null);
+      else if (event.type === "output-start" || event.type === "run-complete") setPipelineError(null);
       setSections((prev) => applyProgress(prev, event));
-      if (event.type === "section-complete") {
-        invalidateAnalysisCache(event.sectionId);
+      if (event.type === "output-complete") {
+        invalidateAnalysisCache(event.promptOutputId);
         void refresh();
         return;
       }
@@ -421,7 +421,7 @@ export function MeetingWorkspace({
 
   useEffect(() => {
     if (!activeJob?.progress.steps?.length) return;
-    setSections(sectionsFromJobSteps(activeJob.progress.steps));
+    setSections(outputsFromJobSteps(activeJob.progress.steps));
   }, [activeJob]);
 
   // Poll for updates when processing
@@ -470,7 +470,7 @@ export function MeetingWorkspace({
     const manifest = (detail.manifest ?? {}) as { sections?: Record<string, { filename?: string; label?: string; status?: string }> };
     return buildMeetingPromptCollections({
       prompts,
-      manifestSections: manifest.sections ?? {},
+      manifestOutputs: manifest.prompt_outputs ?? {},
       files: detail.files.filter((f): f is typeof f & { kind?: "document" | "log" | "media" } => f.kind !== "attachment"),
     });
   }, [detail, prompts]);
@@ -778,7 +778,7 @@ export function MeetingWorkspace({
         description={pipelineError ? pipelineError : reprocessStarting && sections.length === 0 ? "The job has started in the background." : activeJob?.subtitle ?? (config.llm_provider === "ollama" ? "Local models stay on-device." : "Outputs update in place as each step finishes.")}
         status={activeJob?.status ?? "processing"}
         queuePosition={activeJob?.queuePosition}
-        currentLabel={activeJob?.progress.currentSectionLabel}
+        currentLabel={activeJob?.progress.currentOutputLabel}
         showPreparingWhenEmpty
         action={activeJob?.cancelable ? <CancelJobButton jobId={activeJob.id} onCancel={(jobId) => api.jobs.cancel(jobId)} /> : undefined}
       />

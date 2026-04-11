@@ -30,7 +30,7 @@ import { PageScaffold } from "../components/PageScaffold";
 import {
   PipelineStatus,
   applyProgress,
-  type SectionStatus,
+  type PromptOutputStatus,
 } from "../components/PipelineStatus";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -120,7 +120,7 @@ export function RecordView({
   const [endMode, setEndMode] = useState<EndMeetingMode>("process");
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
   const [selectedProcessStepIds, setSelectedProcessStepIds] = useState<string[]>([]);
-  const [sections, setSections] = useState<SectionStatus[]>([]);
+  const [sections, setSections] = useState<PromptOutputStatus[]>([]);
   const [elapsedSec, setElapsedSec] = useState(0);
   const [prompts, setPrompts] = useState<PromptRow[]>([]);
   const saveTimer = useRef<number | null>(null);

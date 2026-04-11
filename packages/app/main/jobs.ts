@@ -39,7 +39,7 @@ interface InternalJob extends JobSummary {
   task: JobTask<unknown>;
   resolve: (value: unknown) => void;
   reject: (reason?: unknown) => void;
-  seenSections: Set<string>;
+  seenOutputs: Set<string>;
 }
 
 const jobs = new Map<string, InternalJob>();
@@ -57,9 +57,9 @@ function isAbortLikeError(err: unknown): boolean {
 
 function emptyProgress(): JobProgress {
   return {
-    completedSections: 0,
-    failedSections: 0,
-    totalSections: 0,
+    completedOutputs: 0,
+    failedOutputs: 0,
+    totalOutputs: 0,
     steps: [],
   };
 }
@@ -73,13 +73,13 @@ function normalizePlannedSteps(steps: PipelinePlannedStep[]): JobProgressStep[] 
 
 function updateStep(
   steps: JobProgressStep[],
-  sectionId: string,
+  promptOutputId: string,
   updater: (step: JobProgressStep) => JobProgressStep,
   fallback?: () => JobProgressStep
 ): JobProgressStep[] {
   let found = false;
   const next = steps.map((step) => {
-    if (step.sectionId !== sectionId) return step;
+    if (step.promptOutputId !== promptOutputId) return step;
     found = true;
     return updater(step);
   });
@@ -235,18 +235,18 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
 
   if (event.type === "run-planned") {
     job.progress.steps = normalizePlannedSteps(event.steps);
-    job.progress.totalSections = event.steps.length;
-    if (!job.progress.currentSectionLabel && event.steps.length > 0) {
-      job.progress.currentSectionLabel = event.steps[0].label;
+    job.progress.totalOutputs = event.steps.length;
+    if (!job.progress.currentOutputLabel && event.steps.length > 0) {
+      job.progress.currentOutputLabel = event.steps[0].label;
     }
-  } else if (event.type === "section-start") {
-    job.seenSections.add(event.sectionId);
-    job.progress.totalSections = Math.max(job.progress.totalSections, job.seenSections.size);
-    job.progress.currentSectionLabel = event.label;
+  } else if (event.type === "output-start") {
+    job.seenOutputs.add(event.promptOutputId);
+    job.progress.totalOutputs = Math.max(job.progress.totalOutputs, job.seenOutputs.size);
+    job.progress.currentOutputLabel = event.label;
     const startedAt = Date.now();
     job.progress.steps = updateStep(
       job.progress.steps,
-      event.sectionId,
+      event.promptOutputId,
       (step) => ({
         ...step,
         state: "running",
@@ -254,7 +254,7 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
         model: event.model ?? step.model,
       }),
       () => ({
-        sectionId: event.sectionId,
+        promptOutputId: event.promptOutputId,
         label: event.label,
         filename: event.filename,
         model: event.model,
@@ -263,25 +263,25 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
         startedAt,
       })
     );
-  } else if (event.type === "section-complete") {
-    job.seenSections.add(event.sectionId);
-    job.progress.completedSections += 1;
-    job.progress.totalSections = Math.max(
-      job.progress.totalSections,
-      job.progress.completedSections + job.progress.failedSections,
-      job.seenSections.size
+  } else if (event.type === "output-complete") {
+    job.seenOutputs.add(event.promptOutputId);
+    job.progress.completedOutputs += 1;
+    job.progress.totalOutputs = Math.max(
+      job.progress.totalOutputs,
+      job.progress.completedOutputs + job.progress.failedOutputs,
+      job.seenOutputs.size
     );
-    job.progress.currentSectionLabel = event.label;
+    job.progress.currentOutputLabel = event.label;
     job.progress.steps = updateStep(
       job.progress.steps,
-      event.sectionId,
+      event.promptOutputId,
       (step) => ({
         ...step,
         state: "complete",
         latencyMs: event.latencyMs,
       }),
       () => ({
-        sectionId: event.sectionId,
+        promptOutputId: event.promptOutputId,
         label: event.label,
         filename: event.filename,
         kind: "prompt",
@@ -289,18 +289,18 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
         latencyMs: event.latencyMs,
       })
     );
-  } else if (event.type === "section-failed") {
-    job.seenSections.add(event.sectionId);
-    job.progress.failedSections += 1;
-    job.progress.totalSections = Math.max(
-      job.progress.totalSections,
-      job.progress.completedSections + job.progress.failedSections,
-      job.seenSections.size
+  } else if (event.type === "output-failed") {
+    job.seenOutputs.add(event.promptOutputId);
+    job.progress.failedOutputs += 1;
+    job.progress.totalOutputs = Math.max(
+      job.progress.totalOutputs,
+      job.progress.completedOutputs + job.progress.failedOutputs,
+      job.seenOutputs.size
     );
-    job.progress.currentSectionLabel = event.label;
+    job.progress.currentOutputLabel = event.label;
     job.progress.steps = updateStep(
       job.progress.steps,
-      event.sectionId,
+      event.promptOutputId,
       (step) => ({
         ...step,
         state: "failed",
@@ -308,7 +308,7 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
         error: event.error,
       }),
       () => ({
-        sectionId: event.sectionId,
+        promptOutputId: event.promptOutputId,
         label: event.label,
         filename: event.filename,
         kind: "prompt",
@@ -371,7 +371,7 @@ export async function scheduleJob<T>(options: ScheduleJobOptions<T>): Promise<T>
       task: options.task as JobTask<unknown>,
       resolve: resolve as (value: unknown) => void,
       reject,
-      seenSections: new Set<string>(),
+      seenOutputs: new Set<string>(),
     };
 
     jobs.set(id, job);

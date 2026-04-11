@@ -64,11 +64,11 @@ export interface RunSummary {
   duration_minutes: number | null;
   tags: string[];
   folder_path: string;
-  section_ids: string[];
+  prompt_output_ids: string[];
   scheduled_time?: string | null;
 }
 
-export interface RunSectionState {
+export interface RunPromptOutputState {
   status: "pending" | "running" | "complete" | "failed";
   filename: string;
   label?: string;
@@ -79,7 +79,7 @@ export interface RunManifest {
   run_id: string;
   title: string;
   status: string;
-  sections: Record<string, RunSectionState>;
+  prompt_outputs: Record<string, RunPromptOutputState>;
 }
 
 export interface RunDetail extends RunSummary {
@@ -185,7 +185,7 @@ export interface BulkReprocessResult extends ReprocessResult {
 }
 
 export interface PipelinePlannedStep {
-  sectionId: string;
+  promptOutputId: string;
   label: string;
   filename: string;
   model?: string;
@@ -199,27 +199,27 @@ export type PipelineProgressEvent =
       steps: PipelinePlannedStep[];
     }
   | {
-      type: "section-start";
+      type: "output-start";
       runFolder: string;
-      sectionId: string;
+      promptOutputId: string;
       label: string;
       filename: string;
-      /** Model id this section will run against; lets the UI label local vs cloud. */
+      /** Model id this output will run against; lets the UI label local vs cloud. */
       model?: string;
     }
   | {
-      type: "section-complete";
+      type: "output-complete";
       runFolder: string;
-      sectionId: string;
+      promptOutputId: string;
       label: string;
       filename: string;
       latencyMs: number;
       tokensUsed?: number;
     }
   | {
-      type: "section-failed";
+      type: "output-failed";
       runFolder: string;
-      sectionId: string;
+      promptOutputId: string;
       label: string;
       filename: string;
       error: string;
@@ -255,10 +255,10 @@ export interface JobProgressStep extends PipelinePlannedStep {
 }
 
 export interface JobProgress {
-  completedSections: number;
-  failedSections: number;
-  totalSections: number;
-  currentSectionLabel?: string;
+  completedOutputs: number;
+  failedOutputs: number;
+  totalOutputs: number;
+  currentOutputLabel?: string;
   steps: JobProgressStep[];
 }
 
@@ -497,6 +497,7 @@ export interface MeetingNotesApi {
     openInObsidian: (runFolder: string, fileName: string) => Promise<void>;
     openInFinder: (runFolder: string) => Promise<void>;
     deleteRun: (runFolder: string) => Promise<void>;
+    bulkDelete: (runFolders: string[]) => Promise<void>;
     updateMeta: (req: UpdateMetaRequest) => Promise<void>;
     createDraft: (req: CreateDraftRequest) => Promise<CreateDraftResult>;
     writePrep: (runFolder: string, content: string) => Promise<void>;

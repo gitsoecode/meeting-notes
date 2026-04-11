@@ -18,12 +18,12 @@ import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 
-export type SectionState = "queued" | "running" | "complete" | "failed" | "canceled";
+export type PromptOutputStepState = "queued" | "running" | "complete" | "failed" | "canceled";
 
-export interface SectionStatus {
+export interface PromptOutputStatus {
   id: string;
   label: string;
-  state: SectionState;
+  state: PromptOutputStepState;
   kind: "transcript" | "prompt";
   filename?: string;
   latencyMs?: number;
@@ -33,7 +33,7 @@ export interface SectionStatus {
 }
 
 interface PipelineStatusProps {
-  sections: SectionStatus[];
+  sections: PromptOutputStatus[];
   title?: string;
   description?: string;
   status?: JobStatus | "processing";
@@ -163,7 +163,7 @@ export function PipelineStatus({
   );
 }
 
-function StepRow({ section }: { section: SectionStatus }) {
+function StepRow({ section }: { section: PromptOutputStatus }) {
   const elapsedSec =
     section.state === "running" && section.startedAt
       ? Math.floor((Date.now() - section.startedAt) / 1000)
@@ -215,7 +215,7 @@ export function ProcessingStatusInline({
 
 export function resolvePipelineStatus(
   status: JobStatus | "processing",
-  sections: SectionStatus[] = []
+  sections: PromptOutputStatus[] = []
 ): JobStatus | "processing" {
   if (status !== "processing" && status !== "running") {
     return status;
@@ -243,7 +243,7 @@ function StatusIcon({ status }: { status: JobStatus | "processing" }) {
   return <Spinner className="h-4 w-4" />;
 }
 
-function StepIcon({ state }: { state: SectionState }) {
+function StepIcon({ state }: { state: PromptOutputStepState }) {
   if (state === "complete") return <Check className="h-4 w-4 text-[var(--text-secondary)]" />;
   if (state === "failed") return <AlertCircle className="h-4 w-4 text-[var(--error)]" />;
   if (state === "canceled") return <X className="h-4 w-4 text-[var(--text-secondary)]" />;
@@ -293,9 +293,9 @@ function statusLabel(status: JobStatus | "processing") {
   return "Processing";
 }
 
-export function sectionsFromJobSteps(steps?: JobProgressStep[]): SectionStatus[] {
+export function outputsFromJobSteps(steps?: JobProgressStep[]): PromptOutputStatus[] {
   return (steps ?? []).map((step) => ({
-    id: step.sectionId,
+    id: step.promptOutputId,
     label: step.label,
     state: step.state,
     kind: step.kind,
@@ -308,84 +308,84 @@ export function sectionsFromJobSteps(steps?: JobProgressStep[]): SectionStatus[]
 }
 
 export function applyProgress(
-  prev: SectionStatus[],
+  prev: PromptOutputStatus[],
   event: PipelineProgressEvent
-): SectionStatus[] {
+): PromptOutputStatus[] {
   switch (event.type) {
     case "run-planned":
       return event.steps.map((step) => ({
-        id: step.sectionId,
+        id: step.promptOutputId,
         label: step.label,
         state: "queued",
         kind: step.kind,
         filename: step.filename,
         model: step.model,
       }));
-    case "section-start": {
+    case "output-start": {
       const startedAt = Date.now();
-      const existing = prev.find((section) => section.id === event.sectionId);
+      const existing = prev.find((entry) => entry.id === event.promptOutputId);
       if (existing) {
-        return prev.map((section) =>
-          section.id === event.sectionId
+        return prev.map((entry) =>
+          entry.id === event.promptOutputId
             ? {
-                ...section,
+                ...entry,
                 state: "running",
                 startedAt,
-                model: event.model ?? section.model,
+                model: event.model ?? entry.model,
               }
-            : section
+            : entry
         );
       }
       return [
         ...prev,
         {
-          id: event.sectionId,
+          id: event.promptOutputId,
           label: event.label,
           state: "running",
           startedAt,
           model: event.model,
           filename: event.filename,
-          kind: event.sectionId === "__transcript__" ? "transcript" : "prompt",
+          kind: event.promptOutputId === "__transcript__" ? "transcript" : "prompt",
         },
       ];
     }
-    case "section-complete":
-      return prev.some((section) => section.id === event.sectionId)
-        ? prev.map((section) =>
-            section.id === event.sectionId
-              ? { ...section, state: "complete", latencyMs: event.latencyMs }
-              : section
+    case "output-complete":
+      return prev.some((entry) => entry.id === event.promptOutputId)
+        ? prev.map((entry) =>
+            entry.id === event.promptOutputId
+              ? { ...entry, state: "complete", latencyMs: event.latencyMs }
+              : entry
           )
         : [
             ...prev,
             {
-              id: event.sectionId,
+              id: event.promptOutputId,
               label: event.label,
               state: "complete",
-              kind: event.sectionId === "__transcript__" ? "transcript" : "prompt",
+              kind: event.promptOutputId === "__transcript__" ? "transcript" : "prompt",
               filename: event.filename,
               latencyMs: event.latencyMs,
             },
           ];
-    case "section-failed":
-      return prev.some((section) => section.id === event.sectionId)
-        ? prev.map((section) =>
-            section.id === event.sectionId
+    case "output-failed":
+      return prev.some((entry) => entry.id === event.promptOutputId)
+        ? prev.map((entry) =>
+            entry.id === event.promptOutputId
               ? {
-                  ...section,
+                  ...entry,
                   state: "failed",
                   latencyMs: event.latencyMs,
                   error: event.error,
                 }
-              : section
+              : entry
           )
         : [
             ...prev,
             {
-              id: event.sectionId,
+              id: event.promptOutputId,
               label: event.label,
               state: "failed",
-              kind: event.sectionId === "__transcript__" ? "transcript" : "prompt",
+              kind: event.promptOutputId === "__transcript__" ? "transcript" : "prompt",
               filename: event.filename,
               latencyMs: event.latencyMs,
               error: event.error,

@@ -161,17 +161,30 @@ function migrateLegacyConfig(
   return raw;
 }
 
+// ---- Config cache (mtime-based) ----
+let _cachedConfig: AppConfig | null = null;
+let _cachedMtimeMs = 0;
+
 export function loadConfig(): AppConfig {
   const configPath = getConfigPath();
-  if (!fs.existsSync(configPath)) {
+
+  // Fast path: if the file mtime hasn't changed, return cached config.
+  try {
+    const stat = fs.statSync(configPath);
+    if (_cachedConfig && stat.mtimeMs === _cachedMtimeMs) {
+      return _cachedConfig;
+    }
+    _cachedMtimeMs = stat.mtimeMs;
+  } catch {
     throw new Error(
       `Config not found at ${configPath}. Run "meeting-notes init" first.`
     );
   }
+
   const raw = fs.readFileSync(configPath, "utf-8");
   const parsed = (parseYaml(raw) ?? {}) as Partial<AppConfig> & LegacyAppConfig;
   const migrated = migrateLegacyConfig(parsed);
-  return {
+  const config: AppConfig = {
     ...DEFAULT_CONFIG,
     ...migrated,
     obsidian_integration: {
@@ -185,12 +198,21 @@ export function loadConfig(): AppConfig {
     recording: { ...DEFAULT_CONFIG.recording, ...migrated.recording },
     shortcuts: { ...DEFAULT_CONFIG.shortcuts, ...migrated.shortcuts },
   };
+  _cachedConfig = config;
+  return config;
+}
+
+/** Force the next `loadConfig()` call to re-read from disk. */
+export function invalidateConfigCache(): void {
+  _cachedConfig = null;
+  _cachedMtimeMs = 0;
 }
 
 export function saveConfig(config: AppConfig): void {
   const configDir = getConfigDir();
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(getConfigPath(), stringifyYaml(config), "utf-8");
+  invalidateConfigCache();
 }
 
 /**

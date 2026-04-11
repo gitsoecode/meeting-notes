@@ -25,6 +25,8 @@ import { buildInterruptedRunUpdate } from "./recording-lifecycle.js";
 import { finishTrackedProcess, startTrackedProcess } from "./activity-monitor.js";
 import { scheduleJob } from "./jobs.js";
 import { resolveRunFolderPath } from "./run-access.js";
+import { getCachedAudioDevices } from "./device-cache.js";
+import { getStore } from "./store.js";
 
 export interface ActiveRecordingState {
   session: RecordingSession;
@@ -125,13 +127,16 @@ export async function startRecording(
   const config = loadConfig();
   const runContext = createRun(config, title, { sourceMode: "both", quiet: true }, description);
   const { folderPath, manifest, logger } = runContext;
+  getStore().insertRun(manifest, folderPath);
 
   const recorder = new FfmpegRecorder();
   const audioDir = path.join(folderPath, "audio");
+  const devices = await getCachedAudioDevices();
   const session = await recorder.start({
     micDevice: config.recording.mic_device,
     systemDevice: config.recording.system_device,
     outputDir: audioDir,
+    devices,
   });
 
   active = {
@@ -241,7 +246,7 @@ export async function stopRecording(
             Number.isFinite(startedMs) && Number.isFinite(endedMs) && endedMs > startedMs
               ? (endedMs - startedMs) / 60000
               : null,
-        });
+        }, getStore());
       }
       return { run_folder: cli.run_folder };
     }
@@ -277,7 +282,7 @@ export async function stopRecording(
 
   if (audioFiles.length === 0) {
     state.logger.error("No audio files captured, marking run as error");
-    updateRunStatus(state.runFolder, "error", { ended: new Date().toISOString() });
+    updateRunStatus(state.runFolder, "error", { ended: new Date().toISOString() }, getStore());
     appLogger.error("Recording stopped without captured audio", {
       runFolder: state.runFolder,
     });
@@ -295,7 +300,7 @@ export async function stopRecording(
         Number.isFinite(startedMs) && Number.isFinite(endedMs) && endedMs > startedMs
           ? (endedMs - startedMs) / 60000
           : null,
-    });
+    }, getStore());
     return { run_folder: state.runFolder };
   }
 
@@ -354,7 +359,7 @@ export async function stopActiveRecording(_reason: string): Promise<void> {
   }
   if (_reason === "app-quit") {
     const endedAt = new Date().toISOString();
-    updateRunStatus(state.runFolder, "aborted", buildInterruptedRunUpdate(state.startedAt, endedAt));
+    updateRunStatus(state.runFolder, "aborted", buildInterruptedRunUpdate(state.startedAt, endedAt), getStore());
     state.logger.warn("Recording aborted during app quit", {
       run_folder: state.runFolder,
       endedAt,
@@ -384,18 +389,21 @@ async function startCaptureIntoSegment(
   fs.mkdirSync(segmentDir, { recursive: true });
 
   const recorder = new FfmpegRecorder();
+  const devices = await getCachedAudioDevices();
   const session = await recorder.start({
     micDevice: config.recording.mic_device,
     systemDevice: config.recording.system_device,
     outputDir: segmentDir,
+    devices,
   });
 
   // Update manifest to add this segment
-  const manifest = loadRunManifest(runFolder);
+  const store = getStore();
+  const manifest = store.loadManifest(runFolder);
   manifest.recording_segments.push(segmentName);
   updateRunStatus(runFolder, "recording", {
     recording_segments: manifest.recording_segments,
-  });
+  }, store);
 
   const state: ActiveRecordingState = {
     session,
@@ -472,7 +480,7 @@ export async function startRecordingForDraft(
   }
 
   const startedAt = new Date().toISOString();
-  updateRunStatus(validated, "recording", { started: startedAt });
+  updateRunStatus(validated, "recording", { started: startedAt }, getStore());
 
   const logger = createRunLogger(path.join(validated, "run.log"), false);
   active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, startedAt, logger);
@@ -507,7 +515,7 @@ export async function pauseRecording(): Promise<void> {
   }
   clearActiveRecording();
 
-  updateRunStatus(state.runFolder, "paused");
+  updateRunStatus(state.runFolder, "paused", undefined, getStore());
   pausedRunFolder = state.runFolder;
 
   state.logger.info("Recording paused", { run_folder: state.runFolder });

@@ -2,6 +2,8 @@ export interface RecorderOptions {
   micDevice: string;
   systemDevice: string;
   outputDir: string;
+  /** Pre-enumerated device list to skip ffmpeg device-listing spawns. */
+  devices?: string[];
 }
 
 export interface RecordingStopResult {

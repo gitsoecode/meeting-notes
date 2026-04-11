@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { FileUp, PlayCircle } from "lucide-react";
+import { FileUp, PlayCircle, Trash2 } from "lucide-react";
 import { api } from "../ipc-client";
 import type { BulkReprocessResult, JobSummary, PromptRow, RunSummary } from "../../../shared/ipc";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { PageScaffold } from "../components/PageScaffold";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -44,6 +45,8 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
   const [importing, setImporting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [search, setSearch] = useState("");
   const [defaultPromptModel, setDefaultPromptModel] = useState<string | null>(null);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -227,10 +230,16 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
             )}
           </Button>
           {selected.size > 0 ? (
-            <Button onClick={() => setBulkOpen(true)}>
-              <PlayCircle className="h-4 w-4" />
-              Run prompt on {selected.size}
-            </Button>
+            <>
+              <Button variant="destructive" onClick={() => setConfirmBulkDelete(true)} disabled={bulkDeleting}>
+                <Trash2 className="h-4 w-4" />
+                Delete {selected.size}
+              </Button>
+              <Button onClick={() => setBulkOpen(true)}>
+                <PlayCircle className="h-4 w-4" />
+                Run prompt on {selected.size}
+              </Button>
+            </>
           ) : null}
         </div>
       </div>
@@ -304,7 +313,7 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                               <ProcessingStatusInline
                                 status={activeJob.status === "running" ? "processing" : activeJob.status}
                                 currentLabel={
-                                  activeJob.progress.currentSectionLabel ??
+                                  activeJob.progress.currentOutputLabel ??
                                   (activeJob.status === "queued"
                                     ? `Queued${activeJob.queuePosition ? ` · #${activeJob.queuePosition}` : ""}`
                                     : undefined)
@@ -379,7 +388,7 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                       <div className="mt-2">
                         <ProcessingStatusInline
                           status={activeJob.status === "running" ? "processing" : activeJob.status}
-                          currentLabel={activeJob.progress.currentSectionLabel}
+                          currentLabel={activeJob.progress.currentOutputLabel}
                         />
                       </div>
                     ) : null}
@@ -390,6 +399,29 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
           </div>
         </>
       )}
+
+      <ConfirmDialog
+        open={confirmBulkDelete}
+        onOpenChange={setConfirmBulkDelete}
+        title={`Delete ${selected.size} meeting${selected.size === 1 ? "" : "s"}?`}
+        description="This will permanently delete the selected meetings, including all recordings, transcripts, and notes. This action cannot be undone."
+        confirmLabel={bulkDeleting ? "Deleting..." : "Delete"}
+        cancelLabel="Cancel"
+        onCancel={() => setConfirmBulkDelete(false)}
+        onConfirm={async () => {
+          setBulkDeleting(true);
+          try {
+            await api.runs.bulkDelete([...selected]);
+            setSelected(new Set());
+            setConfirmBulkDelete(false);
+            await refresh();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+          } finally {
+            setBulkDeleting(false);
+          }
+        }}
+      />
 
       {bulkOpen ? (
         <BulkRunPromptModal

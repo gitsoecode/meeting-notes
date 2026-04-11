@@ -12,7 +12,7 @@ import {
   CancelJobButton,
   PipelineStatus,
   resolvePipelineStatus,
-  sectionsFromJobSteps,
+  outputsFromJobSteps,
 } from "../components/PipelineStatus";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
 import { Badge } from "../components/ui/badge";
@@ -135,7 +135,7 @@ export function ActivityView() {
   const runningJobs = useMemo(
     () =>
       jobs.filter(
-        (job) => resolvePipelineStatus(job.status, sectionsFromJobSteps(job.progress.steps)) === "running"
+        (job) => resolvePipelineStatus(job.status, outputsFromJobSteps(job.progress.steps)) === "running"
       ),
     [jobs]
   );
@@ -147,7 +147,7 @@ export function ActivityView() {
     () =>
       jobs.filter((job) =>
         ["completed", "failed", "canceled"].includes(
-          resolvePipelineStatus(job.status, sectionsFromJobSteps(job.progress.steps))
+          resolvePipelineStatus(job.status, outputsFromJobSteps(job.progress.steps))
         )
       ),
     [jobs]
@@ -250,11 +250,11 @@ export function ActivityView() {
                     {runningJobs.map((job) => (
                       <PipelineStatus
                         key={job.id}
-                        sections={sectionsFromJobSteps(job.progress.steps)}
+                        sections={outputsFromJobSteps(job.progress.steps)}
                         title={job.title}
                         description={`${job.subtitle}${job.model ? ` · ${job.model}` : ""}`}
-                        status={resolvePipelineStatus(job.status, sectionsFromJobSteps(job.progress.steps))}
-                        currentLabel={job.progress.currentSectionLabel}
+                        status={resolvePipelineStatus(job.status, outputsFromJobSteps(job.progress.steps))}
+                        currentLabel={job.progress.currentOutputLabel}
                         showPreparingWhenEmpty
                         compact
                         action={
@@ -277,12 +277,12 @@ export function ActivityView() {
                     {queuedJobs.map((job) => (
                       <PipelineStatus
                         key={job.id}
-                        sections={sectionsFromJobSteps(job.progress.steps)}
+                        sections={outputsFromJobSteps(job.progress.steps)}
                         title={job.title}
                         description={`${job.subtitle}${job.error ? ` · ${job.error}` : ""}`}
                         status={job.status}
                         queuePosition={job.queuePosition}
-                        currentLabel={job.progress.currentSectionLabel}
+                        currentLabel={job.progress.currentOutputLabel}
                         showPreparingWhenEmpty
                         compact
                         action={
@@ -305,11 +305,11 @@ export function ActivityView() {
                     {completedJobs.map((job) => (
                       <PipelineStatus
                         key={job.id}
-                        sections={sectionsFromJobSteps(job.progress.steps)}
+                        sections={outputsFromJobSteps(job.progress.steps)}
                         title={job.title}
                         description={`${job.subtitle}${job.error ? ` · ${job.error}` : ""}`}
-                        status={resolvePipelineStatus(job.status, sectionsFromJobSteps(job.progress.steps))}
-                        currentLabel={job.progress.currentSectionLabel}
+                        status={resolvePipelineStatus(job.status, outputsFromJobSteps(job.progress.steps))}
+                        currentLabel={job.progress.currentOutputLabel}
                         compact
                       />
                     ))}

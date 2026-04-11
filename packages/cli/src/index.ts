@@ -631,8 +631,8 @@ program
     });
 
     console.log(`\n  Reprocess: ${succeeded.length} succeeded, ${failed.length} failed`);
-    for (const r of succeeded) console.log(`    ✓ ${r.sectionId} (${r.latencyMs}ms)`);
-    for (const f of failed) console.error(`    ✗ ${f.sectionId}: ${f.error}`);
+    for (const r of succeeded) console.log(`    ✓ ${r.promptOutputId} (${r.latencyMs}ms)`);
+    for (const f of failed) console.error(`    ✗ ${f.promptOutputId}: ${f.error}`);
     console.log();
   });
 
@@ -910,9 +910,9 @@ prompts
 
     for (const r of results) {
       if (r.success) {
-        console.log(`    ✓ ${r.sectionId} (${r.latencyMs}ms) → ${r.filename}`);
+        console.log(`    ✓ ${r.promptOutputId} (${r.latencyMs}ms) → ${r.filename}`);
       } else {
-        console.error(`    ✗ ${r.sectionId}: ${r.error}`);
+        console.error(`    ✗ ${r.promptOutputId}: ${r.error}`);
       }
     }
     console.log();

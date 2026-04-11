@@ -5,12 +5,13 @@ import { ulid } from "ulid";
 import { AppConfig, resolveRunsPath, resolveBasePath } from "./config.js";
 import { writeMarkdownFile, writeRawFile } from "./markdown.js";
 import { createRunLogger, Logger } from "../logging/logger.js";
+import type { RunStore } from "./run-store.js";
 
 export type RunStatus = "draft" | "recording" | "paused" | "processing" | "complete" | "error" | "aborted";
-export type SectionStatus = "pending" | "running" | "complete" | "failed";
+export type PromptOutputStatus = "pending" | "running" | "complete" | "failed";
 
-export interface SectionState {
-  status: SectionStatus;
+export interface PromptOutputState {
+  status: PromptOutputStatus;
   filename: string;
   label?: string;
   builtin?: boolean;
@@ -34,7 +35,7 @@ export interface RunManifest {
   duration_minutes: number | null;
   asr_provider: string;
   llm_provider: string;
-  sections: Record<string, SectionState>;
+  prompt_outputs: Record<string, PromptOutputState>;
   /** ISO 8601 datetime for when the meeting is scheduled. */
   scheduled_time: string | null;
   /** Filenames stored in the attachments/ subdirectory. */
@@ -99,7 +100,7 @@ export function manifestToFrontmatter(manifest: RunManifest): Record<string, unk
     duration_minutes: manifest.duration_minutes,
     asr_provider: manifest.asr_provider,
     llm_provider: manifest.llm_provider,
-    sections: manifest.sections,
+    prompt_outputs: manifest.prompt_outputs,
   };
   if (manifest.scheduled_time) fm.scheduled_time = manifest.scheduled_time;
   if (manifest.attachments.length > 0) fm.attachments = manifest.attachments;
@@ -108,13 +109,13 @@ export function manifestToFrontmatter(manifest: RunManifest): Record<string, unk
   return fm;
 }
 
-function buildIndexBody(manifest: RunManifest): string {
+export function buildIndexBody(manifest: RunManifest): string {
   const links = ["- [[notes]]"];
-  const sectionIds = Object.keys(manifest.sections);
-  if (sectionIds.length > 0) {
+  const outputIds = Object.keys(manifest.prompt_outputs);
+  if (outputIds.length > 0) {
     links.push("- [[transcript]]");
-    for (const id of sectionIds) {
-      const state = manifest.sections[id];
+    for (const id of outputIds) {
+      const state = manifest.prompt_outputs[id];
       if (state.status === "complete") {
         const noExt = state.filename.replace(/\.md$/, "");
         links.push(`- [[${noExt}]]`);
@@ -166,7 +167,7 @@ export function createRun(
     duration_minutes: null,
     asr_provider: config.asr_provider,
     llm_provider: config.llm_provider,
-    sections: {},
+    prompt_outputs: {},
     scheduled_time: null,
     attachments: [],
     selected_prompts: null,
@@ -240,7 +241,7 @@ export function createDraftRun(
     duration_minutes: null,
     asr_provider: config.asr_provider,
     llm_provider: config.llm_provider,
-    sections: {},
+    prompt_outputs: {},
     scheduled_time: opts.scheduledTime ?? null,
     attachments: [],
     selected_prompts: null,
@@ -296,7 +297,7 @@ export function loadRunManifest(folderPath: string): RunManifest {
     duration_minutes: duration,
     asr_provider: data.asr_provider ?? "",
     llm_provider: data.llm_provider ?? "",
-    sections: data.sections ?? {},
+    prompt_outputs: (data as Record<string, unknown>).prompt_outputs as Record<string, PromptOutputState> ?? {},
     scheduled_time: (data as Record<string, unknown>).scheduled_time as string ?? null,
     attachments: (data as Record<string, unknown>).attachments as string[] ?? [],
     selected_prompts: (data as Record<string, unknown>).selected_prompts as string[] ?? null,
@@ -307,8 +308,10 @@ export function loadRunManifest(folderPath: string): RunManifest {
 export function updateRunStatus(
   folderPath: string,
   status: RunStatus,
-  updates?: Partial<RunManifest>
+  updates?: Partial<RunManifest>,
+  store?: RunStore
 ): RunManifest {
+  if (store) return store.updateStatus(folderPath, status, updates);
   const manifest = loadRunManifest(folderPath);
   manifest.status = status;
   if (updates) {
@@ -318,13 +321,14 @@ export function updateRunStatus(
   return manifest;
 }
 
-export function updateSectionState(
+export function updatePromptOutput(
   folderPath: string,
-  sectionId: string,
-  state: SectionState
-): RunManifest {
+  promptOutputId: string,
+  state: PromptOutputState,
+  store?: RunStore
+): void {
+  if (store) { store.updatePromptOutput(folderPath, promptOutputId, state); return; }
   const manifest = loadRunManifest(folderPath);
-  manifest.sections[sectionId] = state;
+  manifest.prompt_outputs[promptOutputId] = state;
   writeManifest(folderPath, manifest);
-  return manifest;
 }

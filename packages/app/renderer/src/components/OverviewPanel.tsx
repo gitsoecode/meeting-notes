@@ -57,8 +57,8 @@ export function OverviewPanel({ detail, runFolder, onUpdated }: OverviewPanelPro
   const endedDate = detail.ended ? new Date(detail.ended) : null;
   const participants = manifest.participants ?? [];
   const tags = detail.tags ?? manifest.tags ?? [];
-  const sections = manifest.sections ?? {};
-  const sectionEntries = Object.entries(sections);
+  const promptOutputs = manifest.prompt_outputs ?? {};
+  const outputEntries = Object.entries(promptOutputs);
 
   const onSaveDescription = async () => {
     setSavingDescription(true);
@@ -181,10 +181,10 @@ export function OverviewPanel({ detail, runFolder, onUpdated }: OverviewPanelPro
                 </div>
               </MetadataRow>
             )}
-            {sectionEntries.length > 0 && (
-              <MetadataRow label="Sections">
+            {outputEntries.length > 0 && (
+              <MetadataRow label="Prompt Outputs">
                 <div className="space-y-1 text-xs">
-                  {sectionEntries.map(([id, section]) => (
+                  {outputEntries.map(([id, section]) => (
                     <div key={id} className="flex items-center justify-between gap-3">
                       <span className="text-[var(--text-primary)]">{section.label ?? id}</span>
                       <span className={`text-[10px] font-medium uppercase ${
