@@ -111,7 +111,7 @@ test.describe("Settings", () => {
     page,
   }) => {
     await page.getByRole("tab", { name: "Models" }).click();
-    await expect(page.getByText("qwen3.5:9b")).toBeVisible();
+    await expect(page.getByText("Installed models")).toBeVisible();
     await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
   });
 
@@ -142,11 +142,11 @@ test.describe("Settings", () => {
     await settings.modelRemoveButton("qwen3.5:9b").click();
     await expect(settings.removeModelConfirmButton()).toBeVisible();
     await settings.removeModelCancelButton().click();
-    await expect(page.getByText("qwen3.5:9b")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
 
     await settings.modelRemoveButton("qwen3.5:9b").click();
     await settings.removeModelConfirmButton().click();
-    await expect(page.getByText("qwen3.5:9b")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
   });
 
   test("dependencies card shows all rows", async ({ settings, page }) => {

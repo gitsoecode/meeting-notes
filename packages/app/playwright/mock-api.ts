@@ -231,11 +231,13 @@ export async function installMockApi(page: Page) {
             status: "complete",
             label: "Summary + Action Items",
             filename: "summary.md",
+            model: "qwen3.5:9b",
           },
           "decision-log": {
             status: "complete",
             label: "Decision Log",
             filename: "decision-log.md",
+            model: "qwen3.5:9b",
           },
         },
       },
@@ -251,6 +253,7 @@ export async function installMockApi(page: Page) {
             status: "running",
             label: "Summary + Action Items",
             filename: "summary.md",
+            model: "qwen3.5:9b",
           },
         },
       },
@@ -507,6 +510,7 @@ export async function installMockApi(page: Page) {
         status,
         label: prompt.label,
         filename: prompt.filename,
+        model: prompt.model ?? "qwen3.5:9b",
       };
       const run = runs.find((item) => item.folder_path === runFolder);
       if (run && !run.prompt_output_ids.includes(prompt.id)) {

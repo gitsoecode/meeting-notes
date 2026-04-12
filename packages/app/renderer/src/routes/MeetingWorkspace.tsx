@@ -76,6 +76,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from ".
 import { Spinner } from "../components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { getDefaultPromptModel, getPromptModelSummary } from "../lib/prompt-metadata";
+import { findModelEntry } from "../../../shared/llm-catalog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -163,13 +164,20 @@ function sortAnalysisPrompts(left: MeetingAnalysisPromptItem, right: MeetingAnal
   return left.label.localeCompare(right.label);
 }
 
-function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem): string {
+function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem, defaultModel: string | null): string {
   const parts = [prompt.prompt.auto ? "Auto-run prompt" : "Manual prompt"];
   if (prompt.status === "running") parts.push("Running");
   else if (prompt.status === "failed") parts.push("Last run failed");
   else if (prompt.status === "queued") parts.push("Queued");
   else if (prompt.hasOutput) parts.push("Output ready");
   else parts.push("No output yet");
+
+  const effectiveModel = prompt.prompt.model ?? defaultModel;
+  if (effectiveModel) {
+    const entry = findModelEntry(effectiveModel);
+    parts.push(entry?.label ?? effectiveModel);
+  }
+
   return parts.join(" • ");
 }
 
@@ -774,8 +782,8 @@ export function MeetingWorkspace({
     <div className="space-y-3">
       <PipelineStatus
         sections={sections}
-        title={reprocessStarting && sections.length === 0 ? "Reprocess queued for this meeting" : config.llm_provider === "ollama" ? "Processing locally" : config.llm_provider === "openai" ? "Processing with OpenAI" : "Processing meeting outputs"}
-        description={pipelineError ? pipelineError : reprocessStarting && sections.length === 0 ? "The job has started in the background." : activeJob?.subtitle ?? (config.llm_provider === "ollama" ? "Local models stay on-device." : "Outputs update in place as each step finishes.")}
+        title={reprocessStarting && sections.length === 0 ? "Reprocess queued for this meeting" : "Processing"}
+        description={pipelineError ? pipelineError : reprocessStarting && sections.length === 0 ? "The job has started in the background." : activeJob?.subtitle ?? "Outputs update in place as each step finishes."}
         status={activeJob?.status ?? "processing"}
         queuePosition={activeJob?.queuePosition}
         currentLabel={activeJob?.progress.currentOutputLabel}
@@ -1164,7 +1172,7 @@ export function MeetingWorkspace({
                           <div className="px-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-tertiary)]/70">Pre-loaded</div>
                           <div className="space-y-0.5">
                             {analysisPreloadedPrompts.map((prompt) => (
-                              <AnalysisSidebarItem key={prompt.id} prompt={prompt} active={activePromptId === prompt.id} onSelect={() => setActivePromptId(prompt.id)} />
+                              <AnalysisSidebarItem key={prompt.id} prompt={prompt} active={activePromptId === prompt.id} onSelect={() => setActivePromptId(prompt.id)} defaultModel={defaultModel} />
                             ))}
                           </div>
                         </div>
@@ -1175,7 +1183,7 @@ export function MeetingWorkspace({
                           {analysisCustomPrompts.length === 0 ? (
                             <div className="px-3 py-2 text-[11px] italic text-[var(--text-tertiary)]">No custom prompts yet</div>
                           ) : analysisCustomPrompts.map((prompt) => (
-                            <AnalysisSidebarItem key={prompt.id} prompt={prompt} active={activePromptId === prompt.id} onSelect={() => setActivePromptId(prompt.id)} />
+                            <AnalysisSidebarItem key={prompt.id} prompt={prompt} active={activePromptId === prompt.id} onSelect={() => setActivePromptId(prompt.id)} defaultModel={defaultModel} />
                           ))}
                         </div>
                       </div>
@@ -1194,7 +1202,7 @@ export function MeetingWorkspace({
                           {activePrompt.description?.trim() || "No description yet."}
                         </p>
                         <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-tertiary)]">
-                          {formatAnalysisPromptMeta(activePrompt)}
+                          {formatAnalysisPromptMeta(activePrompt, defaultModel)}
                         </p>
                       </div>
                       <Button size="sm" onClick={() => void startReprocess({ runFolder, onlyIds: [activePrompt.id] })}>
@@ -1510,10 +1518,12 @@ function AnalysisSidebarItem({
   prompt,
   active,
   onSelect,
+  defaultModel,
 }: {
   prompt: MeetingAnalysisPromptItem;
   active: boolean;
   onSelect: () => void;
+  defaultModel: string | null;
 }) {
   return (
     <button
@@ -1528,7 +1538,7 @@ function AnalysisSidebarItem({
       <div className="min-w-0">
         <span className="truncate text-xs">{prompt.label}</span>
         <div className="mt-0.5 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-          {formatAnalysisPromptMeta(prompt)}
+          {formatAnalysisPromptMeta(prompt, defaultModel)}
         </div>
       </div>
       {active && <div className="absolute left-0 top-2 h-4 w-0.5 rounded-full bg-[var(--accent)]" />}

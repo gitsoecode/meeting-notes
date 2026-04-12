@@ -390,7 +390,7 @@ export function registerIpcHandlers(): void {
       openai: { model: "gpt-4o" },
       ollama: {
         base_url: "http://127.0.0.1:11434",
-        model: req.ollama_model ?? "qwen3.5",
+        model: req.ollama_model ?? "qwen3.5:9b",
       },
       recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },

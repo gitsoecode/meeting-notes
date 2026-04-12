@@ -62,6 +62,8 @@ import {
   PRIMARY_PROMPT_ID,
   type MeetingAnalysisPromptItem,
 } from "../../../shared/meeting-prompts";
+import { getDefaultPromptModel } from "../lib/prompt-metadata";
+import { findModelEntry } from "../../../shared/llm-catalog";
 
 interface MeetingDetailProps {
   runFolder: string;
@@ -313,6 +315,8 @@ export function MeetingDetail({
     }, 7000);
     return () => clearInterval(id);
   }, [detail?.status, runFolder]);
+
+  const defaultModel = useMemo(() => getDefaultPromptModel(config), [config]);
 
   const promptCollections = useMemo(() => {
     if (!detail) {
@@ -645,21 +649,14 @@ export function MeetingDetail({
         title={
           reprocessStarting && sections.length === 0
             ? "Reprocess queued for this meeting"
-            : config.llm_provider === "ollama"
-              ? "Processing locally"
-              : config.llm_provider === "openai"
-                ? "Processing with OpenAI"
-                : "Processing meeting outputs"
+            : "Processing"
         }
         description={
           pipelineError
             ? pipelineError
             : reprocessStarting && sections.length === 0
-              ? "The job has started in the background. This timeline will fill in as each step begins."
-              : activeJob?.subtitle ??
-                (config.llm_provider === "ollama"
-                  ? "Local models stay on-device while each step updates in place."
-                  : "Outputs update in place as each step finishes.")
+              ? "The job has started in the background."
+              : activeJob?.subtitle ?? "Outputs update in place as each step finishes."
         }
         status={activeJob?.status ?? "processing"}
         queuePosition={activeJob?.queuePosition}
@@ -873,6 +870,7 @@ export function MeetingDetail({
                               prompt={prompt}
                               active={activePromptId === prompt.id}
                               onSelect={() => setActivePromptId(prompt.id)}
+                              defaultModel={defaultModel}
                             />
                           ))}
                         </div>
@@ -895,6 +893,7 @@ export function MeetingDetail({
                               prompt={prompt}
                               active={activePromptId === prompt.id}
                               onSelect={() => setActivePromptId(prompt.id)}
+                              defaultModel={defaultModel}
                             />
                           ))
                         )}
@@ -919,7 +918,7 @@ export function MeetingDetail({
                           : "No description yet. Use this prompt when you want a meeting-specific analysis beyond the primary summary."}
                       </p>
                       <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-tertiary)]">
-                        {formatAnalysisPromptMeta(activePrompt)}
+                        {formatAnalysisPromptMeta(activePrompt, defaultModel)}
                       </p>
                     </div>
                     <Button size="sm" onClick={() => void runSelectedAnalysisPrompt()}>
@@ -1480,7 +1479,7 @@ function sortAnalysisPrompts(left: MeetingAnalysisPromptItem, right: MeetingAnal
   return left.label.localeCompare(right.label);
 }
 
-function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem): string {
+function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem, defaultModel: string | null): string {
   const parts = [prompt.prompt.auto ? "Auto-run prompt" : "Manual prompt"];
 
   if (prompt.status === "running") {
@@ -1495,6 +1494,12 @@ function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem): string {
     parts.push("No output yet");
   }
 
+  const effectiveModel = prompt.prompt.model ?? defaultModel;
+  if (effectiveModel) {
+    const entry = findModelEntry(effectiveModel);
+    parts.push(entry?.label ?? effectiveModel);
+  }
+
   return parts.join(" • ");
 }
 
@@ -1502,10 +1507,12 @@ function AnalysisSidebarItem({
   prompt,
   active,
   onSelect,
+  defaultModel,
 }: {
   prompt: MeetingAnalysisPromptItem;
   active: boolean;
   onSelect: () => void;
+  defaultModel: string | null;
 }) {
   return (
     <button
@@ -1520,7 +1527,7 @@ function AnalysisSidebarItem({
       <div className="min-w-0">
         <span className="truncate text-xs">{prompt.label}</span>
         <div className="mt-0.5 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-          {formatAnalysisPromptMeta(prompt)}
+          {formatAnalysisPromptMeta(prompt, defaultModel)}
         </div>
       </div>
       {active && (

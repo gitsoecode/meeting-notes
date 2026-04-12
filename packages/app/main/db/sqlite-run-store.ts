@@ -57,12 +57,13 @@ export class SqliteRunStore implements RunStore {
 
     this.db.prepare(`
       INSERT OR REPLACE INTO prompt_outputs
-        (run_id, prompt_output_id, status, filename, label, builtin, error, latency_ms, tokens_used, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (run_id, prompt_output_id, status, filename, label, builtin, error, latency_ms, tokens_used, completed_at, model)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       row.run_id, promptOutputId, state.status, state.filename,
       state.label ?? null, state.builtin ? 1 : 0, state.error ?? null,
-      state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null
+      state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null,
+      state.model ?? null
     );
 
     // Regenerate index.md with full manifest
@@ -92,12 +93,13 @@ export class SqliteRunStore implements RunStore {
       for (const [id, state] of Object.entries(manifest.prompt_outputs)) {
         this.db.prepare(`
           INSERT INTO prompt_outputs
-            (run_id, prompt_output_id, status, filename, label, builtin, error, latency_ms, tokens_used, completed_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (run_id, prompt_output_id, status, filename, label, builtin, error, latency_ms, tokens_used, completed_at, model)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           manifest.run_id, id, state.status, state.filename,
           state.label ?? null, state.builtin ? 1 : 0, state.error ?? null,
-          state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null
+          state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null,
+          state.model ?? null
         );
       }
 
@@ -254,6 +256,7 @@ interface PromptOutputRow {
   latency_ms: number | null;
   tokens_used: number | null;
   completed_at: string | null;
+  model: string | null;
 }
 
 function rowToPromptOutputState(row: PromptOutputRow): PromptOutputState {
@@ -266,5 +269,6 @@ function rowToPromptOutputState(row: PromptOutputRow): PromptOutputState {
     latency_ms: row.latency_ms ?? undefined,
     tokens_used: row.tokens_used ?? undefined,
     completed_at: row.completed_at ?? undefined,
+    model: row.model ?? undefined,
   };
 }

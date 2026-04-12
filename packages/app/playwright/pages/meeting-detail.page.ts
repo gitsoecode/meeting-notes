@@ -130,7 +130,7 @@ export class MeetingDetailPage {
 
   // Processing state
   processingCard() {
-    return this.main.getByText("Processing locally with");
+    return this.main.getByText("Processing");
   }
 
   // Reprocess modal

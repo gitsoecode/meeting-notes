@@ -109,7 +109,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   ollama: {
     base_url: "http://127.0.0.1:11434",
-    model: "qwen3.5",
+    model: "qwen3.5:9b",
   },
   recording: {
     mic_device: "default",

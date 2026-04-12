@@ -14,6 +14,7 @@ import {
   TableRow,
 } from "./ui/table";
 import { FolderOpen, Info, Pencil } from "lucide-react";
+import { findModelEntry } from "../../../shared/llm-catalog";
 
 interface OverviewPanelProps {
   detail: RunDetail;
@@ -34,6 +35,7 @@ interface ManifestShape {
       status?: string;
       label?: string;
       filename?: string;
+      model?: string;
     }
   >;
 }
@@ -186,8 +188,15 @@ export function OverviewPanel({ detail, runFolder, onUpdated }: OverviewPanelPro
                 <div className="space-y-1 text-xs">
                   {outputEntries.map(([id, section]) => (
                     <div key={id} className="flex items-center justify-between gap-3">
-                      <span className="text-[var(--text-primary)]">{section.label ?? id}</span>
-                      <span className={`text-[10px] font-medium uppercase ${
+                      <div className="min-w-0">
+                        <span className="text-[var(--text-primary)]">{section.label ?? id}</span>
+                        {section.model && (
+                          <span className="ml-2 text-[10px] text-[var(--text-tertiary)]">
+                            {findModelEntry(section.model)?.label ?? section.model}
+                          </span>
+                        )}
+                      </div>
+                      <span className={`shrink-0 text-[10px] font-medium uppercase ${
                         section.status === "complete" ? "text-emerald-600"
                           : section.status === "failed" ? "text-[var(--error)]"
                           : section.status === "running" ? "text-blue-600"

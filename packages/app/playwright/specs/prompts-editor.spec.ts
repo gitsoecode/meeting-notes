@@ -12,7 +12,7 @@ test.describe("Prompt Library", () => {
     await expect(promptsEditor.libraryHeading()).toBeVisible();
     await expect(promptsEditor.rootPromptItem()).toContainText("Summary + Action Items");
     await expect(promptsEditor.titleInput()).toHaveValue("Summary + Action Items");
-    await expect(promptsEditor.modelCombobox()).toContainText("Qwen 3.5 9B");
+    await expect(promptsEditor.modelCombobox()).toContainText("qwen3.5:9b");
 
     await page.screenshot({
       path: "test-results/screenshots/prompts-editor-initial.png",

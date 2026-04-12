@@ -19,6 +19,7 @@ export interface PromptOutputState {
   latency_ms?: number;
   tokens_used?: number;
   completed_at?: string;
+  model?: string;
 }
 
 export interface RunManifest {

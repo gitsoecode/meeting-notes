@@ -73,6 +73,7 @@ export interface RunPromptOutputState {
   filename: string;
   label?: string;
   error?: string;
+  model?: string;
 }
 
 export interface RunManifest {

@@ -46,7 +46,7 @@ test("migrate creates all tables and sets user_version", () => {
   migrate(db);
 
   const version = db.pragma("user_version", { simple: true });
-  assert.equal(version, 1);
+  assert.equal(version, 2);
 
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")

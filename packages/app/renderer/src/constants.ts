@@ -15,8 +15,8 @@ export {
  */
 export function recommendLocalModel(ramGb: number | undefined): string {
   if (!ramGb || ramGb < 16) return "qwen3:8b";
-  if (ramGb >= 24) return "qwen3.5";
-  return "qwen3.5";
+  if (ramGb >= 24) return "qwen3.5:9b";
+  return "qwen3.5:9b";
 }
 
 /** Format an ISO date as a relative label like "Today" / "Yesterday" / "3d ago". */

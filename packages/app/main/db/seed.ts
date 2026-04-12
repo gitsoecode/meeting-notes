@@ -42,8 +42,8 @@ export function seedDbFromFilesystem(
 
   const insertOutput = db.prepare(`
     INSERT OR IGNORE INTO prompt_outputs
-      (run_id, prompt_output_id, status, filename, label, builtin, error, latency_ms, tokens_used, completed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (run_id, prompt_output_id, status, filename, label, builtin, error, latency_ms, tokens_used, completed_at, model)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const insertTag = db.prepare("INSERT OR IGNORE INTO tags (run_id, tag) VALUES (?, ?)");
@@ -81,7 +81,8 @@ export function seedDbFromFilesystem(
         insertOutput.run(
           manifest.run_id, id, state.status, state.filename,
           state.label ?? null, state.builtin ? 1 : 0, state.error ?? null,
-          state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null
+          state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null,
+          state.model ?? null
         );
       }
 

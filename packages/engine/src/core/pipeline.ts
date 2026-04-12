@@ -550,6 +550,7 @@ export async function runPipeline(
       filename: prompt.filename,
       label: prompt.label,
       builtin: prompt.builtin,
+      model: prompt.model ?? undefined,
     }, store);
     onProgress?.({
       type: "output-start",
@@ -599,6 +600,7 @@ export async function runPipeline(
         latency_ms: latencyMs,
         tokens_used: response.tokensUsed,
         completed_at: new Date().toISOString(),
+        model: prompt.model ?? undefined,
       }, store);
 
       logger.info(`Completed prompt output: ${prompt.id}`, {
@@ -638,6 +640,7 @@ export async function runPipeline(
         builtin: prompt.builtin,
         error: errorMsg,
         latency_ms: latencyMs,
+        model: prompt.model ?? undefined,
       }, store);
 
       onProgress?.({

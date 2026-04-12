@@ -47,8 +47,8 @@ export const LLM_MODELS: LlmModelEntry[] = [
     blurb: "OpenAI's reasoning model for complex tasks.",
   },
   {
-    id: "qwen3.5",
-    label: "Qwen 3.5 9B",
+    id: "qwen3.5:9b",
+    label: "qwen3.5:9b",
     provider: "ollama",
     sizeGb: 5.5,
     minRamGb: 16,
@@ -56,7 +56,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
   },
   {
     id: "llama3.1:8b",
-    label: "Llama 3.1 8B",
+    label: "llama3.1:8b",
     provider: "ollama",
     sizeGb: 4.7,
     minRamGb: 8,
@@ -64,7 +64,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
   },
   {
     id: "mistral:latest",
-    label: "Mistral 7B",
+    label: "mistral:latest",
     provider: "ollama",
     sizeGb: 4.1,
     minRamGb: 8,
@@ -72,7 +72,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
   },
   {
     id: "phi3:latest",
-    label: "Phi-3 Mini",
+    label: "phi3:latest",
     provider: "ollama",
     sizeGb: 2.3,
     minRamGb: 4,
@@ -80,7 +80,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
   },
   {
     id: "gemma4:e4b",
-    label: "Gemma 4 E4B",
+    label: "gemma4:e4b",
     provider: "ollama",
     sizeGb: 4.0,
     minRamGb: 16,
@@ -89,8 +89,8 @@ export const LLM_MODELS: LlmModelEntry[] = [
 ];
 
 const LOCAL_MODEL_ALIASES: Record<string, string> = {
-  "qwen3.5:9b": "qwen3.5",
-  "qwen3.5:latest": "qwen3.5",
+  "qwen3.5": "qwen3.5:9b",
+  "qwen3.5:latest": "qwen3.5:9b",
   "llama3.1:latest": "llama3.1:8b",
 };
 

@@ -33,7 +33,7 @@ function normalizeModelId(id: string | null | undefined): string | null {
   const trimmed = id.trim();
   if (!trimmed) return null;
   if (trimmed.startsWith("claude-")) return trimmed;
-  if (trimmed === "qwen3.5:9b" || trimmed === "qwen3.5:latest") return "qwen3.5";
+  if (trimmed === "qwen3.5" || trimmed === "qwen3.5:latest") return "qwen3.5:9b";
   return trimmed.replace(/:latest$/, "");
 }
 

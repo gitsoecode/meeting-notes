@@ -1,6 +1,6 @@
 # Meeting Notes
 
-A local-first meeting recording and processing tool with an Obsidian workspace. Records mic + system audio, transcribes locally (or via OpenAI), runs Claude over the transcript to produce structured notes, and writes everything into your Obsidian vault. Today it ships as a Node CLI; an Electron app will follow.
+A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product, with Obsidian as an optional integration layer. Meeting Notes records mic + system audio, transcribes locally (or via OpenAI), runs prompts over the transcript to produce structured notes, and keeps the resulting files on disk.
 
 ---
 
@@ -35,6 +35,47 @@ After `npm link`, the `meeting-notes` command is on your `PATH`. Verify with:
 ```bash
 meeting-notes --help
 ```
+
+## Desktop App Development
+
+### Build the desktop app once
+
+```bash
+npm run build --workspace @meeting-notes/app
+```
+
+This builds the Electron main process, preload bridge, renderer, and packaged app assets into `packages/app/dist/`.
+
+### Run the desktop app in development
+
+```bash
+npm run dev --workspace @meeting-notes/app
+```
+
+This starts:
+
+- the TypeScript watcher for the Electron main process
+- the TypeScript watcher for the preload bridge
+- the Vite dev server for the renderer
+- Electron pointed at the local dev build
+
+Leave this running while working on the app. Save-to-rebuild is automatic.
+
+### Start the desktop app without watchers
+
+If you already built the app and just want to launch it:
+
+```bash
+npm run start --workspace @meeting-notes/app
+```
+
+### Package the macOS app
+
+```bash
+npm run package:mac --workspace @meeting-notes/app
+```
+
+This runs the app build, checks bundled binaries, and creates a macOS package under `packages/app/release/`.
 
 ---
 
@@ -176,3 +217,16 @@ Make sure the Dataview plugin is installed and enabled in Obsidian's community p
 
 **Stale behavior after editing code**
 You forgot to rebuild. Run `npm run build`, or leave `npm run dev` running in a terminal.
+
+**`better-sqlite3` / `NODE_MODULE_VERSION` mismatch when starting or recording in the desktop app**
+The native SQLite module was built for plain Node instead of Electron. Rebuild it for the app runtime:
+
+```bash
+PYTHON=/usr/bin/python3 npm_config_build_from_source=true npm_config_runtime=electron npm_config_target=41.2.0 npm_config_disturl=https://electronjs.org/headers npm rebuild better-sqlite3 --workspace @meeting-notes/app
+```
+
+Notes:
+
+- `npm test` and `npm run test --workspace @meeting-notes/app` may rebuild `better-sqlite3` for the current plain Node runtime first. That is expected for tests.
+- The Electron app needs the Electron-targeted rebuild above if you see `ERR_DLOPEN_FAILED` or a `NODE_MODULE_VERSION` mismatch while launching, opening, or starting a meeting.
+- On this repo, `/usr/bin/python3` is the safest Python for native rebuilds because older `node-gyp` versions may fail with newer Python releases.

@@ -14,7 +14,12 @@ export function migrate(db: Database.Database): void {
     appLogger.info("Database migration v1 applied");
   }
 
-  // Future: if (version < 2) { ... db.pragma("user_version = 2"); }
+  if (version < 2) {
+    appLogger.info("Applying database migration v2");
+    db.exec("ALTER TABLE prompt_outputs ADD COLUMN model TEXT");
+    db.pragma("user_version = 2");
+    appLogger.info("Database migration v2 applied");
+  }
 }
 
 export function isEmptyDatabase(db: Database.Database): boolean {

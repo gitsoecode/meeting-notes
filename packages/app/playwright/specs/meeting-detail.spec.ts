@@ -65,6 +65,20 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByRole("heading", { name: "Follow-up", exact: true })).toBeVisible();
   });
 
+  test("analysis sidebar shows model name in prompt metadata", async ({ meetingDetail, page }) => {
+    await meetingDetail.tab("Analysis").click();
+    // Decision Log has model: "qwen3.5:9b" — shown as the raw Ollama model name
+    await expect(page.getByText("qwen3.5:9b").first()).toBeVisible();
+  });
+
+  test("processing step rows display model name", async ({ meetingDetail, page }) => {
+    await meetingDetail.tab("Analysis").click();
+    await meetingDetail.promptSidebarItem("1:1 Follow-up").click();
+    await meetingDetail.runPromptButton().click();
+    // The PipelineStatus step rows should show the raw model name
+    await expect(page.getByText("qwen3.5:9b").first()).toBeVisible();
+  });
+
   test("notes and transcript tabs render meeting content", async ({ meetingDetail, page }) => {
     await meetingDetail.tab("Notes").click();
     await expect(page.getByText("These are the notes I found:")).toBeVisible();

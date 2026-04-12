@@ -49,7 +49,7 @@ test.describe("Meetings List", () => {
 
     await expect(meetingsList.bulkRunModalHeading()).toBeVisible();
     await expect(meetingsList.bulkRunPromptSummary()).toContainText("Summary + Action Items");
-    await expect(meetingsList.bulkRunPromptSummary()).toContainText("Qwen 3.5 9B");
+    await expect(meetingsList.bulkRunPromptSummary()).toContainText("qwen3.5:9b");
     await expect(meetingsList.bulkRunPromptSummary()).toContainText(
       "Default meeting prompt for most meetings."
     );

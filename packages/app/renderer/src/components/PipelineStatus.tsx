@@ -13,6 +13,7 @@ import type {
   JobStatus,
   PipelineProgressEvent,
 } from "../../../shared/ipc";
+import { findModelEntry } from "../../../shared/llm-catalog";
 import { cn } from "../lib/utils";
 import { Button } from "./ui/button";
 import { Card, CardContent } from "./ui/card";
@@ -141,7 +142,9 @@ export function PipelineStatus({
             </div>
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
-              <span>{statusLabel(effectiveStatus)}</span>
+              {effectiveStatus !== "processing" && effectiveStatus !== "running" ? (
+                <span>{statusLabel(effectiveStatus)}</span>
+              ) : null}
               {total > 0 ? <span>{completed}/{total} complete</span> : null}
               {failed > 0 ? <span>{failed} failed</span> : null}
               {currentLabel && !finished ? <span>Current: {currentLabel}</span> : null}
@@ -178,6 +181,9 @@ function StepRow({ section }: { section: PromptOutputStatus }) {
         <div className="text-sm text-[var(--text-primary)]">{section.label}</div>
         <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--text-secondary)]">
           <span>{section.kind === "transcript" ? "Transcript" : "Prompt"}</span>
+          {section.model ? (
+            <span>{findModelEntry(section.model)?.label ?? section.model}</span>
+          ) : null}
           {section.state === "running" && elapsedSec != null ? (
             <span>{elapsedSec}s elapsed</span>
           ) : null}

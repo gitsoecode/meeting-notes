@@ -7,8 +7,8 @@ const SUPPORTED_CLAUDE_MODELS = new Set([
 ]);
 
 const LOCAL_MODEL_ALIASES: Record<string, string> = {
-  "qwen3.5:9b": "qwen3.5",
-  "qwen3.5:latest": "qwen3.5",
+  "qwen3.5": "qwen3.5:9b",
+  "qwen3.5:latest": "qwen3.5:9b",
 };
 
 function normalizeModelId(id: string | null | undefined): string | null {
