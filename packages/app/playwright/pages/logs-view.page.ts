@@ -40,6 +40,10 @@ export class LogsViewPage {
     return this.page.getByText(/daemon · pid|capture · pid/i).first();
   }
 
+  noMatchingLines() {
+    return this.page.getByText("(no matching log lines)");
+  }
+
   heading() {
     return this.page.getByRole("heading", { name: "Activity" }).first();
   }

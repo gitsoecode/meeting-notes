@@ -302,6 +302,26 @@ export async function installMockApi(page: Page) {
     const missingFolders = new Set<string>();
     const missingAttachmentDirs = new Set<string>();
     const failedPromptOutputs: Record<string, string> = {};
+    const depsState = {
+      ffmpeg: "/opt/homebrew/bin/ffmpeg",
+      ffmpegVersion: "7.1-mock",
+      blackhole: "loaded",
+      python: "/usr/bin/python3",
+      pythonVersion: "3.9.6",
+      parakeet: "/Users/test/.meeting-notes/parakeet",
+      ollamaVersion: "0.7.2",
+      brewAvailable: true,
+    } as {
+      ffmpeg: string | null;
+      ffmpegVersion: string | null;
+      blackhole: "missing" | "installed-not-loaded" | "loaded";
+      python: string | null;
+      pythonVersion: string | null;
+      parakeet: string | null;
+      ollamaVersion: string | null;
+      brewAvailable: boolean | null;
+    };
+    const externalActionLog: Array<{ type: string; payload?: unknown }> = [];
 
     const hydrateArray = <T,>(target: T[], source: T[]) => {
       target.splice(0, target.length, ...clone(source));
@@ -330,6 +350,8 @@ export async function installMockApi(page: Page) {
       missingFolders: [...missingFolders],
       missingAttachmentDirs: [...missingAttachmentDirs],
       failedPromptOutputs: clone(failedPromptOutputs),
+      depsState: clone(depsState),
+      externalActionLog: clone(externalActionLog),
     });
     const persistState = () => {
       try {
@@ -363,6 +385,8 @@ export async function installMockApi(page: Page) {
         (parsed.missingAttachmentDirs ?? []).forEach((folder: string) => missingAttachmentDirs.add(folder));
         Object.keys(failedPromptOutputs).forEach((key) => delete failedPromptOutputs[key]);
         Object.assign(failedPromptOutputs, parsed.failedPromptOutputs ?? {});
+        hydrateObject(depsState, parsed.depsState ?? depsState);
+        hydrateArray(externalActionLog, parsed.externalActionLog ?? externalActionLog);
       } catch {}
     };
     const pruneRun = (runFolder: string) => {
@@ -418,6 +442,11 @@ export async function installMockApi(page: Page) {
       appLogEntries.unshift(entry);
       persistState();
       emit("logEntry", clone(entry));
+    };
+    const recordExternalAction = (type: string, payload?: unknown) => {
+      externalActionLog.unshift({ type, payload });
+      if (externalActionLog.length > 20) externalActionLog.length = 20;
+      persistState();
     };
 
     const getRun = (runFolder) => {
@@ -703,6 +732,13 @@ export async function installMockApi(page: Page) {
         delete failedPromptOutputs[`${runFolder}::${promptId}`];
         persistState();
       },
+      setDependencyState(overrides) {
+        Object.assign(depsState, overrides);
+        persistState();
+      },
+      getLastExternalAction() {
+        return clone(externalActionLog[0] ?? null);
+      },
     };
 
     window.api = {
@@ -712,20 +748,26 @@ export async function installMockApi(page: Page) {
         },
         async save(next) {
           Object.assign(config, next);
+          persistState();
         },
         async initProject() {},
         async setDataPath(newPath) {
           config.data_path = newPath;
+          persistState();
           return { from: "/old", to: newPath };
         },
         async setObsidianEnabled(enabled) {
           config.obsidian_integration.enabled = enabled;
+          persistState();
         },
         async setObsidianVault(vaultPath) {
           config.obsidian_integration.vault_path = vaultPath;
           config.obsidian_integration.vault_name = "Mock Vault";
+          persistState();
         },
-        async openDataDirectory() {},
+        async openDataDirectory() {
+          recordExternalAction("open-data-directory", { path: config.data_path });
+        },
         async pickDirectory() {
           return "/Users/test/Documents";
         },
@@ -1192,8 +1234,12 @@ export async function installMockApi(page: Page) {
         async processDroppedMedia(_file, title) {
           return this.processMedia("dropped", title);
         },
-        async openInObsidian() {},
-        async openInFinder() {},
+        async openInObsidian(runFolder, target) {
+          recordExternalAction("open-in-obsidian", { runFolder, target });
+        },
+        async openInFinder(runFolder) {
+          recordExternalAction("open-run-in-finder", { runFolder });
+        },
         async deleteRun(runFolder) {
           pruneRun(runFolder);
         },
@@ -1348,7 +1394,9 @@ export async function installMockApi(page: Page) {
         async getDir() {
           return "/Users/test/.meeting-notes/prompts";
         },
-        async openInFinder() {},
+        async openInFinder(promptId) {
+          recordExternalAction("open-prompt-in-finder", { promptId });
+        },
       },
       secrets: {
         async has(name) {
@@ -1357,6 +1405,7 @@ export async function installMockApi(page: Page) {
         async set(name) {
           if (name === "claude") hasClaude = true;
           if (name === "openai") hasOpenai = true;
+          persistState();
         },
       },
       async setupAsr() {},
@@ -1371,6 +1420,7 @@ export async function installMockApi(page: Page) {
         async setup({ model }) {
           if (!installedLocalModels.includes(model)) installedLocalModels.push(model);
           emit("setupLlmLog", `Pulled ${model}`);
+          persistState();
         },
         async listInstalled() {
           return clone(installedLocalModels);
@@ -1378,6 +1428,7 @@ export async function installMockApi(page: Page) {
         async remove(model) {
           const index = installedLocalModels.indexOf(model);
           if (index !== -1) installedLocalModels.splice(index, 1);
+          persistState();
         },
         async runtime() {
           return {
@@ -1481,26 +1532,34 @@ export async function installMockApi(page: Page) {
       },
       async depsCheck() {
         return {
-          ffmpeg: "/opt/homebrew/bin/ffmpeg",
-          blackhole: "loaded",
-          python: "/usr/bin/python3",
-          parakeet: "/Users/test/.meeting-notes/parakeet",
+          ffmpeg: depsState.ffmpeg,
+          ffmpegVersion: depsState.ffmpegVersion,
+          blackhole: depsState.blackhole,
+          python: depsState.python,
+          pythonVersion: depsState.pythonVersion,
+          parakeet: depsState.parakeet,
           ollama: {
             daemon: true,
             source: "bundled-spawned",
             installedModels: clone(installedLocalModels),
+            version: depsState.ollamaVersion,
           },
         };
       },
       deps: {
         async install(target) {
           emit("depsInstallLog", `Installed ${target}`);
+          if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
+          if (target === "blackhole") depsState.blackhole = "installed-not-loaded";
+          persistState();
           return { ok: true };
         },
         async checkBrew() {
-          return true;
+          return depsState.brewAvailable;
         },
         async restartAudio() {
+          depsState.blackhole = "loaded";
+          persistState();
           return { ok: true };
         },
       },

@@ -28,6 +28,15 @@ test.describe("Activity", () => {
     await expect(page.getByText("Prompt run failed to render preview")).toBeVisible();
   });
 
+  test("follow switch and empty filtered state are functional", async ({ logsView }) => {
+    await expect(logsView.followCheckbox()).toHaveAttribute("aria-checked", "true");
+    await logsView.followCheckbox().click();
+    await expect(logsView.followCheckbox()).toHaveAttribute("aria-checked", "false");
+
+    await logsView.searchInput().fill("definitely-no-match");
+    await expect(logsView.noMatchingLines()).toBeVisible();
+  });
+
   test("only errors toggle works", async ({ logsView, page }) => {
     await logsView.onlyErrorsSwitch().click();
     await expect(page.getByText("Prompt run failed to render preview")).toBeVisible();

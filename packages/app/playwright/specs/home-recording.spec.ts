@@ -82,6 +82,58 @@ test.describe("Home & Recording", () => {
     await expect(page.getByText("Back to meetings")).toBeVisible();
   });
 
+  test("prepare for later opens a draft with working tabs and files actions", async ({
+    recordView,
+    page,
+  }) => {
+    await recordView.prepareForLaterButton().click();
+    await expect(page.getByText("draft").first()).toBeVisible();
+    await expect(recordView.draftTab("Prep")).toBeVisible();
+
+    await recordView.draftTab("Notes").click();
+    await expect(recordView.draftTab("Notes")).toHaveAttribute("data-state", "active");
+
+    await recordView.draftTab("Analysis").click();
+    await expect(recordView.draftTab("Analysis")).toHaveAttribute("data-state", "active");
+
+    await recordView.draftTab("Files").click();
+    await expect(recordView.draftTab("Files")).toHaveAttribute("data-state", "active");
+  });
+
+  test("end meeting dialog cancel keeps recording active", async ({
+    recordView,
+    page,
+  }) => {
+    await recordView.startRecording("Keep Going");
+    await recordView.endMeetingButton().click();
+    await expect(recordView.endMeetingDialogTitle()).toBeVisible();
+    await recordView.keepRecordingButton().click();
+    await expect(recordView.endMeetingDialogTitle()).not.toBeVisible();
+    await expect(recordView.recordingLiveBadge()).toBeVisible();
+    await expect(page.getByRole("button", { name: /End meeting/ })).toBeVisible();
+  });
+
+  test("recording can pause and resume", async ({
+    recordView,
+    page,
+  }) => {
+    await recordView.startRecording("Pause Resume");
+    await recordView.pauseButton().click();
+    await expect(recordView.resumeButton()).toBeVisible();
+    await recordView.resumeButton().click();
+    await expect(recordView.pauseButton()).toBeVisible();
+    await expect(page.getByRole("button", { name: /End meeting/ })).toBeVisible();
+  });
+
+  test("view all meetings button navigates from home", async ({
+    recordView,
+    page,
+  }) => {
+    await recordView.viewAllMeetingsButton().click();
+    await expect(page.locator("header h1")).toContainText("Meetings");
+    await expect(page.getByPlaceholder("Search meetings…")).toBeVisible();
+  });
+
   test("live view shows audio meter, pipeline status, and notes editor", async ({
     recordView,
     page,

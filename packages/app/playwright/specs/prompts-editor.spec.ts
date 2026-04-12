@@ -109,6 +109,33 @@ test.describe("Prompt Library", () => {
     await expect(promptsEditor.runAgainstModalHeading()).not.toBeVisible();
   });
 
+  test("finder action and run-against-meeting actions are functional", async ({
+    app,
+    promptsEditor,
+    page,
+  }) => {
+    await promptsEditor.finderButton().click();
+    await expect
+      .poll(async () => await app.lastExternalAction())
+      .toMatchObject({
+        type: "open-prompt-in-finder",
+        payload: { promptId: "summary" },
+      });
+
+    await promptsEditor.promptSidebarItem("Decision Log").click();
+    await promptsEditor.moreButton().click();
+    await promptsEditor.runAgainstMeetingItem().click();
+    await promptsEditor.runAgainstMeetingSearchInput().fill("weekly");
+    await expect(page.getByText("Weekly planning")).toBeVisible();
+    await expect(page.getByText("Customer call")).toHaveCount(0);
+    await expect(promptsEditor.showAllMeetingsButton()).toHaveCount(0);
+    await promptsEditor.runAgainstMeetingSearchInput().clear();
+    await page.getByRole("button", { name: /Weekly planning/ }).click();
+    await expect(promptsEditor.runAgainstMeetingRunButton()).toBeEnabled();
+    await promptsEditor.runAgainstMeetingRunButton().click();
+    await expect(promptsEditor.runAgainstModalHeading()).not.toBeVisible();
+  });
+
   test("new prompt creation", async ({ promptsEditor, page }) => {
     await promptsEditor.newPromptButton().click();
     const dialog = promptsEditor.newPromptDialog();
@@ -128,6 +155,13 @@ test.describe("Prompt Library", () => {
     await expect(page.getByText("Follow-up email")).toBeVisible();
   });
 
+  test("new prompt modal can be cancelled", async ({ promptsEditor }) => {
+    await promptsEditor.newPromptButton().click();
+    await expect(promptsEditor.newPromptDialog()).toBeVisible();
+    await promptsEditor.runAgainstModalCancel().click();
+    await expect(promptsEditor.newPromptDialog()).not.toBeVisible();
+  });
+
   test("details accordion and reset to default are available", async ({
     promptsEditor,
   }) => {
@@ -144,6 +178,16 @@ test.describe("Prompt Library", () => {
     await promptsEditor.resetToDefaultItem().click();
     await page.getByRole("button", { name: "Reset prompt" }).click();
     await expect(promptsEditor.titleInput()).toHaveValue("Summary + Action Items");
+  });
+
+  test("reset to default can be cancelled", async ({
+    promptsEditor,
+    page,
+  }) => {
+    await promptsEditor.moreButton().click();
+    await promptsEditor.resetToDefaultItem().click();
+    await page.getByRole("button", { name: "Keep current version" }).click();
+    await expect(page.getByRole("button", { name: "Reset prompt" })).toHaveCount(0);
   });
 
   test("dirty state is clearly marked after editing", async ({

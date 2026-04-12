@@ -13,6 +13,20 @@ test.describe("Settings", () => {
     });
   });
 
+  test("all settings tabs are functional", async ({ settings }) => {
+    await settings.openTab("Models");
+    await expect(settings.defaultModelCombobox()).toBeVisible();
+
+    await settings.openTab("Transcription");
+    await expect(settings.micDeviceSelect()).toBeVisible();
+
+    await settings.openTab("Storage");
+    await expect(settings.dataPathInput()).toBeVisible();
+
+    await settings.openTab("General");
+    await expect(settings.dependenciesCard()).toBeVisible();
+  });
+
   test("Obsidian toggle shows and hides vault path", async ({ settings }) => {
     await settings.openTab("Storage");
     // Initially disabled in mock
@@ -71,6 +85,28 @@ test.describe("Settings", () => {
     await expect(keyInput).toHaveValue("");
   });
 
+  test("OpenAI API key save flow", async ({ settings }) => {
+    await settings.openTab("Models");
+    const keyInput = settings.openaiKeyInput();
+    const saveButton = settings.openaiKeySaveButton();
+
+    await expect(saveButton).toBeDisabled();
+    await keyInput.fill("sk-openai-test-key-123");
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await expect(keyInput).toHaveValue("");
+  });
+
+  test("default model selection persists across reload", async ({ settings, page }) => {
+    await settings.openTab("Models");
+    await settings.defaultModelCombobox().click();
+    await page.getByRole("option", { name: /Sonnet 4\.6/i }).first().click();
+    await expect(settings.defaultModelCombobox()).toContainText(/Sonnet/i);
+    await page.reload();
+    await settings.openTab("Models");
+    await expect(settings.defaultModelCombobox()).toContainText(/Sonnet/i);
+  });
+
   test("installed local models list with Remove button", async ({
     page,
   }) => {
@@ -98,6 +134,21 @@ test.describe("Settings", () => {
     await closeButton.click();
   });
 
+  test("remove local model can be cancelled and confirmed", async ({
+    settings,
+    page,
+  }) => {
+    await settings.openTab("Models");
+    await settings.modelRemoveButton("qwen3.5:9b").click();
+    await expect(settings.removeModelConfirmButton()).toBeVisible();
+    await settings.removeModelCancelButton().click();
+    await expect(page.getByText("qwen3.5:9b")).toBeVisible();
+
+    await settings.modelRemoveButton("qwen3.5:9b").click();
+    await settings.removeModelConfirmButton().click();
+    await expect(page.getByText("qwen3.5:9b")).toHaveCount(0);
+  });
+
   test("dependencies card shows all rows", async ({ settings, page }) => {
     await settings.openTab("General");
     await expect(page.getByText("ffmpeg", { exact: true })).toBeVisible();
@@ -112,6 +163,51 @@ test.describe("Settings", () => {
     await expect(page.getByText("Toggle recording")).toBeVisible();
     // The shortcut recorder should show current binding
     await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
+  });
+
+  test("storage actions update paths and record external directory opens", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    await settings.openTab("Storage");
+    await settings.changeDataDirButton().click();
+    await page.getByRole("button", { name: "Move files" }).click();
+    await expect(settings.dataPathInput()).toHaveValue("/Users/test/Documents");
+
+    await settings.openDataDirButton().click();
+    await expect
+      .poll(async () => await app.lastExternalAction())
+      .toMatchObject({
+        type: "open-data-directory",
+        payload: { path: "/Users/test/Documents" },
+      });
+  });
+
+  test("Obsidian vault picker path is functional", async ({ settings }) => {
+    await settings.openTab("Storage");
+    await settings.obsidianSwitch().click();
+    await expect(settings.vaultPathInput()).toBeVisible();
+    await settings.page.getByRole("button", { name: "Pick…" }).click();
+    await expect(settings.vaultPathInput()).toHaveValue("/Users/test/Documents");
+  });
+
+  test("Parakeet setup modal can run and degraded dependency state renders", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    await app.setDependencyState({ blackhole: "missing", ffmpeg: null });
+    await page.reload();
+    await settings.openTab("General");
+    await expect(settings.dependenciesCard().getByText(/not found/i).first()).toBeVisible();
+
+    await settings.openTab("Transcription");
+    await settings.parakeetInstallButton().click();
+    await expect(page.getByRole("heading", { name: /Install Parakeet|Check \/ repair Parakeet/ })).toBeVisible();
+    await settings.runParakeetSetupButton().click();
+    await expect(page.getByText(/Parakeet verified|Parakeet installed/).first()).toBeVisible();
+    await settings.setupParakeetCloseButton().click();
   });
 
   test("settings page can scroll past shortcuts to system health", async ({ page, settings }) => {

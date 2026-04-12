@@ -33,6 +33,14 @@ test.describe("Meetings List", () => {
     });
   });
 
+  test("select all toggles visible meetings and shows both bulk actions", async ({
+    meetingsList,
+  }) => {
+    await meetingsList.selectAllCheckbox().click();
+    await expect(meetingsList.bulkRunButton()).toBeVisible();
+    await expect(meetingsList.bulkDeleteButton()).toBeVisible();
+  });
+
   test("bulk run modal flow: select prompt, run, done", async ({
     meetingsList,
   }) => {
@@ -86,6 +94,28 @@ test.describe("Meetings List", () => {
     await expect(
       page.getByRole("tab", { name: "Analysis" })
     ).toBeVisible();
+  });
+
+  test("bulk delete cancel keeps selected meetings visible", async ({
+    meetingsList,
+    page,
+  }) => {
+    await meetingsList.meetingCheckbox("Weekly planning").click();
+    await meetingsList.bulkDeleteButton().click();
+    await meetingsList.cancelDeleteButton().click();
+    await expect(meetingsList.meetingRow("Weekly planning")).toBeVisible();
+    await expect(meetingsList.bulkDeleteButton()).toBeVisible();
+  });
+
+  test("bulk delete can clear the list into its empty state", async ({
+    meetingsList,
+    page,
+  }) => {
+    await meetingsList.selectAllCheckbox().click();
+    await meetingsList.bulkDeleteButton().click();
+    await meetingsList.confirmDeleteButton().click();
+    await expect(meetingsList.emptyState()).toBeVisible();
+    await expect(page.getByText("Start a recording from Home, or drop a file here to import.")).toBeVisible();
   });
 
   test("status badges show correct values", async ({ meetingsList, page }) => {

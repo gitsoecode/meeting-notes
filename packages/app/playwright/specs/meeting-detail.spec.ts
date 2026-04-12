@@ -19,6 +19,34 @@ test.describe("Meeting Workspace", () => {
     await expect(meetingDetail.tab("Files")).toBeVisible();
   });
 
+  test("all tabs are functional and switch content", async ({ meetingDetail, page }) => {
+    await meetingDetail.tab("Prep").click();
+    await expect(page.getByText("Review backlog")).toBeVisible();
+
+    await meetingDetail.tab("Notes").click();
+    await expect(page.getByText("These are the notes I found:")).toBeVisible();
+
+    await meetingDetail.tab("Summary").click();
+    await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+
+    await meetingDetail.tab("Analysis").click();
+    await expect(meetingDetail.promptSidebarItem("Decision Log")).toBeVisible();
+    await meetingDetail.promptSidebarItem("Decision Log").click();
+    await expect(page.getByRole("heading", { name: "Decisions" })).toBeVisible();
+
+    await meetingDetail.tab("Transcript").click();
+    await expect(page.getByText("Welcome everyone.")).toBeVisible();
+
+    await meetingDetail.tab("Recording").click();
+    await expect(page.getByText("audio/mic.wav")).toBeVisible();
+
+    await meetingDetail.tab("Files").click();
+    await expect(page.getByText("Attached files (1)")).toBeVisible();
+
+    await meetingDetail.tab("Metadata").click();
+    await expect(meetingDetail.metadataHeading()).toBeVisible();
+  });
+
   test("summary tab shows output and can refresh", async ({ meetingDetail, page }) => {
     await meetingDetail.tab("Summary").click();
     await expect(page.getByText("Highlights")).toBeVisible();
@@ -45,6 +73,22 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByText("Welcome everyone.")).toBeVisible();
   });
 
+  test("metadata description can be edited, cancelled, and saved", async ({
+    meetingDetail,
+    page,
+  }) => {
+    await meetingDetail.tab("Metadata").click();
+    await meetingDetail.metadataDescriptionText().click();
+    await meetingDetail.metadataDescriptionTextarea().fill("Changed description");
+    await meetingDetail.metadataCancelButton().click();
+    await expect(page.getByText("Changed description")).toHaveCount(0);
+
+    await meetingDetail.metadataDescriptionText().click();
+    await meetingDetail.metadataDescriptionTextarea().fill("Changed description");
+    await meetingDetail.metadataSaveButton().click();
+    await expect(page.getByText("Changed description").first()).toBeVisible();
+  });
+
   test("recording and files tabs show stored artifacts", async ({ meetingDetail, page }) => {
     await meetingDetail.tab("Recording").click();
     await expect(page.getByText("audio/mic.wav")).toBeVisible();
@@ -53,6 +97,26 @@ test.describe("Meeting Workspace", () => {
     await meetingDetail.tab("Files").click();
     await expect(page.getByText("Attached files (1)")).toBeVisible();
     await expect(page.getByText("agenda.pdf")).toBeVisible();
+  });
+
+  test("recording delete dialog cancels cleanly", async ({ meetingDetail, page }) => {
+    await meetingDetail.tab("Recording").click();
+    await meetingDetail.deleteRecordingButton().click();
+    await expect(meetingDetail.deleteRecordingDialogTitle()).toBeVisible();
+    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(meetingDetail.deleteRecordingDialogTitle()).not.toBeVisible();
+    await expect(page.getByText("audio/mic.wav")).toBeVisible();
+  });
+
+  test("open folder action calls the external handler", async ({ app, meetingDetail }) => {
+    await meetingDetail.moreActionsButton().click();
+    await meetingDetail.openFolderButton().click();
+    await expect
+      .poll(async () => await app.lastExternalAction())
+      .toMatchObject({
+        type: "open-run-in-finder",
+        payload: { runFolder: "/runs/weekly-planning" },
+      });
   });
 
   test("can reopen a complete meeting as a draft and continue recording", async ({

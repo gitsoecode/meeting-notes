@@ -72,6 +72,17 @@ test.describe("Setup Wizard", () => {
     );
   });
 
+  test("pick buttons populate vault and data paths", async ({ wizard }) => {
+    await wizard.getStartedButton().click();
+    await wizard.obsidianToggle().click();
+    await wizard.pickVaultButton().click();
+    await expect(wizard.vaultPathInput()).toHaveValue("/Users/test/Documents");
+
+    await wizard.nextButton().click();
+    await wizard.pickDataDirButton().click();
+    await expect(wizard.dataPathInput()).toHaveValue("/Users/test/Documents");
+  });
+
   test("back navigation works at each step", async ({ wizard }) => {
     await wizard.getStartedButton().click();
     await expect(wizard.obsidianHeading()).toBeVisible();
@@ -121,6 +132,41 @@ test.describe("Setup Wizard", () => {
       path: "test-results/screenshots/wizard-step3-local-llm.png",
       fullPage: true,
     });
+  });
+
+  test("provider choices and dependency actions are functional under degraded state", async ({
+    wizard,
+    page,
+  }) => {
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setDependencyState({
+        ffmpeg: null,
+        blackhole: "missing",
+      });
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+
+    await wizard.asrProviderSelect().click();
+    await page.getByRole("option", { name: /OpenAI \(cloud\)/ }).click();
+    await expect(wizard.nextButton()).toBeDisabled();
+
+    await wizard.localLlmToggle().click();
+    await page.getByRole("option", { name: /OpenAI ChatGPT/ }).click();
+    await expect(wizard.nextButton()).toBeDisabled();
+
+    await wizard.apiKeyInput().fill("sk-openai-test-key");
+    await expect(wizard.nextButton()).toBeEnabled();
+    await wizard.nextButton().click();
+
+    await expect(wizard.depRowByName("ffmpeg")).toBeVisible();
+    await expect(wizard.installButton("Install via Homebrew")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Restart audio" })).toHaveCount(0);
+    await wizard.installButton("Install via Homebrew").click();
+    await wizard.skipBlackholeCheckbox().click();
+    await expect(wizard.finishButton()).toBeEnabled();
   });
 
   test("progress dots advance correctly", async ({ wizard }) => {

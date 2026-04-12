@@ -17,8 +17,20 @@ export class RecordViewPage {
     return this.main.getByPlaceholder("What's this meeting about?");
   }
 
+  prepareForLaterButton() {
+    return this.main.getByRole("button", { name: /Prepare for later/ });
+  }
+
   startButton() {
     return this.main.getByRole("button", { name: /Start recording/ });
+  }
+
+  pauseButton() {
+    return this.main.getByRole("button", { name: /Pause/ });
+  }
+
+  resumeButton() {
+    return this.main.getByRole("button", { name: /Resume/ });
   }
 
   endMeetingButton() {
@@ -77,6 +89,10 @@ export class RecordViewPage {
     return this.main.getByRole("button", { name: /import a recording/i });
   }
 
+  viewAllMeetingsButton() {
+    return this.main.getByRole("button", { name: /View all meetings/i });
+  }
+
   recordingLiveBadge() {
     return this.main.getByText(/Recording · \d+:\d{2}:\d{2}/).first();
   }
@@ -99,6 +115,14 @@ export class RecordViewPage {
 
   pipelineStatusCard() {
     return this.main.getByText("Coming up");
+  }
+
+  draftTab(name: "Prep" | "Notes" | "Analysis" | "Files") {
+    return this.main.locator('[role="tab"]:visible').filter({ hasText: name }).first();
+  }
+
+  addAttachmentButton() {
+    return this.page.getByRole("button", { name: /Add file/ });
   }
 
   liveNotesEditor() {

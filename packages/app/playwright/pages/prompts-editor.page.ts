@@ -120,4 +120,20 @@ export class PromptsEditorPage {
   runAgainstModalCancel() {
     return this.page.getByRole("dialog").getByRole("button", { name: "Cancel" });
   }
+
+  finderButton() {
+    return this.main.getByRole("button", { name: "Open in Finder" });
+  }
+
+  runAgainstMeetingSearchInput() {
+    return this.page.getByRole("dialog").getByPlaceholder("Search meetings");
+  }
+
+  showAllMeetingsButton() {
+    return this.page.getByRole("dialog").getByRole("button", { name: /Show all|Show fewer/ });
+  }
+
+  runAgainstMeetingRunButton() {
+    return this.page.getByRole("dialog").getByRole("button", { name: /Run on/ });
+  }
 }

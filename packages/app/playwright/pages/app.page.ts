@@ -180,6 +180,18 @@ export class AppPage {
     );
   }
 
+  async setDependencyState(overrides: Record<string, unknown>) {
+    await this.page.evaluate((nextOverrides) => {
+      (window as any).__MEETING_NOTES_TEST.setDependencyState(nextOverrides);
+    }, overrides);
+  }
+
+  async lastExternalAction() {
+    return this.page.evaluate(() => {
+      return (window as any).__MEETING_NOTES_TEST.getLastExternalAction();
+    });
+  }
+
   async countInteractiveElements(scope?: Locator) {
     const root = scope ?? this.page.locator("main");
     const buttons = await root.getByRole("button").count();

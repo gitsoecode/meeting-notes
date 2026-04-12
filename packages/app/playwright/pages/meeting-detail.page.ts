@@ -23,7 +23,7 @@ export class MeetingDetailPage {
 
   // Tabs
   tab(name: "Metadata" | "Prep" | "Notes" | "Summary" | "Analysis" | "Transcript" | "Recording" | "Files") {
-    return this.page.getByRole("tab", { name });
+    return this.main.locator('[role="tab"]:visible').filter({ hasText: name }).first();
   }
 
   tabsList() {
@@ -169,6 +169,25 @@ export class MeetingDetailPage {
     return this.main.getByRole("heading", { name: "Meeting metadata" });
   }
 
+  metadataDescriptionText() {
+    return this.main
+      .getByText("Description", { exact: true })
+      .locator("xpath=following-sibling::div[1]")
+      .first();
+  }
+
+  metadataDescriptionTextarea() {
+    return this.main.locator('textarea[placeholder="What was this meeting about?"]').first();
+  }
+
+  metadataSaveButton() {
+    return this.main.getByRole("button", { name: /^Save$/ }).first();
+  }
+
+  metadataCancelButton() {
+    return this.main.getByRole("button", { name: "Cancel" }).first();
+  }
+
   continueRecordingButton() {
     return this.main.getByRole("button", { name: "Continue recording" });
   }
@@ -179,6 +198,18 @@ export class MeetingDetailPage {
 
   friendlyError() {
     return this.main.getByText("This meeting no longer exists on disk.");
+  }
+
+  focusRecordingButton() {
+    return this.main.getByRole("button", { name: /Focus on recording/i });
+  }
+
+  fullWorkspaceButton() {
+    return this.main.getByRole("button", { name: /View full workspace/i });
+  }
+
+  prepLockButton() {
+    return this.main.getByRole("button", { name: /Unlock editing|Lock editing/ }).first();
   }
 
   async waitForReady() {

@@ -17,6 +17,31 @@ For this repo, that means combining:
 - Playwright coverage for real UI flows and route transitions
 - manual smoke verification for native desktop behavior that mocks cannot fully prove
 
+## Action Completeness Standard
+
+For UI work, do not stop at "the page renders" or one happy path.
+
+The default bar is:
+
+- every primary route has a route-ready assertion
+- every visible, meaningful user action on the touched page is exercised
+- every modal has both confirm and cancel coverage
+- every visible tab, menu action, and bulk action on the touched page is exercised
+- every stateful action has at least one persistence, reload, reopen, or state-transition assertion
+- every run-scoped or failure-prone action has at least one resilience-path test
+
+"Visible, meaningful user action" includes:
+
+- primary and secondary buttons
+- row actions and bulk actions
+- tabs and segmented controls
+- dropdown and combobox selections
+- menu items
+- modal confirm and cancel buttons
+- retry, reopen, delete, and continue flows
+
+When a route has multiple valid UI variants, assert the functional outcome rather than anchoring to brittle incidental copy.
+
 ## Default Test Sequence
 
 For most app changes, run tests in this order:
@@ -214,6 +239,35 @@ Rules:
 - avoid coupling tests to mutable marketing copy unless the copy is the thing under test
 - add route-ready helpers when new screens or tabs are introduced
 
+## Stabilizing Playwright Assertions
+
+When a Playwright test fails, first ask whether the selector is asserting the real contract or just a convenient detail.
+
+Prefer:
+
+- page-object helpers over raw selectors in specs
+- route-scoped, card-scoped, row-scoped, or dialog-scoped assertions over global `getByText(...)`
+- visible controls over duplicated hidden or off-route controls
+- state assertions like active tab, selected row, modal closed, route changed, or item added over brittle copy checks
+- exact headings only when the heading itself is the contract
+
+Avoid:
+
+- broad global text lookups when the same text can appear in multiple places
+- stale marketing or helper copy as the primary assertion
+- assuming a specific empty-state sentence when the actionable control is the real contract
+- assuming one default tab or variant unless the product guarantees it
+
+When a user action can land in more than one valid UI state, assert the invariant that matters:
+
+- the right tab is active
+- the modal closed
+- the item exists
+- the route changed
+- the button became enabled or disabled
+- the workspace stayed mounted
+- the error degraded gracefully
+
 ## Authoring New Tests
 
 When adding a new feature, write tests in this order:
@@ -320,10 +374,11 @@ When touching app flows:
 
 1. Read this file.
 2. Read `docs/smoke-flow.md` if the change affects recording, import, settings, prompts, or quit safety.
-3. Update page objects and `mock-api.ts` together with the app behavior.
-4. Run the smallest targeted Playwright slice that covers the changed flow.
-5. Run the full app and repo gates before closing the task.
-6. If the feature is stateful or run-scoped, add a resilience test before considering the work complete.
+3. Inventory the visible actions on the touched page or flow.
+4. Update page objects and `mock-api.ts` together with the app behavior.
+5. Run the smallest targeted Playwright slice that covers the changed flow.
+6. Run the full app and repo gates before closing the task.
+7. If the feature is stateful or run-scoped, add a resilience test before considering the work complete.
 
 ## Files Most Future Test Work Will Touch
 

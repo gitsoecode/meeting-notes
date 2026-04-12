@@ -46,7 +46,7 @@ export class SettingsPage {
   }
 
   openDataDirButton() {
-    return this.page.getByRole("button").filter({ has: this.page.locator("svg.lucide-folder-open") }).first();
+    return this.card("Data Storage").getByRole("button").nth(1);
   }
 
   // Audio card
@@ -65,7 +65,7 @@ export class SettingsPage {
 
   parakeetInstallButton() {
     return this.page.getByRole("button", {
-      name: "Install / reinstall Parakeet",
+      name: /Install Parakeet|Check \/ repair/,
     });
   }
 
@@ -82,6 +82,18 @@ export class SettingsPage {
     return this.card("AI Provider").getByRole("button", { name: "Save" }).first();
   }
 
+  openaiKeyInput() {
+    return this.card("AI Provider").getByPlaceholder(/paste key|••••• stored/).nth(1);
+  }
+
+  openaiKeySaveButton() {
+    return this.card("AI Provider").getByRole("button", { name: "Save" }).nth(1);
+  }
+
+  defaultModelCombobox() {
+    return this.card("AI Provider").getByRole("combobox").first();
+  }
+
   // Local models card
   installedModelsList() {
     return this.card("Local Models").getByText("Installed models");
@@ -92,6 +104,14 @@ export class SettingsPage {
       .locator("div")
       .filter({ has: this.page.getByText(modelName, { exact: true }) })
       .getByRole("button", { name: "Remove" });
+  }
+
+  removeModelConfirmButton() {
+    return this.page.getByRole("button", { name: "Remove model" });
+  }
+
+  removeModelCancelButton() {
+    return this.page.getByRole("button", { name: "Keep model" });
   }
 
   pullModelInput() {
@@ -106,6 +126,10 @@ export class SettingsPage {
     return this.card("Local Models").getByRole("button", { name: "Pull" });
   }
 
+  pullModelCloseButton() {
+    return this.page.getByRole("dialog").getByRole("button", { name: "Close" });
+  }
+
   // Shortcuts card
   shortcutRecorder() {
     return this.card("Keyboard Shortcuts").getByText("Toggle recording").locator("..").locator("..");
@@ -116,8 +140,12 @@ export class SettingsPage {
     return this.card("System Health");
   }
 
-  depRefreshButton() {
-    return this.page.getByRole("button", { name: "Refresh" }).last();
+  runParakeetSetupButton() {
+    return this.page.getByRole("dialog").getByRole("button", { name: /Run setup|Install/ });
+  }
+
+  setupParakeetCloseButton() {
+    return this.page.getByRole("dialog").getByRole("button", { name: "Close" }).first();
   }
 
   depRow(name: string) {

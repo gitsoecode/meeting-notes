@@ -29,6 +29,10 @@ export class MeetingsListPage {
     return this.main.getByRole("button", { name: /Import meeting/ });
   }
 
+  selectAllCheckbox() {
+    return this.main.getByRole("checkbox", { name: "Select all" });
+  }
+
   bulkRunButton() {
     return this.main.getByRole("button", { name: /Run prompt on \d+/ });
   }
@@ -80,6 +84,10 @@ export class MeetingsListPage {
 
   confirmDeleteButton() {
     return this.page.getByRole("button", { name: /^Delete$/ });
+  }
+
+  cancelDeleteButton() {
+    return this.page.getByRole("button", { name: "Cancel" });
   }
 
   async waitForReady() {

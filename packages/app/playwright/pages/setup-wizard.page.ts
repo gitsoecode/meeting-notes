@@ -83,6 +83,10 @@ export class SetupWizardPage {
     return this.page.getByPlaceholder("/Users/you/Documents/Meeting Notes");
   }
 
+  pickDataDirButton() {
+    return this.page.getByRole("button", { name: "Pick…" }).last();
+  }
+
   // Step 3: Transcription
   asrProviderSelect() {
     return this.page.getByRole("combobox").first();
@@ -103,5 +107,13 @@ export class SetupWizardPage {
 
   skipBlackholeCheckbox() {
     return this.page.getByText("Skip — I don't need to capture");
+  }
+
+  recheckButton() {
+    return this.page.getByRole("button", { name: "Re-check" });
+  }
+
+  installButton(name: string) {
+    return this.page.getByRole("button", { name }).first();
   }
 }

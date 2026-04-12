@@ -35,6 +35,10 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
   2. targeted Playwright specs for the changed area
   3. `npm run test:e2e --workspace @meeting-notes/app`
   4. `npm test`
+- For UI changes, the default testing bar is action completeness, not route render:
+  - cover visible buttons, menus, tabs, dropdowns, row actions, bulk actions, and modal confirm/cancel paths on affected pages
+  - prefer page-object and semantic assertions over brittle global text checks
+  - if a page is stateful or run-scoped, add at least one resilience-path test
 - Keep Playwright’s `mock-api.ts`, shared fixtures, and page objects aligned with real app behavior. If a feature changes route behavior, IPC semantics, or meeting-state transitions, update the test harness in the same task.
 - Add or update resilience coverage for run-scoped features that can encounter stale, missing, partial, or interrupted state.
 - Prefer small shared helpers over growing `packages/app/main/ipc.ts` with more business logic.
