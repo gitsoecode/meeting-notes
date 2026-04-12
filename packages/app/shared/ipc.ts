@@ -591,6 +591,7 @@ export interface MeetingNotesApi {
     pipelineProgress: (cb: (event: PipelineProgressEvent) => void) => () => void;
     setupAsrLog: (cb: (line: string) => void) => () => void;
     setupLlmLog: (cb: (line: string) => void) => () => void;
+    setupLlmProgress: (cb: (progress: { pct: number; completed: number; total: number }) => void) => () => void;
     depsInstallLog: (cb: (line: string) => void) => () => void;
     appAction: (cb: (event: AppActionEvent) => void) => () => void;
     jobUpdate: (cb: (job: JobSummary) => void) => () => void;

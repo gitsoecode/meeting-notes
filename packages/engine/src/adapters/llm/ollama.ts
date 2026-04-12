@@ -120,12 +120,23 @@ export async function listRunningOllamaModels(
  * Stream a model pull, forwarding human-readable status lines to onLog.
  * Resolves when the pull finishes; rejects on any chunk-level error.
  */
+export interface PullProgress {
+  pct: number;
+  completed: number;
+  total: number;
+}
+
 export async function pullOllamaModel(
   model: string,
-  opts: { baseUrl?: string; onLog?: (line: string) => void } = {}
+  opts: {
+    baseUrl?: string;
+    onLog?: (line: string) => void;
+    onProgress?: (progress: PullProgress) => void;
+  } = {}
 ): Promise<void> {
   const baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, "");
   const onLog = opts.onLog;
+  const onProgress = opts.onProgress;
   const res = await fetch(`${baseUrl}/api/pull`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -139,6 +150,7 @@ export async function pullOllamaModel(
   const decoder = new TextDecoder();
   let buf = "";
   let lastStatus = "";
+  let lastPct = -1;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -158,10 +170,11 @@ export async function pullOllamaModel(
       if (chunk.error) {
         throw new Error(`Ollama pull failed: ${chunk.error}`);
       }
-      // Compress the firehose: only emit when status changes, plus a single
-      // percent line per status if size info is present.
+      // Compress the firehose: only emit when status changes, plus a
+      // throttled percent line per 1% increment.
       if (chunk.status && chunk.status !== lastStatus) {
         lastStatus = chunk.status;
+        lastPct = -1;
         onLog?.(chunk.status);
       }
       if (
@@ -170,7 +183,11 @@ export async function pullOllamaModel(
         chunk.completed != null
       ) {
         const pct = Math.floor((chunk.completed / chunk.total) * 100);
-        onLog?.(`  ${pct}% (${formatBytes(chunk.completed)}/${formatBytes(chunk.total)})`);
+        if (pct !== lastPct) {
+          lastPct = pct;
+          onLog?.(`  ${pct}% (${formatBytes(chunk.completed)}/${formatBytes(chunk.total)})`);
+          onProgress?.({ pct, completed: chunk.completed, total: chunk.total });
+        }
       }
     }
   }

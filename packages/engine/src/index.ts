@@ -91,6 +91,7 @@ export { openInObsidian } from "./core/obsidian.js";
 export { setupAsr } from "./core/setup-asr.js";
 
 export { setupLlm, checkOllama, normalizeLocalModelId, type SetupLlmOptions } from "./core/setup-llm.js";
+export type { PullProgress } from "./adapters/llm/ollama.js";
 
 export { moveDataDirectory } from "./core/data-path.js";
 

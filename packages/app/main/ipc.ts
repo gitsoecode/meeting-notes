@@ -1482,6 +1482,7 @@ export function registerIpcHandlers(): void {
         baseUrl: state.baseUrl,
         force: opts.force,
         onLog: (line) => broadcastToAll("setup-llm:log", line),
+        onProgress: (p) => broadcastToAll("setup-llm:progress", p),
       });
     }
   );

@@ -175,6 +175,8 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     filename: "transcript.md",
     kind: "transcript",
   };
+  const defaultModel =
+    config.llm_provider === "ollama" ? config.ollama.model : (config.llm_provider === "openai" ? config.openai.model : config.claude.model);
   const hasExplicitPromptSelection = onlyIds !== undefined;
 
   updateRunStatus(runFolder, "processing", undefined, store);
@@ -192,7 +194,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
         promptOutputId: prompt.id,
         label: prompt.label,
         filename: prompt.filename,
-        model: prompt.model ?? undefined,
+        model: prompt.model ?? defaultModel,
         kind: "prompt" as const,
       })),
     ],
@@ -273,8 +275,6 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   // touch both Claude and Ollama. We only require the Anthropic key when
   // a Claude model is actually selected somewhere — fully-local users
   // should never be told to set a key they don't need.
-  const defaultModel =
-    config.llm_provider === "ollama" ? config.ollama.model : (config.llm_provider === "openai" ? config.openai.model : config.claude.model);
   const claudeKey = await getSecret("claude");
   const openaiKey = await getSecret("openai");
   const claudeCache: Record<string, ClaudeProvider> = {};

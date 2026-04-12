@@ -767,6 +767,13 @@ export function Settings({ config, onChange }: SettingsProps) {
   );
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
 function PullLocalModelModal({
   model,
   onClose,
@@ -778,9 +785,23 @@ function PullLocalModelModal({
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ pct: number; completed: number; total: number } | null>(null);
 
   useEffect(() => {
-    const unsub = api.on.setupLlmLog((line) => setLog((prev) => [...prev, line]));
+    const unsub = api.on.setupLlmLog((line) =>
+      setLog((prev) => {
+        // Replace the last percentage line in-place instead of appending
+        if (/^\s+\d+%/.test(line) && prev.length > 0 && /^\s+\d+%/.test(prev[prev.length - 1])) {
+          return [...prev.slice(0, -1), line];
+        }
+        return [...prev, line];
+      })
+    );
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    const unsub = api.on.setupLlmProgress((p) => setProgress(p));
     return () => unsub();
   }, []);
 
@@ -789,25 +810,43 @@ function PullLocalModelModal({
     setRunning(true);
     setLog([]);
     setError(null);
+    setProgress(null);
     api.llm
       .setup({ model })
       .then(() => { if (!cancelled) setDone(true); })
       .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
-      .finally(() => { if (!cancelled) setRunning(false); });
+      .finally(() => { if (!cancelled) { setRunning(false); setProgress(null); } });
     return () => { cancelled = true; };
   }, [model]);
 
   return (
-    <Dialog open onOpenChange={(open) => !open && !running && onClose()}>
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Pulling {model}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2">
+            {running && <Spinner className="size-4" />}
+            {done ? `Pulled ${model}` : `Pulling ${model}`}
+          </DialogTitle>
           <DialogDescription>
             Downloads into <code>~/.ollama/models</code>.
+            {running && " Download continues in the background if you close this dialog."}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          <div className="max-h-60 overflow-auto rounded-md border border-[var(--border-default)] bg-white p-3 font-mono text-xs text-[var(--text-secondary)]">
+          {progress && running && (
+            <div className="space-y-1.5">
+              <div className="h-2 w-full overflow-hidden rounded-full bg-[var(--border-default)]">
+                <div
+                  className="h-2 rounded-full bg-[var(--brand)] transition-[width] duration-300 ease-out"
+                  style={{ width: `${progress.pct}%` }}
+                />
+              </div>
+              <p className="text-xs text-[var(--text-secondary)]">
+                {progress.pct}% &mdash; {formatBytes(progress.completed)} / {formatBytes(progress.total)}
+              </p>
+            </div>
+          )}
+          <div className="max-h-40 overflow-auto rounded-md border border-[var(--border-default)] bg-white p-3 font-mono text-xs text-[var(--text-secondary)]">
             {log.length > 0 ? (
               <pre className="whitespace-pre-wrap">{log.join("\n")}</pre>
             ) : running ? "Waiting for progress…" : "No output."}
@@ -824,7 +863,9 @@ function PullLocalModelModal({
           )}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose} disabled={running}>Close</Button>
+          <Button variant="secondary" onClick={onClose}>
+            {running ? "Close (continues in background)" : "Close"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

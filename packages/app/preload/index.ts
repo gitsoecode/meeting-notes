@@ -177,6 +177,11 @@ const api: MeetingNotesApi = {
       ipcRenderer.on("setup-llm:log", handler);
       return () => ipcRenderer.removeListener("setup-llm:log", handler);
     },
+    setupLlmProgress: (cb: (progress: { pct: number; completed: number; total: number }) => void) => {
+      const handler = (_e: unknown, progress: { pct: number; completed: number; total: number }) => cb(progress);
+      ipcRenderer.on("setup-llm:progress", handler);
+      return () => ipcRenderer.removeListener("setup-llm:progress", handler);
+    },
     depsInstallLog: (cb: (line: string) => void) => {
       const handler = (_e: unknown, line: string) => cb(line);
       ipcRenderer.on("deps-install:log", handler);

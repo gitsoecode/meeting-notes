@@ -8,6 +8,7 @@ export async function installMockApi(page: Page) {
       pipelineProgress: new Set(),
       setupAsrLog: new Set(),
       setupLlmLog: new Set(),
+      setupLlmProgress: new Set(),
       depsInstallLog: new Set(),
       appAction: new Set(),
       jobUpdate: new Set(),
@@ -1584,6 +1585,9 @@ export async function installMockApi(page: Page) {
         },
         setupLlmLog(cb) {
           return subscribe("setupLlmLog", cb);
+        },
+        setupLlmProgress(cb) {
+          return subscribe("setupLlmProgress", cb);
         },
         depsInstallLog(cb) {
           return subscribe("depsInstallLog", cb);

@@ -1,4 +1,4 @@
-import { pingOllama, pullOllamaModel, listOllamaModels } from "../adapters/llm/ollama.js";
+import { pingOllama, pullOllamaModel, listOllamaModels, type PullProgress } from "../adapters/llm/ollama.js";
 
 export interface SetupLlmOptions {
   model: string;
@@ -6,6 +6,7 @@ export interface SetupLlmOptions {
   /** Re-pull even if the tag already exists. */
   force?: boolean;
   onLog?: (line: string) => void;
+  onProgress?: (progress: PullProgress) => void;
 }
 
 const LOCAL_MODEL_ALIASES: Record<string, string> = {
@@ -61,7 +62,7 @@ export async function setupLlm(opts: SetupLlmOptions): Promise<void> {
   }
 
   onLog?.(`Pulling ${opts.model}…`);
-  await pullOllamaModel(opts.model, { baseUrl, onLog });
+  await pullOllamaModel(opts.model, { baseUrl, onLog, onProgress: opts.onProgress });
 
   // Verify
   const after = await listOllamaModels(baseUrl);

@@ -27,6 +27,7 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 
 ## How To Work In This Repo
 
+- **All tests must pass before completing any task.** Do not dismiss failures as "pre-existing" or "unrelated." If tests fail, fix them — whether or not your changes caused the failure. Run `npm test` (unit) and `npm run test:e2e --workspace @meeting-notes/app` (Playwright) and confirm zero failures before finishing.
 - Build and regression-check with `npm test`.
 - Read `docs/testing-playbook.md` before changing app flows, Playwright fixtures, page objects, IPC-backed UI behavior, or run-lifecycle behavior.
 - Use `docs/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.

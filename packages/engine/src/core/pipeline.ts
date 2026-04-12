@@ -521,6 +521,9 @@ export async function runPipeline(
     store,
   } = options;
 
+  const defaultModel =
+    config.llm_provider === "ollama" ? config.ollama.model : (config.llm_provider === "openai" ? config.openai.model : config.claude.model);
+
   const allPrompts =
     plannedPrompts ?? await planPipelineSteps(config, runFolderPath, logger, options);
 
@@ -550,14 +553,14 @@ export async function runPipeline(
       filename: prompt.filename,
       label: prompt.label,
       builtin: prompt.builtin,
-      model: prompt.model ?? undefined,
+      model: prompt.model ?? defaultModel,
     }, store);
     onProgress?.({
       type: "output-start",
       promptOutputId: prompt.id,
       label: prompt.label,
       filename: prompt.filename,
-      model: prompt.model ?? undefined,
+      model: prompt.model ?? defaultModel,
     });
 
     const start = Date.now();
@@ -600,7 +603,7 @@ export async function runPipeline(
         latency_ms: latencyMs,
         tokens_used: response.tokensUsed,
         completed_at: new Date().toISOString(),
-        model: prompt.model ?? undefined,
+        model: prompt.model ?? defaultModel,
       }, store);
 
       logger.info(`Completed prompt output: ${prompt.id}`, {
@@ -640,7 +643,7 @@ export async function runPipeline(
         builtin: prompt.builtin,
         error: errorMsg,
         latency_ms: latencyMs,
-        model: prompt.model ?? undefined,
+        model: prompt.model ?? defaultModel,
       }, store);
 
       onProgress?.({

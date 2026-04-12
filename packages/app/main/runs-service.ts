@@ -122,7 +122,7 @@ export async function reprocessRun(
       promptOutputId: prompt.id,
       label: prompt.label,
       filename: prompt.filename,
-      model: prompt.model ?? undefined,
+      model: prompt.model ?? defaultModel,
       kind: "prompt" as const,
     })),
   });

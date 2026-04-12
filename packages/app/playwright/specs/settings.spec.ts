@@ -123,12 +123,13 @@ test.describe("Settings", () => {
     await expect(settings.pullCustomModelInput()).toBeVisible();
     await settings.pullCustomModelInput().fill("llama3.1:8b");
     await settings.pullButton().click();
-    await expect(page.getByText("Pulling llama3.1:8b")).toBeVisible();
+    // The mock resolves instantly so the title may already be "Pulled …"
+    await expect(page.getByRole("heading", { name: /Pull(?:ing|ed) llama3\.1:8b/ })).toBeVisible();
 
     // Close the modal — use the text-based Close button (not the X icon)
     const closeButton = page
       .getByRole("dialog")
-      .getByRole("button", { name: "Close" })
+      .getByRole("button", { name: /^Close/ })
       .first();
     await expect(closeButton).toBeEnabled({ timeout: 5000 });
     await closeButton.click();

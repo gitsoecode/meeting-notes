@@ -10,7 +10,7 @@ const appRoot = path.resolve(__dirname, "..");
 function canLoadBetterSqlite3() {
   const probe = spawnSync(
     process.execPath,
-    ["-e", "require('better-sqlite3');"],
+    ["-e", "const D = require('better-sqlite3'); new D(':memory:').close();"],
     {
       cwd: appRoot,
       env: process.env,
