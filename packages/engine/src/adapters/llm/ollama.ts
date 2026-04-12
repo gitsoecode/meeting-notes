@@ -67,6 +67,7 @@ export class OllamaProvider implements LlmProvider {
       body: JSON.stringify({
         model,
         stream: false,
+        keep_alive: "5s",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -205,6 +206,33 @@ export async function deleteOllamaModel(
   if (!res.ok) {
     throw new Error(`Ollama /api/delete ${res.status}: ${res.statusText}`);
   }
+}
+
+/**
+ * Force-unload all models currently loaded in Ollama. Sends `keep_alive: 0`
+ * to each running model so memory is freed immediately. Safe to call when
+ * no models are loaded or when Ollama is unreachable.
+ */
+export async function unloadOllamaModels(
+  baseUrl: string = DEFAULT_BASE_URL
+): Promise<void> {
+  let models: RunningOllamaModel[];
+  try {
+    models = await listRunningOllamaModels(baseUrl);
+  } catch {
+    return; // Ollama unreachable — nothing to unload.
+  }
+  const url = `${baseUrl.replace(/\/+$/, "")}/api/generate`;
+  await Promise.allSettled(
+    models.map((m) =>
+      fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(3000),
+        body: JSON.stringify({ model: m.model, keep_alive: 0 }),
+      }).catch(() => {})
+    )
+  );
 }
 
 function formatBytes(n: number): string {

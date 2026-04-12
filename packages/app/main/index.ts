@@ -1,7 +1,7 @@
 import { app, BrowserWindow, globalShortcut, nativeImage } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAppLogger, setAppLoggerListener } from "@meeting-notes/engine";
+import { createAppLogger, setAppLoggerListener, unloadOllamaModels } from "@meeting-notes/engine";
 import {
   registerIpcHandlers,
   broadcastAppAction,
@@ -9,7 +9,7 @@ import {
   stopActiveRecording,
 } from "./ipc.js";
 import { setupTray } from "./tray.js";
-import { ensureOllamaDaemon, stopOllamaDaemon } from "./ollama-daemon.js";
+import { ensureOllamaDaemon, stopOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { DEFAULT_CONFIG, loadConfig } from "@meeting-notes/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
@@ -187,6 +187,14 @@ app.on("before-quit", async (event) => {
   appLogger.info("App quit requested");
   try {
     await stopActiveRecording("app-quit");
+  } catch {
+    // Best effort.
+  }
+  try {
+    const ollamaState = getOllamaState();
+    if (ollamaState) {
+      await unloadOllamaModels(ollamaState.baseUrl);
+    }
   } catch {
     // Best effort.
   }

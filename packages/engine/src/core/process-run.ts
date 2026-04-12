@@ -33,7 +33,7 @@ import {
 import { getSecret, requireSecret } from "./secrets.js";
 import { ClaudeProvider } from "../adapters/llm/claude.js";
 import { OpenAIProvider } from "../adapters/llm/openai.js";
-import { OllamaProvider } from "../adapters/llm/ollama.js";
+import { OllamaProvider, unloadOllamaModels } from "../adapters/llm/ollama.js";
 import { classifyModel } from "../adapters/llm/resolve.js";
 import { normalizeLocalModelId } from "./setup-llm.js";
 import type { LlmProvider } from "../adapters/llm/provider.js";
@@ -396,6 +396,15 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       store,
     }
   );
+
+  // Free Ollama model memory now that all prompts are done.
+  if (config.llm_provider === "ollama") {
+    try {
+      await unloadOllamaModels(config.ollama.base_url);
+    } catch {
+      // Best effort — don't fail the run over cleanup.
+    }
+  }
 
   const succeeded = results.filter((r) => r.success).map((r) => r.promptOutputId);
   const failed = results.filter((r) => !r.success).map((r) => r.promptOutputId);

@@ -11,6 +11,7 @@ import {
   getSecret,
   ClaudeProvider,
   OllamaProvider,
+  unloadOllamaModels,
   classifyModel,
   createRunLogger,
   type LlmCallFn,
@@ -153,6 +154,15 @@ export async function reprocessRun(
       store,
     }
   );
+
+  // Free Ollama model memory now that all prompts are done.
+  if (config.llm_provider === "ollama") {
+    try {
+      await unloadOllamaModels(config.ollama.base_url);
+    } catch {
+      // Best effort — don't fail the reprocess over cleanup.
+    }
+  }
 
   return {
     runFolder,

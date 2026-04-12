@@ -47,6 +47,16 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:
   `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`.
 
+## Native Module Rebuild (better-sqlite3)
+
+`better-sqlite3` is a native C++ addon that must be compiled for the correct Node ABI. Node.js and Electron use **different** ABI versions (e.g. Node = 127, Electron = 145), and only one compiled binary exists on disk at a time.
+
+- `npm test` automatically rebuilds for **Node.js** (via `ensure-better-sqlite3.mjs`). After running tests, the Electron app will crash with `ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION` mismatch.
+- To restore the Electron app after running tests: `npm run rebuild:native --workspace @meeting-notes/app`
+- `npm run rebuild:native` rebuilds for **Electron** (via `electron-rebuild`). After this, Node-based tests will fail until the next `npm test` run auto-repairs them.
+
+**This is expected.** Do not spend time debugging the mismatch — just run the appropriate rebuild command for whichever runtime you need next. If the user reports the app can't load meetings or crashes on start after you ran tests, tell them to run `npm run rebuild:native --workspace @meeting-notes/app`.
+
 ## Plan Handling
 
 - Stable repo instructions live in this `AGENTS.md`.
