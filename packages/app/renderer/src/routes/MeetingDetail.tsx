@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Check,
   ExternalLink,
   FileOutput,
   MoreHorizontal,
@@ -62,6 +63,8 @@ import {
   PRIMARY_PROMPT_ID,
   type MeetingAnalysisPromptItem,
 } from "../../../shared/meeting-prompts";
+import { findModelEntry } from "../../../shared/llm-catalog";
+import { getDefaultPromptModel } from "../lib/prompt-metadata";
 import { getDefaultPromptModel } from "../lib/prompt-metadata";
 import { findModelEntry } from "../../../shared/llm-catalog";
 
@@ -677,6 +680,22 @@ export function MeetingDetail({
     </div>
   ) : null;
 
+  const activePromptSection = activePromptId
+    ? sections.find((s) => s.id === activePromptId)
+    : null;
+
+  const analysisPipelineContent = activePromptSection ? (
+    <PipelineStatus
+      sections={[activePromptSection]}
+      title="Processing"
+      description={activePromptSection.label}
+      status={activePromptSection.state === "complete" ? "completed"
+        : activePromptSection.state === "failed" ? "failed"
+        : "processing"}
+      compact
+    />
+  ) : null;
+
   return (
     <PageScaffold className="gap-4 md:gap-5">
       <MeetingHeader
@@ -870,7 +889,6 @@ export function MeetingDetail({
                               prompt={prompt}
                               active={activePromptId === prompt.id}
                               onSelect={() => setActivePromptId(prompt.id)}
-                              defaultModel={defaultModel}
                             />
                           ))}
                         </div>
@@ -881,7 +899,7 @@ export function MeetingDetail({
                       <div className="px-3 text-[10px] font-bold uppercase tracking-[0.15em] text-[var(--text-tertiary)]/70">
                         Custom
                       </div>
-                      <div className="space-y-0.5 px-0.5">
+                      <div className="space-y-0.5">
                         {analysisCustomPrompts.length === 0 ? (
                           <div className="px-3 py-2 text-[11px] italic text-[var(--text-tertiary)]">
                             No custom prompts yet
@@ -893,7 +911,6 @@ export function MeetingDetail({
                               prompt={prompt}
                               active={activePromptId === prompt.id}
                               onSelect={() => setActivePromptId(prompt.id)}
-                              defaultModel={defaultModel}
                             />
                           ))
                         )}
@@ -917,9 +934,17 @@ export function MeetingDetail({
                           ? activePrompt.description
                           : "No description yet. Use this prompt when you want a meeting-specific analysis beyond the primary summary."}
                       </p>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-[var(--text-tertiary)]">
-                        {formatAnalysisPromptMeta(activePrompt, defaultModel)}
-                      </p>
+                      {(() => {
+                        const effectiveModel = activePrompt.prompt.model ?? defaultModel;
+                        const modelLabel = effectiveModel
+                          ? (findModelEntry(effectiveModel)?.label ?? effectiveModel)
+                          : null;
+                        return modelLabel ? (
+                          <p className="text-[11px] font-medium text-[var(--text-tertiary)]">
+                            {modelLabel}{activePrompt.prompt.model ? "" : " (default)"}
+                          </p>
+                        ) : null;
+                      })()}
                     </div>
                     <Button size="sm" onClick={() => void runSelectedAnalysisPrompt()}>
                       <PlayCircle className="h-3.5 w-3.5" />
@@ -927,7 +952,7 @@ export function MeetingDetail({
                     </Button>
                   </div>
 
-                  {pipelineStatusContent}
+                  {analysisPipelineContent}
 
                   {activePrompt.hasOutput ? (
                     <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 md:p-6">
@@ -941,7 +966,7 @@ export function MeetingDetail({
                 </div>
               ) : (
                 <div className="p-5 md:p-6">
-                  {pipelineStatusContent}
+                  {analysisPipelineContent}
                   <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-secondary)] px-5 py-6 text-sm text-[var(--text-secondary)]">
                     Select an analysis prompt to view its output for this meeting.
                   </div>
@@ -1479,59 +1504,39 @@ function sortAnalysisPrompts(left: MeetingAnalysisPromptItem, right: MeetingAnal
   return left.label.localeCompare(right.label);
 }
 
-function formatAnalysisPromptMeta(prompt: MeetingAnalysisPromptItem, defaultModel: string | null): string {
-  const parts = [prompt.prompt.auto ? "Auto-run prompt" : "Manual prompt"];
-
-  if (prompt.status === "running") {
-    parts.push("Running");
-  } else if (prompt.status === "failed") {
-    parts.push("Last run failed");
-  } else if (prompt.status === "queued") {
-    parts.push("Queued");
-  } else if (prompt.hasOutput) {
-    parts.push("Output ready");
-  } else {
-    parts.push("No output yet");
-  }
-
-  const effectiveModel = prompt.prompt.model ?? defaultModel;
-  if (effectiveModel) {
-    const entry = findModelEntry(effectiveModel);
-    parts.push(entry?.label ?? effectiveModel);
-  }
-
-  return parts.join(" • ");
-}
-
 function AnalysisSidebarItem({
   prompt,
   active,
   onSelect,
-  defaultModel,
 }: {
   prompt: MeetingAnalysisPromptItem;
   active: boolean;
   onSelect: () => void;
-  defaultModel: string | null;
 }) {
   return (
     <button
       type="button"
       onClick={onSelect}
-      className={`group relative flex w-full items-center justify-between rounded-md px-3 py-2 text-left transition-all ${
+      className={`group relative flex w-full items-center justify-between rounded-md px-3 py-[7px] text-left transition-all ${
         active
           ? "bg-white font-semibold text-[var(--text-primary)] shadow-sm ring-1 ring-black/5"
           : "text-[var(--text-secondary)] hover:bg-white/60 hover:text-[var(--text-primary)]"
       }`}
     >
       <div className="min-w-0">
-        <span className="truncate text-xs">{prompt.label}</span>
-        <div className="mt-0.5 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-          {formatAnalysisPromptMeta(prompt, defaultModel)}
-        </div>
+        <span className="block truncate text-xs leading-snug">{prompt.label}</span>
+      </div>
+      <div className="flex shrink-0 items-center gap-1.5">
+        {prompt.status === "running" || prompt.status === "queued" ? (
+          <Spinner className="h-3 w-3 text-[var(--text-tertiary)]" />
+        ) : prompt.status === "failed" ? (
+          <AlertCircle className="h-3 w-3 text-red-400" />
+        ) : prompt.hasOutput ? (
+          <Check className="h-3 w-3 text-[var(--accent)]" />
+        ) : null}
       </div>
       {active && (
-        <div className="absolute left-0 top-2 h-4 w-0.5 rounded-full bg-[var(--accent)]" />
+        <div className="absolute inset-y-0 left-0 my-auto h-4 w-0.5 rounded-full bg-[var(--accent)]" />
       )}
     </button>
   );
