@@ -308,20 +308,16 @@ export interface AudioDevice {
   name: string;
 }
 
-/**
- * Tri-state for BlackHole detection. macOS sometimes has the HAL driver
- * file on disk but `coreaudiod` hasn't picked it up yet (common right
- * after `brew install --cask blackhole-2ch`), so a single boolean isn't
- * enough — we need to distinguish "missing" from "installed but not
- * loaded" so the wizard can offer a restart-audio recovery instead of
- * just saying "not installed".
- */
+/** @deprecated BlackHole is no longer required — system audio is captured via AudioTee. */
 export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 
 export interface DepsCheckResult {
   ffmpeg: string | null;
   ffmpegVersion?: string | null;
+  /** @deprecated Kept for type compatibility. Always "missing" in new code. */
   blackhole: BlackHoleStatus;
+  /** True when macOS 14.2+ supports automatic system audio capture via CoreAudio taps. */
+  systemAudioSupported: boolean;
   python: string | null;
   pythonVersion?: string | null;
   /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
@@ -355,7 +351,7 @@ export interface HardwareInfoDTO {
  * behalf. Keep this union in sync with the `deps:install` handler in
  * `main/ipc.ts` — adding a new target requires both sides to agree.
  */
-export type DepsInstallTarget = "ffmpeg" | "blackhole" | "whisper-cpp";
+export type DepsInstallTarget = "ffmpeg" | "whisper-cpp";
 
 export interface DepsInstallResult {
   ok: boolean;

@@ -283,15 +283,8 @@ export function App() {
         <SidebarInset>
           <SiteHeader
             section={routeLabel}
-            title={route.name === "meeting" ? "Meeting workspace" : routeLabel}
+            title={route.name === "meeting" ? "Meeting" : routeLabel}
             subtitle={routeSubtitle}
-            recordingLabel={
-              recording.active && !recording.paused
-                ? `Recording${recording.title ? ` · ${recording.title}` : ""}`
-                : recording.paused
-                  ? `Paused${recording.title ? ` · ${recording.title}` : ""}`
-                  : null
-            }
             isDirty={isDirty}
           />
           <main className="flex min-h-0 flex-1 flex-col">

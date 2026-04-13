@@ -118,7 +118,7 @@ const DEFAULT_CONFIG: AppConfig = {
   },
   recording: {
     mic_device: "default",
-    system_device: "BlackHole 2ch",
+    system_device: "", // Deprecated: system audio is now captured automatically via AudioTee
   },
   shortcuts: {
     toggle_recording: "CommandOrControl+Shift+M",

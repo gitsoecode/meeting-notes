@@ -267,7 +267,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     if (!deps) return true;
     if (!deps.ffmpeg) return true;
     if (asrProvider === "parakeet-mlx" && !deps.parakeet) return true;
-    if (deps.blackhole !== "loaded" && !skipBlackhole) return true;
+    // BlackHole no longer required — system audio is captured via AudioTee
     if (llmProvider === "ollama") {
       if (!localLlmModel) return true;
       if (!hasInstalledLocalModel(installedLocalModels, localLlmModel)) return true;
@@ -279,7 +279,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     restartingAudio,
     deps,
     asrProvider,
-    skipBlackhole,
     llmProvider,
     localLlmModel,
     installedLocalModels,
@@ -647,16 +646,20 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     brewAvailable={brewAvailable}
                     onInstall={() => installDep("ffmpeg")}
                   />
-                  <BlackHoleRow
-                    status={deps.blackhole}
-                    installing={installing === "blackhole"}
-                    anyBusy={installing !== null || restartingAudio}
-                    brewAvailable={brewAvailable}
-                    restarting={restartingAudio}
-                    onInstall={() => installDep("blackhole")}
-                    onRestartAudio={restartAudio}
-                    restartError={restartAudioError}
-                  />
+                  {/* BlackHole removed — system audio captured via AudioTee */}
+                  {deps.systemAudioSupported ? (
+                    <DependencyRow
+                      name="System audio"
+                      ok
+                      value="Supported (macOS 14.2+)"
+                    />
+                  ) : (
+                    <DependencyRow
+                      name="System audio"
+                      ok={false}
+                      value="Requires macOS 14.2+"
+                    />
+                  )}
                   {asrProvider === "parakeet-mlx" && (
                     <DependencyRow
                       name="Parakeet"
@@ -705,7 +708,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   <CardContent className="space-y-3 p-4">
                     <div className="text-sm font-medium text-[var(--text-primary)]">Homebrew is not installed</div>
                     <div className="text-sm text-[var(--text-secondary)]">
-                      Homebrew is the macOS package manager we use to install ffmpeg and BlackHole. Open Terminal and run:
+                      Homebrew is the macOS package manager we use to install ffmpeg. Open Terminal and run:
                     </div>
                     <pre className="overflow-x-auto rounded-lg border border-[var(--border-default)] bg-white px-3 py-2 font-mono text-xs text-[var(--text-primary)]">
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -732,18 +735,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className="text-sm text-[var(--error)]">{installError}</div>
               )}
 
-              {deps && deps.blackhole !== "loaded" && (
-                <div className="flex items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
-                  <Checkbox
-                    id="wizard-skip-blackhole"
-                    checked={skipBlackhole}
-                    onCheckedChange={(checked) => setSkipBlackhole(checked === true)}
-                  />
-                  <label htmlFor="wizard-skip-blackhole" className="cursor-pointer text-sm text-[var(--text-secondary)]">
-                    Skip — I don&apos;t need to capture the other side of calls (mic-only recording)
-                  </label>
-                </div>
-              )}
+              {/* BlackHole skip checkbox removed — system audio is automatic */}
 
               {error && (
                 <div className="text-sm text-[var(--error)]">{error}</div>

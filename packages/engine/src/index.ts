@@ -69,7 +69,7 @@ export {
   type PipelinePlannedStep,
 } from "./core/pipeline.js";
 
-export { getAudioInfo, mediaHasAudioStream, checkAudioSilence, type SilenceCheckResult } from "./core/audio.js";
+export { getAudioInfo, mediaHasAudioStream, checkAudioSilence, mergeAudioFiles, type SilenceCheckResult } from "./core/audio.js";
 export { testAudioCapture, type AudioTestReport, type DeviceTestResult } from "./core/audio-test.js";
 
 export {
@@ -99,6 +99,7 @@ export { moveDataDirectory } from "./core/data-path.js";
 export { migrateVaultPromptsToHome } from "./core/migrate-prompts.js";
 
 export { FfmpegRecorder } from "./adapters/recording/ffmpeg.js";
+export { startAudioTeeCapture, recoverRawFile, type AudioTeeSession } from "./adapters/recording/audiotee-recorder.js";
 export type {
   Recorder,
   RecorderOptions,

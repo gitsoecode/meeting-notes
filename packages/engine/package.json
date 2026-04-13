@@ -30,6 +30,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
     "@napi-rs/keyring": "^1.2.0",
+    "audiotee": "^0.0.7",
     "gray-matter": "^4.0.3",
     "openai": "^6.33.0",
     "ulid": "^2.3.0",

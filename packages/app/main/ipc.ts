@@ -43,7 +43,7 @@ import {
 } from "@meeting-notes/engine";
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
-import { detectHardware } from "./system.js";
+import { detectHardware, isSystemAudioSupported } from "./system.js";
 import type {
   AppActionEvent,
   AppLogQuery,
@@ -365,26 +365,19 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("config:init", async (_e, req: InitConfigRequest) => {
-    // The wizard no longer asks about audio devices — fill in sensible
-    // defaults here so the user can always record, and let them tweak in
-    // Settings if needed. Mic = first AVFoundation input; system = first
-    // device whose name contains "blackhole" (the only loopback path on
-    // macOS). If BlackHole isn't installed yet, system_device stays empty
-    // and FfmpegRecorder gracefully degrades to mic-only.
+    // Auto-detect the default mic from AVFoundation. System audio is
+    // captured automatically via AudioTee — no device name needed.
     let micDevice = req.recording.mic_device;
-    let systemDevice = req.recording.system_device;
-    if (!micDevice || !systemDevice) {
+    if (!micDevice) {
       try {
         const recorder = new FfmpegRecorder();
         const devices = await recorder.listAudioDevices();
         if (!micDevice) micDevice = devices[0] ?? "";
-        if (!systemDevice) {
-          systemDevice = devices.find((d) => /blackhole/i.test(d)) ?? "";
-        }
       } catch {
         // ffmpeg missing — leave fields empty; deps step will flag ffmpeg.
       }
     }
+    const systemDevice = ""; // System audio handled by AudioTee, not a device
 
     const llmProvider = req.llm_provider ?? "claude";
     const config: AppConfig = {
@@ -1122,9 +1115,7 @@ export function registerIpcHandlers(): void {
       const args =
         target === "ffmpeg"
           ? ["install", "ffmpeg"]
-          : target === "whisper-cpp"
-          ? ["install", "whisper-cpp"]
-          : ["install", "--cask", "blackhole-2ch"];
+          : ["install", "whisper-cpp"];
 
       broadcastToAll("deps-install:log", `$ brew ${args.join(" ")}`);
 
@@ -1135,7 +1126,7 @@ export function registerIpcHandlers(): void {
         });
         trackChildProcess(child, {
           type: "brew-install",
-          label: target === "ffmpeg" ? "Installing ffmpeg" : target === "whisper-cpp" ? "Installing whisper-cpp" : "Installing BlackHole",
+          label: target === "ffmpeg" ? "Installing ffmpeg" : "Installing whisper-cpp",
           command: `${brew} ${args.join(" ")}`,
         });
 
@@ -1178,32 +1169,6 @@ export function registerIpcHandlers(): void {
           }
         });
       });
-    }
-  );
-
-  // ---- Restart macOS audio system ----
-  //
-  // Used after a fresh BlackHole install when CoreAudio hasn't picked up
-  // the new HAL plugin yet. `killall coreaudiod` requires sudo, so we
-  // route it through `osascript ... with administrator privileges` —
-  // macOS shows the standard credentials dialog, the user clicks Allow,
-  // coreaudiod relaunches under launchd, and BlackHole becomes
-  // enumerable in AVFoundation within ~1 second.
-  ipcMain.handle(
-    "deps:restart-audio",
-    async (): Promise<{ ok: boolean; error?: string }> => {
-      try {
-        await execFileAsync("osascript", [
-          "-e",
-          'do shell script "killall coreaudiod" with administrator privileges',
-        ]);
-        return { ok: true };
-      } catch (err) {
-        return {
-          ok: false,
-          error: err instanceof Error ? err.message : String(err),
-        };
-      }
     }
   );
 
@@ -1394,35 +1359,9 @@ export function registerIpcHandlers(): void {
         if (m) pythonVersion = m[1];
       } catch { /* ignore */ }
     }
-    // BlackHole detection is two-step. First, is the HAL driver file on
-    // disk? brew puts it at /Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver.
-    // Second, has CoreAudio actually loaded it? We answer that by asking
-    // ffmpeg/AVFoundation to enumerate audio devices. The two can disagree:
-    // immediately after a fresh `brew install --cask blackhole-2ch`, the
-    // driver bundle is on disk but coreaudiod hasn't picked it up yet.
-    // Reporting "installed-not-loaded" lets the wizard offer a Restart
-    // Audio recovery instead of pointlessly telling the user to install
-    // something that's already there.
-    const blackholeDriverPath = "/Library/Audio/Plug-Ins/HAL/BlackHole2ch.driver";
-    let driverPresent = false;
-    try {
-      driverPresent = fs.statSync(blackholeDriverPath).isDirectory();
-    } catch {
-      driverPresent = false;
-    }
-    let avfoundationLoaded = false;
-    try {
-      const recorder = new FfmpegRecorder();
-      const devices = await recorder.listAudioDevices();
-      avfoundationLoaded = devices.some((d) => d.toLowerCase().includes("blackhole"));
-    } catch {
-      avfoundationLoaded = false;
-    }
-    const blackhole: DepsCheckResult["blackhole"] = avfoundationLoaded
-      ? "loaded"
-      : driverPresent
-        ? "installed-not-loaded"
-        : "missing";
+    // System audio: check macOS version for AudioTee support (14.2+).
+    const systemAudioSupported = isSystemAudioSupported();
+
     // Parakeet: check the default install path rather than the configured path,
     // because during the Setup Wizard the user hasn't written a config yet and
     // safeLoadConfig() returns null. This default matches DEFAULT_CONFIG in
@@ -1487,7 +1426,8 @@ export function registerIpcHandlers(): void {
       ffmpegVersion,
       python,
       pythonVersion,
-      blackhole,
+      blackhole: "missing" as const,
+      systemAudioSupported,
       parakeet,
       whisper: whisperBin,
       ollama: {

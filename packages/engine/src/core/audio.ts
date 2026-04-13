@@ -152,3 +152,40 @@ export async function normalizeAudio(
     );
   }
 }
+
+/**
+ * Merge multiple audio files into a single output using ffmpeg's amix filter.
+ * Used to create a combined playback file from mic + system audio channels.
+ * The output contains all channels mixed together at equal volume.
+ */
+export async function mergeAudioFiles(
+  inputPaths: string[],
+  outputPath: string
+): Promise<void> {
+  if (inputPaths.length === 0) return;
+  if (inputPaths.length === 1) {
+    // Single input — just copy.
+    fs.copyFileSync(inputPaths[0], outputPath);
+    return;
+  }
+
+  const dir = path.dirname(outputPath);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const inputArgs = inputPaths.flatMap((p) => ["-i", p]);
+  try {
+    await execFileAsync("ffmpeg", [
+      ...inputArgs,
+      "-filter_complex",
+      `amix=inputs=${inputPaths.length}:duration=longest`,
+      "-ac", "1",
+      "-c:a", "pcm_s16le",
+      "-y",
+      outputPath,
+    ]);
+  } catch (err) {
+    throw new Error(
+      `Failed to merge audio files: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}

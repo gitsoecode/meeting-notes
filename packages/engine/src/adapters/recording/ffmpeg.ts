@@ -3,14 +3,9 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import type { Recorder, RecorderOptions, RecordingSession } from "./recorder.js";
+import { startAudioTeeCapture, type AudioTeeSession } from "./audiotee-recorder.js";
 
 const execFileAsync = promisify(execFile);
-
-interface SpawnedRecording {
-  child: ChildProcess;
-  outputPath: string;
-  source: "mic" | "system";
-}
 
 type DiagnosticLogger = {
   info(message: string, data?: Record<string, unknown>): void;
@@ -49,9 +44,10 @@ export class FfmpegRecorder implements Recorder {
     }
   }
 
-  async isSystemCaptureAvailable(deviceName: string): Promise<boolean> {
-    const devices = await this.listAudioDevices();
-    return devices.some((d) => d === deviceName || d.includes(deviceName));
+  async isSystemCaptureAvailable(_deviceName: string): Promise<boolean> {
+    // AudioTee handles system audio capture natively on macOS 14.2+.
+    // No device name matching required.
+    return process.platform === "darwin";
   }
 
   async start(options: RecorderOptions): Promise<RecordingSession> {
@@ -59,15 +55,12 @@ export class FfmpegRecorder implements Recorder {
     fs.mkdirSync(audioDir, { recursive: true });
 
     const startedAt = Date.now();
-    const recordings: SpawnedRecording[] = [];
 
     // Use pre-enumerated device list if provided, otherwise spawn ffmpeg to enumerate.
     const knownDevices = options.devices ?? await this.listAudioDevices();
 
     // Resolve "system default" (empty mic device) to whatever AVFoundation
-    // currently lists first. This makes hot-swapping mics work without a
-    // settings round-trip — unplug your USB mic and the next start picks
-    // up the built-in input.
+    // currently lists first.
     let micDevice = options.micDevice;
     if (!micDevice || micDevice.trim() === "") {
       micDevice = knownDevices[0] ?? "";
@@ -80,77 +73,83 @@ export class FfmpegRecorder implements Recorder {
       devices: knownDevices,
       requestedMic: options.micDevice || "(system default)",
       resolvedMic: micDevice,
-      requestedSystem: options.systemDevice || "(none)",
     });
 
-    // Always start mic recording
+    // Start mic recording via ffmpeg
     const micPath = path.join(audioDir, "mic.wav");
     const micChild = spawnFfmpegRecord(micDevice, micPath, this.logger);
-    recordings.push({ child: micChild, outputPath: micPath, source: "mic" });
 
-    // Try to start system recording (best-effort)
-    let systemAvailable = false;
-    if (options.systemDevice) {
-      systemAvailable = knownDevices.some((d) => d === options.systemDevice || d.includes(options.systemDevice));
-      if (systemAvailable) {
-        const systemPath = path.join(audioDir, "system.wav");
-        const systemChild = spawnFfmpegRecord(options.systemDevice, systemPath, this.logger);
-        recordings.push({ child: systemChild, outputPath: systemPath, source: "system" });
+    // Start system audio capture via AudioTee (macOS 14.2+, no BlackHole needed)
+    let audioTeeSession: AudioTeeSession | null = null;
+    let systemCaptured = false;
+    try {
+      audioTeeSession = await startAudioTeeCapture({
+        outputDir: audioDir,
+        sampleRate: 48000,
+        onError: (err) => {
+          this.logger?.error("AudioTee system capture error", {
+            error: err.message,
+          });
+        },
+      });
+      systemCaptured = audioTeeSession.started;
+      if (systemCaptured) {
+        this.logger?.info("System audio capture started via AudioTee");
       } else {
-        this.logger?.warn("System audio device not found in device list", {
-          requested: options.systemDevice,
-          available: knownDevices,
-        });
+        this.logger?.warn("AudioTee failed to start — recording mic only. System audio capture requires macOS 14.2+ and the System Audio Recording permission.");
       }
+    } catch (err) {
+      this.logger?.warn("AudioTee unavailable — recording mic only", {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
 
+    const systemPath = systemCaptured ? audioTeeSession!.systemPath : undefined;
+
     return {
-      pids: recordings.map((r) => r.child.pid!).filter((p): p is number => p !== undefined),
+      pids: [micChild.pid!].filter((p): p is number => p !== undefined),
       paths: {
         mic: micPath,
-        system: systemAvailable ? path.join(audioDir, "system.wav") : undefined,
+        system: systemPath,
       },
-      systemCaptured: systemAvailable,
+      systemCaptured,
       stop: async () => {
-        // Send SIGINT to ffmpeg so it flushes the WAV header
-        for (const r of recordings) {
-          if (r.child.pid && !r.child.killed) {
-            try {
-              process.kill(r.child.pid, "SIGINT");
-            } catch {
-              // already exited
-            }
+        // Stop mic (ffmpeg) via SIGINT
+        if (micChild.pid && !micChild.killed) {
+          try {
+            process.kill(micChild.pid, "SIGINT");
+          } catch {
+            // already exited
           }
         }
 
-        // Wait for all to exit
-        await Promise.all(
-          recordings.map(
-            (r) =>
-              new Promise<void>((resolve) => {
-                if (r.child.exitCode !== null) {
-                  resolve();
-                  return;
-                }
-                r.child.on("exit", () => resolve());
-                // Force kill after 5 seconds if it doesn't exit
-                setTimeout(() => {
-                  if (r.child.pid && !r.child.killed) {
-                    try {
-                      process.kill(r.child.pid, "SIGKILL");
-                    } catch {
-                      // ignore
-                    }
-                  }
-                  resolve();
-                }, 5000);
-              })
-          )
-        );
+        // Stop system audio (AudioTee)
+        if (audioTeeSession?.started) {
+          await audioTeeSession.stop();
+        }
+
+        // Wait for ffmpeg to exit
+        await new Promise<void>((resolve) => {
+          if (micChild.exitCode !== null) {
+            resolve();
+            return;
+          }
+          micChild.on("exit", () => resolve());
+          setTimeout(() => {
+            if (micChild.pid && !micChild.killed) {
+              try {
+                process.kill(micChild.pid, "SIGKILL");
+              } catch {
+                // ignore
+              }
+            }
+            resolve();
+          }, 5000);
+        });
 
         return {
           micPath,
-          systemPath: systemAvailable ? path.join(audioDir, "system.wav") : undefined,
+          systemPath,
           durationMs: Date.now() - startedAt,
         };
       },

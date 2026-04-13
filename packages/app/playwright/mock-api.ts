@@ -71,7 +71,7 @@ export async function installMockApi(page: Page) {
       },
       recording: {
         mic_device: "Built-in Mic",
-        system_device: "BlackHole 2ch",
+        system_device: "",
       },
       shortcuts: {
         toggle_recording: "CommandOrControl+Shift+M",
@@ -339,7 +339,8 @@ export async function installMockApi(page: Page) {
     const depsState = {
       ffmpeg: "/opt/homebrew/bin/ffmpeg",
       ffmpegVersion: "7.1-mock",
-      blackhole: "loaded",
+      blackhole: "missing",
+      systemAudioSupported: true,
       python: "/usr/bin/python3",
       pythonVersion: "3.9.6",
       parakeet: "/Users/test/.meeting-notes/parakeet",
@@ -350,6 +351,7 @@ export async function installMockApi(page: Page) {
       ffmpeg: string | null;
       ffmpegVersion: string | null;
       blackhole: "missing" | "installed-not-loaded" | "loaded";
+      systemAudioSupported: boolean;
       python: string | null;
       pythonVersion: string | null;
       parakeet: string | null;
@@ -956,7 +958,7 @@ export async function installMockApi(page: Page) {
           return { run_folder: currentFolder };
         },
         async listAudioDevices() {
-          return [{ name: "Built-in Mic" }, { name: "BlackHole 2ch" }];
+          return [{ name: "Built-in Mic" }, { name: "MacBook Pro Microphone" }];
         },
       },
       runs: {
@@ -1576,6 +1578,7 @@ export async function installMockApi(page: Page) {
           ffmpeg: depsState.ffmpeg,
           ffmpegVersion: depsState.ffmpegVersion,
           blackhole: depsState.blackhole,
+          systemAudioSupported: depsState.systemAudioSupported,
           python: depsState.python,
           pythonVersion: depsState.pythonVersion,
           parakeet: depsState.parakeet,
@@ -1592,7 +1595,6 @@ export async function installMockApi(page: Page) {
         async install(target) {
           emit("depsInstallLog", `Installed ${target}`);
           if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
-          if (target === "blackhole") depsState.blackhole = "installed-not-loaded";
           if (target === "whisper-cpp") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
           persistState();
           return { ok: true };
@@ -1601,8 +1603,6 @@ export async function installMockApi(page: Page) {
           return depsState.brewAvailable;
         },
         async restartAudio() {
-          depsState.blackhole = "loaded";
-          persistState();
           return { ok: true };
         },
       },
