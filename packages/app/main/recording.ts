@@ -22,6 +22,15 @@ import {
 } from "@meeting-notes/engine";
 import type { RecordingStatus } from "../shared/ipc.js";
 import { buildInterruptedRunUpdate } from "./recording-lifecycle.js";
+import {
+  validateStartRecording,
+  validateStartForDraft,
+  validatePause,
+  validateResume,
+  validateContinue,
+  resolveStopTarget,
+  type RecordingModuleState,
+} from "./recording-state.js";
 import { finishTrackedProcess, startTrackedProcess } from "./activity-monitor.js";
 import { scheduleJob } from "./jobs.js";
 import { resolveRunFolderPath } from "./run-access.js";
@@ -46,6 +55,10 @@ let active: ActiveRecordingState | null = null;
 /** Tracks a paused run so resume can pick it back up. */
 let pausedRunFolder: string | null = null;
 const appLogger = createAppLogger(false);
+
+function currentState(): RecordingModuleState {
+  return { hasActiveSession: active !== null, hasPausedRun: pausedRunFolder !== null };
+}
 
 function isAbortLikeError(err: unknown): boolean {
   return err instanceof OperationAbortedError || (err instanceof Error && err.name === "AbortError");
@@ -121,13 +134,17 @@ export async function startRecording(
   title: string,
   description: string | null = null
 ): Promise<{ run_folder: string; run_id: string }> {
-  if (active) {
-    throw new Error("A recording is already in progress. Stop it first.");
-  }
+  validateStartRecording(currentState());
   const config = loadConfig();
   const runContext = createRun(config, title, { sourceMode: "both", quiet: true }, description);
   const { folderPath, manifest, logger } = runContext;
-  getStore().insertRun(manifest, folderPath);
+  try {
+    getStore().insertRun(manifest, folderPath);
+  } catch (err: unknown) {
+    // Clean up the folder that createRun already wrote to disk.
+    fs.rmSync(folderPath, { recursive: true, force: true });
+    throw err;
+  }
 
   const recorder = new FfmpegRecorder();
   const audioDir = path.join(folderPath, "audio");
@@ -215,10 +232,38 @@ export async function stopRecording(
   opts: StopOptions = {}
 ): Promise<{ run_folder?: string; deleted?: boolean } | null> {
   const mode = opts.mode ?? "process";
+  const target = resolveStopTarget(currentState(), !!loadActiveRecording());
 
-  if (!active) {
+  if (target !== "active") {
+    // Handle paused recording — no active ffmpeg session, but run is tracked.
+    if (target === "paused" && pausedRunFolder) {
+      const config = loadConfig();
+      const validated = resolveRunFolderPath(pausedRunFolder, config);
+      const folder = pausedRunFolder;
+      pausedRunFolder = null;
+
+      if (mode === "delete") {
+        fs.rmSync(validated, { recursive: true, force: true });
+        getStore().deleteRun(validated);
+        return { deleted: true };
+      }
+
+      const manifest = loadRunManifest(validated);
+      const endedAt = new Date().toISOString();
+      const startedMs = Date.parse(manifest.started);
+      const endedMs = Date.parse(endedAt);
+      updateRunStatus(validated, "complete", {
+        ended: endedAt,
+        duration_minutes:
+          Number.isFinite(startedMs) && Number.isFinite(endedMs) && endedMs > startedMs
+            ? (endedMs - startedMs) / 60000
+            : null,
+      }, getStore());
+      return { run_folder: folder };
+    }
+
     // Maybe the CLI has an active recording.
-    const cli = loadActiveRecording();
+    const cli = target === "cli" ? loadActiveRecording() : null;
     if (cli) {
       // Best-effort: send SIGINT to each pid and clear the state file.
       for (const pid of cli.pids) {
@@ -253,7 +298,8 @@ export async function stopRecording(
     return null;
   }
 
-  const state = active;
+  // target === "active" here; the validator guarantees active is non-null.
+  const state = active!;
   active = null;
 
   try {
@@ -468,22 +514,26 @@ async function startCaptureIntoSegment(
 export async function startRecordingForDraft(
   runFolder: string
 ): Promise<{ run_folder: string; run_id: string }> {
-  if (active) {
-    throw new Error("A recording is already in progress. Stop it first.");
-  }
   const config = loadConfig();
   const validated = resolveRunFolderPath(runFolder, config);
   const manifest = loadRunManifest(validated);
+  validateStartForDraft(currentState(), manifest.status);
 
-  if (manifest.status !== "draft") {
-    throw new Error(`Cannot start recording: run status is "${manifest.status}", expected "draft".`);
+  const startedAt = manifest.status === "recording" && manifest.started
+    ? manifest.started
+    : new Date().toISOString();
+  if (manifest.status !== "recording") {
+    updateRunStatus(validated, "recording", { started: startedAt }, getStore());
   }
 
-  const startedAt = new Date().toISOString();
-  updateRunStatus(validated, "recording", { started: startedAt }, getStore());
-
   const logger = createRunLogger(path.join(validated, "run.log"), false);
-  active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, startedAt, logger);
+  try {
+    active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, startedAt, logger);
+  } catch (err) {
+    // Roll back status so the user can retry.
+    updateRunStatus(validated, "draft", undefined, getStore());
+    throw err;
+  }
   pausedRunFolder = null;
 
   appLogger.info("Recording started from draft", {
@@ -497,10 +547,8 @@ export async function startRecordingForDraft(
 }
 
 export async function pauseRecording(): Promise<void> {
-  if (!active) {
-    throw new Error("No active recording to pause.");
-  }
-  const state = active;
+  validatePause(currentState());
+  const state = active!;
   active = null;
 
   try {
@@ -523,14 +571,9 @@ export async function pauseRecording(): Promise<void> {
 }
 
 export async function resumeRecording(): Promise<void> {
-  if (active) {
-    throw new Error("A recording is already active.");
-  }
-  if (!pausedRunFolder) {
-    throw new Error("No paused recording to resume.");
-  }
+  validateResume(currentState());
   const config = loadConfig();
-  const validated = resolveRunFolderPath(pausedRunFolder, config);
+  const validated = resolveRunFolderPath(pausedRunFolder!, config);
   const manifest = loadRunManifest(validated);
   const logger = createRunLogger(path.join(validated, "run.log"), false);
 
@@ -543,16 +586,10 @@ export async function resumeRecording(): Promise<void> {
 export async function continueRecording(
   runFolder: string
 ): Promise<{ run_folder: string; run_id: string }> {
-  if (active) {
-    throw new Error("A recording is already in progress. Stop it first.");
-  }
   const config = loadConfig();
   const validated = resolveRunFolderPath(runFolder, config);
   const manifest = loadRunManifest(validated);
-
-  if (manifest.status !== "complete" && manifest.status !== "paused") {
-    throw new Error(`Cannot continue: run status is "${manifest.status}".`);
-  }
+  validateContinue(currentState(), manifest.status);
 
   const logger = createRunLogger(path.join(validated, "run.log"), false);
   active = await startCaptureIntoSegment(config, validated, manifest.run_id, manifest.title, manifest.started, logger);

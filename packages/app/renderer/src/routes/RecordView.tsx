@@ -451,7 +451,7 @@ export function RecordView({
         }}
       >
         {/* New Meeting card */}
-        <Card className="overflow-hidden p-5 md:p-6">
+        <Card className="shrink-0 overflow-hidden p-5 md:p-6">
           <CardHeader className="mb-3">
             <CardTitle className="text-xl">New meeting</CardTitle>
             <CardDescription>
@@ -507,7 +507,7 @@ export function RecordView({
         )}
 
         {/* Coming Up + Recent timeline */}
-        <Card className="overflow-hidden p-5 md:p-6">
+        <Card className="shrink-0 overflow-hidden p-5 md:p-6">
           {/* Upcoming section */}
           <CardHeader className="mb-4">
             <CardTitle className="text-lg">Coming up</CardTitle>
