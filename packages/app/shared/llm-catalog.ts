@@ -47,6 +47,22 @@ export const LLM_MODELS: LlmModelEntry[] = [
     blurb: "OpenAI's reasoning model for complex tasks.",
   },
   {
+    id: "qwen3.5:0.8b",
+    label: "qwen3.5:0.8b",
+    provider: "ollama",
+    sizeGb: 1.0,
+    minRamGb: 4,
+    blurb: "Ultra-tiny Qwen — runs on nearly anything, good for quick tests.",
+  },
+  {
+    id: "qwen3.5:2b",
+    label: "qwen3.5:2b",
+    provider: "ollama",
+    sizeGb: 2.7,
+    minRamGb: 4,
+    blurb: "Tiny Qwen variant — fastest local option for low-resource machines.",
+  },
+  {
     id: "qwen3.5:4b",
     label: "qwen3.5:4b",
     provider: "ollama",
@@ -85,6 +101,14 @@ export const LLM_MODELS: LlmModelEntry[] = [
     sizeGb: 2.3,
     minRamGb: 4,
     blurb: "Microsoft's capable tiny model. Runs on almost anything.",
+  },
+  {
+    id: "gemma4:e2b",
+    label: "gemma4:e2b",
+    provider: "ollama",
+    sizeGb: 7.2,
+    minRamGb: 16,
+    blurb: "Google's smallest Gemma 4 — quick inference, modest quality.",
   },
   {
     id: "gemma4:e4b",
