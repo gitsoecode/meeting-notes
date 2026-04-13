@@ -11,17 +11,12 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
 
     // Check: how many competing actions on home screen?
     const startBtn = page.getByRole("button", { name: /Start recording/ });
-    const importBtn = page.getByRole("button", { name: /Import meeting/ });
     const startVisible = await startBtn.isVisible();
-    const importVisible = await importBtn.isVisible();
 
     const observations: string[] = [
       `Total interactive elements on home screen: ${counts.total} (${counts.buttons} buttons, ${counts.inputs} inputs)`,
       `Card components visible: ${cardCount}`,
       `Start recording button visible: ${startVisible}`,
-      `Import meeting button visible at equal weight: ${importVisible}`,
-      "ISSUE: Two equally-weighted primary cards compete for attention — new recording and import are at the same visual hierarchy level",
-      "ISSUE: Import card still consumes substantial above-fold space on smaller screens, which weakens the focus on starting a new recording",
     ];
 
     await audit({

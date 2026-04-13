@@ -216,19 +216,6 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
         />
         <span className="text-xs text-[var(--text-tertiary)]">{runs.length} meetings</span>
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          <Button variant="secondary" onClick={onImport} disabled={importing}>
-            {importing ? (
-              <>
-                <Spinner />
-                Importing…
-              </>
-            ) : (
-              <>
-                <FileUp className="h-4 w-4" />
-                Import meeting
-              </>
-            )}
-          </Button>
           {selected.size > 0 ? (
             <>
               <Button variant="destructive" onClick={() => setConfirmBulkDelete(true)} disabled={bulkDeleting}>

@@ -25,10 +25,6 @@ export class MeetingsListPage {
     return this.main.getByRole("button", { name: "Refresh" });
   }
 
-  importButton() {
-    return this.main.getByRole("button", { name: /Import meeting/ });
-  }
-
   selectAllCheckbox() {
     return this.main.getByRole("checkbox", { name: "Select all" });
   }
@@ -51,10 +47,6 @@ export class MeetingsListPage {
 
   statusBadge(status: string) {
     return this.main.getByText(new RegExp(`^${status}$`, "i")).first();
-  }
-
-  quickActionsCard() {
-    return this.main.getByRole("button", { name: /Import meeting/ });
   }
 
   totalBadge() {

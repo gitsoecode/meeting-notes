@@ -72,12 +72,6 @@ test("covers meetings list, import, bulk actions, and activity states", async ({
   await expect(meetingsList.bulkRunModalDoneButton()).toBeVisible();
   await meetingsList.bulkRunModalDoneButton().click();
 
-  await meetingsList.importButton().click();
-  await meetingDetail.waitForReady();
-  await expect(page.getByText("mock meeting")).toBeVisible();
-
-  await app.navigateTo("Meetings");
-  await meetingsList.waitForReady();
   await meetingsList.meetingRow("Customer call").click();
   await meetingDetail.waitForReady();
   await expect(page.getByText("Processing").first()).toBeVisible();

@@ -77,15 +77,6 @@ test.describe("Meetings List", () => {
     );
   });
 
-  test("import button triggers file picker and navigates", async ({
-    meetingsList,
-    page,
-  }) => {
-    await meetingsList.importButton().click();
-    // Mock returns picked file → navigates to imported meeting detail
-    await expect(page.getByText("Back to meetings")).toBeVisible();
-  });
-
   test("clicking meeting row navigates to detail", async ({
     meetingsList,
     page,
