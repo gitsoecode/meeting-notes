@@ -15,6 +15,7 @@ import {
   openInObsidian,
   createRunLogger,
   createAppLogger,
+  checkAudioSilence,
   type RecordingSession,
   type AppConfig,
   type Logger,
@@ -54,7 +55,7 @@ export interface ActiveRecordingState {
 let active: ActiveRecordingState | null = null;
 /** Tracks a paused run so resume can pick it back up. */
 let pausedRunFolder: string | null = null;
-const appLogger = createAppLogger(false);
+const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 
 function currentState(): RecordingModuleState {
   return { hasActiveSession: active !== null, hasPausedRun: pausedRunFolder !== null };
@@ -146,7 +147,7 @@ export async function startRecording(
     throw err;
   }
 
-  const recorder = new FfmpegRecorder();
+  const recorder = new FfmpegRecorder(logger);
   const audioDir = path.join(folderPath, "audio");
   const devices = await getCachedAudioDevices();
   const session = await recorder.start({
@@ -335,6 +336,24 @@ export async function stopRecording(
     return { run_folder: state.runFolder };
   }
 
+  // Best-effort silence check on system audio to warn about routing issues.
+  if (state.systemCaptured && state.systemPath) {
+    void checkAudioSilence(state.systemPath).then((result) => {
+      if (result.isSilent) {
+        const msg = "System audio appears to be silent — BlackHole may not be receiving routed audio. " +
+          "Set up a Multi-Output Device in Audio MIDI Setup that sends audio to both your speakers/headphones and BlackHole.";
+        state.logger.warn(msg, {
+          maxVolumeDb: result.maxVolumeDb,
+          meanVolumeDb: result.meanVolumeDb,
+        });
+        appLogger.warn("System audio is silent", {
+          runFolder: state.runFolder,
+          detail: msg,
+        });
+      }
+    }).catch(() => {});
+  }
+
   const endedAt = new Date().toISOString();
 
   if (mode === "save") {
@@ -364,8 +383,8 @@ export async function stopRecording(
           state.config.llm_provider === "ollama"
             ? state.config.ollama.model
             : state.config.claude.model,
-        task: async ({ signal, updateProgress }) =>
-          processRun({
+        task: async ({ signal, updateProgress }) => {
+          const result = await processRun({
             config: state.config,
             runFolder: state.runFolder,
             title: state.title,
@@ -377,7 +396,14 @@ export async function stopRecording(
               updateProgress(event);
               opts.onProgress?.(state.runFolder, event);
             },
-          }),
+          });
+          if (result.failed.length > 0) {
+            throw new Error(
+              `${result.failed.length} prompt output(s) failed: ${result.failed.join(", ")}`
+            );
+          }
+          return result;
+        },
       });
     } catch (err) {
       if (!isAbortLikeError(err)) {
@@ -434,7 +460,7 @@ async function startCaptureIntoSegment(
   const segmentDir = path.join(runFolder, "audio", segmentName);
   fs.mkdirSync(segmentDir, { recursive: true });
 
-  const recorder = new FfmpegRecorder();
+  const recorder = new FfmpegRecorder(logger);
   const devices = await getCachedAudioDevices();
   const session = await recorder.start({
     micDevice: config.recording.mic_device,

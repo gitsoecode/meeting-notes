@@ -54,8 +54,12 @@ const api: MeetingNotesApi = {
     get: (runFolder) => ipcRenderer.invoke("runs:get", runFolder),
     readDocument: (runFolder, fileName) =>
       ipcRenderer.invoke("runs:read-document", runFolder, fileName),
-    getMediaSource: (runFolder, fileName) =>
-      ipcRenderer.invoke("runs:get-media-source", runFolder, fileName),
+    getMediaSource: async (runFolder, fileName) => {
+      const result = await ipcRenderer.invoke("runs:get-media-source", runFolder, fileName);
+      if (!result) return null;
+      const blob = new Blob([result.buffer], { type: result.mime });
+      return URL.createObjectURL(blob);
+    },
     downloadMedia: (runFolder, fileName) =>
       ipcRenderer.invoke("runs:download-media", runFolder, fileName),
     deleteMedia: (runFolder, fileName) =>

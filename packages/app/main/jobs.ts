@@ -233,6 +233,33 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
   const job = jobs.get(jobId);
   if (!job) return;
 
+  // Log pipeline steps to app-events.jsonl so they're visible in the Activity tab.
+  if (event.type === "run-planned") {
+    appLogger.info(`Pipeline planned: ${event.steps.length} step(s)`, {
+      jobId: job.id,
+      runFolder: job.runFolder,
+      detail: event.steps.map((s) => s.label).join(", "),
+    });
+  } else if (event.type === "output-start") {
+    appLogger.info(`Starting: ${event.label}`, {
+      jobId: job.id,
+      runFolder: job.runFolder,
+      detail: event.model ? `Model: ${event.model}` : undefined,
+    });
+  } else if (event.type === "output-complete") {
+    appLogger.info(`Completed: ${event.label} (${(event.latencyMs / 1000).toFixed(1)}s)`, {
+      jobId: job.id,
+      runFolder: job.runFolder,
+      detail: `${event.filename} · ${(event.latencyMs / 1000).toFixed(1)}s`,
+    });
+  } else if (event.type === "output-failed") {
+    appLogger.error(`Failed: ${event.label}`, {
+      jobId: job.id,
+      runFolder: job.runFolder,
+      detail: event.error,
+    });
+  }
+
   if (event.type === "run-planned") {
     job.progress.steps = normalizePlannedSteps(event.steps);
     job.progress.totalOutputs = event.steps.length;

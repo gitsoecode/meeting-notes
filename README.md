@@ -181,8 +181,26 @@ You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change 
 | `meeting-notes reprocess <run-path>` | Re-run processing on an existing run |
 | `meeting-notes logs [run-path]` | Show app or run logs |
 | `meeting-notes prompts list` | List configured pipeline prompts |
+| `meeting-notes test-audio` | Test audio capture from configured devices |
 
 Run `meeting-notes --help` or `meeting-notes <command> --help` for the full list and options.
+
+---
+
+## Audio Testing
+
+Verify audio capture is working:
+
+```bash
+meeting-notes test-audio
+meeting-notes test-audio --duration 6000   # 6-second test (default 4s)
+```
+
+This records a short clip from each configured device, analyzes volume levels, and reports whether each device is found, capturing audio, and not silent.
+
+### Current Limitations
+
+System audio capture currently requires **BlackHole 2ch** as a virtual loopback device, plus a manually configured Multi-Output Device in Audio MIDI Setup. This is a known UX gap — the app should handle audio routing automatically without requiring manual system configuration. This is tracked for a future release using macOS ScreenCaptureKit or programmatic aggregate device creation.
 
 ---
 

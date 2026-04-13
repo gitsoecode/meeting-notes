@@ -42,6 +42,7 @@ import {
   openInObsidian,
   setupAsr,
   moveDataDirectory,
+  testAudioCapture,
 } from "@meeting-notes/engine";
 import { createPrompter } from "./prompt.js";
 
@@ -677,6 +678,47 @@ program
           lastSize = stat.size;
         }
       }, 500);
+    }
+  });
+
+// --- test-audio ---
+program
+  .command("test-audio")
+  .description("Record a short test clip from each configured audio device and check for silence")
+  .option("-d, --duration <ms>", "Test recording duration in milliseconds", "4000")
+  .action(async (opts: { duration: string }) => {
+    const config = loadConfig();
+    const durationMs = parseInt(opts.duration, 10);
+
+    console.log("Testing audio capture devices...\n");
+    console.log(`  Mic device:    ${config.recording.mic_device || "(system default)"}`);
+    console.log(`  System device: ${config.recording.system_device || "(none)"}`);
+    console.log(`  Duration:      ${durationMs}ms\n`);
+
+    const report = await testAudioCapture({
+      micDevice: config.recording.mic_device,
+      systemDevice: config.recording.system_device,
+      durationMs,
+    });
+
+    console.log(`Available audio devices: ${report.devices.join(", ")}\n`);
+
+    for (const result of report.results) {
+      const icon = result.found && result.recorded && !result.isSilent ? "\u2705" : "\u274C";
+      console.log(`${icon} ${result.role.toUpperCase()} — ${result.deviceName}`);
+      console.log(`  Found:     ${result.found ? "yes" : "NO — device not in ffmpeg device list"}`);
+      console.log(`  Recorded:  ${result.recorded ? `yes (${result.fileSizeBytes} bytes)` : "NO"}`);
+      console.log(`  Volume:    mean=${result.meanVolumeDb.toFixed(1)} dB, max=${result.maxVolumeDb.toFixed(1)} dB`);
+      console.log(`  Silent:    ${result.isSilent ? "YES — no audio detected" : "no — audio detected"}`);
+      if (result.error) {
+        console.log(`  Error:     ${result.error}`);
+      }
+      if (result.isSilent && result.role === "system" && result.found) {
+        console.log("  \u26A0\uFE0F  System audio is silent. Make sure you have a Multi-Output Device");
+        console.log("     in Audio MIDI Setup that sends audio to both your output device");
+        console.log("     (speakers/headphones) AND BlackHole.");
+      }
+      console.log();
     }
   });
 

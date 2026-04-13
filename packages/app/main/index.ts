@@ -1,6 +1,7 @@
-import { app, BrowserWindow, globalShortcut, nativeImage } from "electron";
+import { app, BrowserWindow, globalShortcut, nativeImage, net, protocol } from "electron";
+import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createAppLogger, setAppLoggerListener, unloadOllamaModels } from "@meeting-notes/engine";
 import {
   registerIpcHandlers,
@@ -30,6 +31,20 @@ const __dirname = path.dirname(__filename);
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const IS_DEV = Boolean(DEV_URL);
 const APP_ICON_PATH = path.resolve(__dirname, "../assets/app-icon.png");
+
+// Register custom protocol for serving audio files to the renderer.
+// Must be called before app.whenReady().
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: "meeting-media",
+    privileges: {
+      standard: false,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+    },
+  },
+]);
 
 let mainWindow: BrowserWindow | null = null;
 const appLogger = createAppLogger(false);
@@ -113,6 +128,20 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin" && app.dock && dockIcon) {
     app.dock.setIcon(dockIcon);
   }
+
+  // Serve audio files via meeting-media:// protocol so the sandboxed
+  // renderer can play them without file:// access.
+  protocol.handle("meeting-media", (request) => {
+    // URL format: meeting-media://audio/<encoded-file-path>
+    const url = new URL(request.url);
+    const filePath = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
+    // Delegate to net.fetch(file://...) which handles streaming, Range
+    // requests, and correct MIME types automatically.
+    const fileUrl = pathToFileURL(filePath).toString();
+    return net.fetch(fileUrl, {
+      headers: request.headers,
+    });
+  });
 
   registerIpcHandlers();
   appLogger.info("App ready");

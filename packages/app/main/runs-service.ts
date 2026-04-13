@@ -4,6 +4,7 @@ import matter from "gray-matter";
 import {
   loadConfig,
   loadRunManifest,
+  updateRunStatus,
   loadAllPrompts,
   planPipelineSteps,
   processRun,
@@ -14,6 +15,7 @@ import {
   unloadOllamaModels,
   classifyModel,
   createRunLogger,
+  createAppLogger,
   type LlmCallFn,
   type LlmProvider,
   type PipelineProgressEvent,
@@ -71,7 +73,7 @@ export async function reprocessRun(
     return (ollamaCache[normalizedId] ??= new OllamaProvider(config.ollama.base_url, normalizedId));
   };
 
-  const logger = createRunLogger(path.join(runFolder, "run.log"), false);
+  const logger = createRunLogger(path.join(runFolder, "run.log"), Boolean(process.env.VITE_DEV_SERVER_URL));
   const prompts = loadAllPrompts(config);
   const requestedPromptIds = req.onlyIds ?? [];
   const promptsToValidate =
@@ -164,11 +166,34 @@ export async function reprocessRun(
     }
   }
 
-  return {
-    runFolder,
-    succeeded: results.filter((result) => result.success).map((result) => result.promptOutputId),
-    failed: results.filter((result) => !result.success).map((result) => result.promptOutputId),
-  };
+  const succeeded = results.filter((result) => result.success).map((result) => result.promptOutputId);
+  const failed = results.filter((result) => !result.success).map((result) => result.promptOutputId);
+
+  // Update the overall run status based on pipeline results.
+  // When prompts ran, status reflects whether any failed.
+  // When 0 prompts ran (e.g. skipComplete filtered everything out),
+  // reconcile: if the run is stuck in "error" but all outputs are
+  // actually complete, flip it to "complete".
+  if (succeeded.length > 0 || failed.length > 0) {
+    const endedIso = new Date().toISOString();
+    updateRunStatus(
+      runFolder,
+      failed.length === 0 ? "complete" : "error",
+      { ended: endedIso },
+      store
+    );
+  } else {
+    const currentManifest = store.loadManifest(runFolder);
+    if (currentManifest.status === "error" || currentManifest.status === "processing") {
+      const outputs = Object.values(currentManifest.prompt_outputs);
+      const hasFailedOutputs = outputs.some((o) => o.status === "failed");
+      if (!hasFailedOutputs) {
+        updateRunStatus(runFolder, "complete", { ended: new Date().toISOString() }, store);
+      }
+    }
+  }
+
+  return { runFolder, succeeded, failed };
 }
 
 function collectRunAudioFiles(runFolder: string, sourceMode: string) {
@@ -223,7 +248,7 @@ export async function processRecordedRun(
   const runFolder = resolveRunFolderPath(req.runFolder, config);
   const store = getStore();
   const manifest = store.loadManifest(runFolder);
-  const logger = createRunLogger(path.join(runFolder, "run.log"), false);
+  const logger = createRunLogger(path.join(runFolder, "run.log"), Boolean(process.env.VITE_DEV_SERVER_URL));
   const prompts = loadAllPrompts(config);
   const requestedPromptIds = req.onlyIds ?? [];
   const promptsToValidate = prompts.filter((prompt) => requestedPromptIds.includes(prompt.id));

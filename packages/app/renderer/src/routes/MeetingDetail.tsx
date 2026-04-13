@@ -55,7 +55,6 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Spinner } from "../components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
@@ -774,6 +773,29 @@ export function MeetingDetail({
         }
       />
 
+      {detail.status === "error" && !showPipelineStatus && (() => {
+        const failedOutputs = Object.entries(detail.manifest?.prompt_outputs ?? {})
+          .filter(([, output]) => output?.status === "failed" && output.error)
+          .map(([id, output]) => ({ id, label: output.label ?? id, error: output.error! }));
+        if (failedOutputs.length === 0) return null;
+        return (
+          <div className="flex items-start gap-3 rounded-lg border border-[color:rgba(185,28,28,0.18)] bg-[rgba(185,28,28,0.06)] px-4 py-3 text-sm text-[var(--error)]">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              {failedOutputs.map(({ id, label, error }) => (
+                <div key={id}>
+                  <span className="font-medium">{label}</span>{" "}
+                  failed: {error}
+                </div>
+              ))}
+              <div className="mt-2 text-xs text-[var(--text-secondary)]">
+                Use Reprocess to retry the failed step(s).
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       <Tabs
         value={activeTabId}
         onValueChange={(value) => {
@@ -1142,10 +1164,14 @@ export function MeetingDetail({
       {reprocessOpen ? (
         <ReprocessModal
           runFolder={runFolder}
-          manifest={detail?.manifest}
+          hasAudio={detail ? detail.files.some((f) => f.kind === "media") : false}
           onClose={() => setReprocessOpen(false)}
-          onStart={async (request) => {
-            await startReprocess(request);
+          onStart={async ({ transcript, summary }) => {
+            if (transcript) {
+              await api.runs.startProcessRecording({ runFolder });
+            } else if (summary) {
+              await startReprocess({ runFolder, onlyIds: [PRIMARY_PROMPT_ID] });
+            }
             setReprocessOpen(false);
           }}
         />
@@ -1231,61 +1257,27 @@ export function MeetingDetail({
 
 function ReprocessModal({
   runFolder,
-  manifest,
+  hasAudio,
   onClose,
   onStart,
 }: {
   runFolder: string;
-  manifest?: RunManifest;
+  hasAudio: boolean;
   onClose: () => void;
-  onStart: (request: ReprocessRequest) => Promise<void>;
+  onStart: (opts: { transcript: boolean; summary: boolean }) => Promise<void>;
 }) {
-  const [prompts, setPrompts] = useState<PromptRow[]>([]);
-  const [loadingPrompts, setLoadingPrompts] = useState(true);
-  const [selectionMode, setSelectionMode] = useState<"auto" | "custom">("auto");
-  const [selectedPromptIds, setSelectedPromptIds] = useState<string[]>([]);
-  const [scope, setScope] = useState<"smart" | "full" | "failed">("smart");
+  const [transcript, setTranscript] = useState(false);
+  const [summary, setSummary] = useState(true);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    setLoadingPrompts(true);
-    void api.prompts.list()
-      .then((list) => {
-        if (!alive) return;
-        const sorted = [...list].sort((left, right) => {
-          if (left.auto !== right.auto) return left.auto ? -1 : 1;
-          return left.label.localeCompare(right.label);
-        });
-        setPrompts(sorted);
-        setSelectedPromptIds(sorted.filter((prompt) => prompt.auto).map((prompt) => prompt.id));
-      })
-      .finally(() => {
-        if (alive) setLoadingPrompts(false);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const togglePrompt = (promptId: string) => {
-    setSelectedPromptIds((prev) =>
-      prev.includes(promptId) ? prev.filter((id) => id !== promptId) : [...prev, promptId]
-    );
-  };
+  const nothingSelected = !transcript && !summary;
 
   const onRun = async () => {
     setError(null);
     setRunning(true);
     try {
-      await onStart({
-        runFolder,
-        onlyFailed: scope === "failed",
-        skipComplete: scope !== "full",
-        autoOnly: selectionMode === "auto",
-        onlyIds: selectionMode === "custom" ? selectedPromptIds : undefined,
-      });
+      await onStart({ transcript, summary });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1293,188 +1285,57 @@ function ReprocessModal({
     }
   };
 
-  const willRunCount = useMemo(() => {
-    const targetIds = selectionMode === "auto" 
-      ? prompts.filter(p => p.enabled && p.auto).map(p => p.id)
-      : selectedPromptIds;
-    
-    return targetIds.filter(id => {
-      const status = manifest?.sections?.[id]?.status;
-      if (scope === "failed") return status === "failed";
-      if (scope === "smart") return status !== "complete";
-      return true; // full
-    }).length;
-  }, [prompts, selectedPromptIds, selectionMode, manifest, scope]);
-
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="gap-6">
         <DialogHeader>
           <DialogTitle>Reprocess meeting</DialogTitle>
           <DialogDescription>
-            Update analysis sections for this meeting. Runs in the background.
+            Choose what to rebuild. Runs in the background. To re-run individual analysis prompts, use the Analysis tab.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5">
-          <div className="space-y-2.5">
-            <label className="text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
-              1. Choose prompts
-            </label>
-            <div className="flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] p-1">
-              <button
-                type="button"
-                onClick={() => setSelectionMode("auto")}
-                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  selectionMode === "auto"
-                    ? "bg-white text-[var(--text-primary)] shadow-sm"
-                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                Auto-run set
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectionMode("custom")}
-                className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                  selectionMode === "custom"
-                    ? "bg-white text-[var(--text-primary)] shadow-sm"
-                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-                }`}
-              >
-                Pick specific prompts
-              </button>
-            </div>
-          </div>
-
-          <div className="space-y-2.5">
-            <label className="text-xs font-medium uppercase tracking-wider text-[var(--text-tertiary)]">
-              2. Select scope
-            </label>
-            <Select 
-              value={scope} 
-              onValueChange={(val) => setScope(val as any)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="smart">
-                  <div className="flex flex-col items-start gap-0.5">
-                    <span className="font-medium">Smart (New or failed only)</span>
-                    <span className="text-xs text-[var(--text-tertiary)]">Skips sections that already completed successfully.</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="full">
-                  <div className="flex flex-col items-start gap-0.5">
-                    <span className="font-medium">Full (Everything)</span>
-                    <span className="text-xs text-[var(--text-tertiary)]">Re-runs all selected prompts, overwriting existing results.</span>
-                  </div>
-                </SelectItem>
-                <SelectItem value="failed">
-                  <div className="flex flex-col items-start gap-0.5">
-                    <span className="font-medium">Errors only</span>
-                    <span className="text-xs text-[var(--text-tertiary)]">Only retries sections that previously failed.</span>
-                  </div>
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {selectionMode === "custom" && (
-            <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)]/40 p-3">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <div className="text-sm font-medium text-[var(--text-primary)]">
-                  {selectedPromptIds.length} prompts selected
-                </div>
-                <div className="flex items-center gap-1.5 text-xs">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2"
-                    onClick={() => setSelectedPromptIds(prompts.map((p) => p.id))}
-                    disabled={loadingPrompts || prompts.length === 0}
-                  >
-                    Select all
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 px-2"
-                    onClick={() => setSelectedPromptIds([])}
-                    disabled={selectedPromptIds.length === 0}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              </div>
-
-              <div className="max-h-[220px] space-y-1.5 overflow-auto pr-1">
-                {loadingPrompts ? (
-                  <div className="flex items-center gap-3 rounded-md bg-white px-3 py-2.5 text-sm text-[var(--text-secondary)]">
-                    <Spinner />
-                    Loading prompts…
-                  </div>
-                ) : prompts.length === 0 ? (
-                  <div className="rounded-md bg-white px-3 py-2.5 text-sm text-[var(--text-secondary)]">
-                    No prompts are available yet.
-                  </div>
-                ) : (
-                  prompts.map((prompt) => {
-                    const checked = selectedPromptIds.includes(prompt.id);
-                    const status = manifest?.sections?.[prompt.id]?.status;
-                    return (
-                      <label
-                        key={prompt.id}
-                        className={`flex items-center gap-3 rounded-md border px-3 py-2 text-sm transition-colors cursor-pointer ${
-                          checked
-                            ? "border-[var(--accent)] bg-white shadow-sm"
-                            : "border-[var(--border-default)] bg-white hover:bg-[var(--bg-primary)]"
-                        }`}
-                      >
-                        <Checkbox
-                          checked={checked}
-                          onCheckedChange={() => togglePrompt(prompt.id)}
-                        />
-                        <div className="min-w-0 flex-1 py-1.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-[var(--text-primary)]">{prompt.label}</span>
-                            {status === "complete" && <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 shadow-none hover:bg-emerald-50">Complete</Badge>}
-                            {status === "failed" && <Badge variant="destructive">Failed</Badge>}
-                          </div>
-                          {prompt.description?.trim() && (
-                            <div className="truncate text-xs text-[var(--text-secondary)]">
-                              {prompt.description}
-                            </div>
-                          )}
-                        </div>
-                      </label>
-                    );
-                  })
-                )}
+        <div className="space-y-3">
+          <label className="flex items-center gap-3 rounded-lg border border-[var(--border-default)] bg-white px-4 py-3 cursor-pointer transition-colors hover:bg-[var(--bg-secondary)]/30">
+            <Checkbox
+              checked={transcript}
+              onCheckedChange={(v) => setTranscript(v === true)}
+              disabled={!hasAudio}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-[var(--text-primary)]">Rebuild transcript</div>
+              <div className="text-xs text-[var(--text-secondary)]">
+                {hasAudio
+                  ? "Re-transcribe from audio files. Also regenerates the summary."
+                  : "No audio files available for this meeting."}
               </div>
             </div>
-          )}
+          </label>
+
+          <label className="flex items-center gap-3 rounded-lg border border-[var(--border-default)] bg-white px-4 py-3 cursor-pointer transition-colors hover:bg-[var(--bg-secondary)]/30">
+            <Checkbox
+              checked={summary || transcript}
+              onCheckedChange={(v) => setSummary(v === true)}
+              disabled={transcript}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-[var(--text-primary)]">Regenerate summary</div>
+              <div className="text-xs text-[var(--text-secondary)]">
+                Re-run the primary summary prompt using the existing transcript.
+              </div>
+            </div>
+          </label>
 
           {error ? <div className="text-sm text-[var(--error)]">{error}</div> : null}
         </div>
 
-        <DialogFooter className="items-center">
-          <div className="mr-auto text-sm text-[var(--text-secondary)]">
-            {willRunCount === 0 ? (
-              <span className="text-[var(--text-tertiary)] italic">No prompts match current scope</span>
-            ) : (
-              <span>Will run <strong className="text-[var(--text-primary)]">{willRunCount}</strong> prompt{willRunCount === 1 ? "" : "s"}</span>
-            )}
-          </div>
+        <DialogFooter>
           <Button variant="secondary" onClick={onClose} disabled={running}>
             Cancel
           </Button>
           <Button
             onClick={onRun}
-            disabled={running || willRunCount === 0}
+            disabled={running || nothingSelected}
             className="min-w-[120px]"
           >
             {running ? (
@@ -1483,7 +1344,7 @@ function ReprocessModal({
                 Starting…
               </>
             ) : (
-              "Start reprocess"
+              "Reprocess"
             )}
           </Button>
         </DialogFooter>

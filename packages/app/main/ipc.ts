@@ -3,7 +3,6 @@ import path from "node:path";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { pathToFileURL } from "node:url";
 import { ipcMain, dialog, shell, clipboard } from "electron";
 import matter from "gray-matter";
 import {
@@ -36,6 +35,7 @@ import {
   setSecret,
   hasSecret,
   OperationAbortedError,
+  testAudioCapture,
   type AppConfig,
   type LlmProvider,
   type PipelineProgressEvent,
@@ -267,6 +267,11 @@ async function handleReprocess(req: ReprocessRequest): Promise<ReprocessResult> 
         succeeded: result.succeeded,
         failed: result.failed,
       } satisfies AppPipelineProgressEvent);
+      if (result.failed.length > 0) {
+        throw new Error(
+          `${result.failed.length} prompt output(s) failed: ${result.failed.join(", ")}`
+        );
+      }
       return result;
     },
   });
@@ -314,6 +319,11 @@ async function handleProcessRecording(req: ProcessRecordingRequest): Promise<Rep
         succeeded: result.succeeded,
         failed: result.failed,
       } satisfies AppPipelineProgressEvent);
+      if (result.failed.length > 0) {
+        throw new Error(
+          `${result.failed.length} prompt output(s) failed: ${result.failed.join(", ")}`
+        );
+      }
       return result;
     },
   });
@@ -492,6 +502,15 @@ export function registerIpcHandlers(): void {
     return devices.map((name) => ({ name }));
   });
 
+  ipcMain.handle("recording:test-audio", async () => {
+    const config = loadConfig();
+    return testAudioCapture({
+      micDevice: config.recording.mic_device,
+      systemDevice: config.recording.system_device,
+      durationMs: 4000,
+    });
+  });
+
   ipcMain.handle(
     "recording:start-for-draft",
     async (_e, req: StartRecordingForDraftRequest) => {
@@ -581,7 +600,18 @@ export function registerIpcHandlers(): void {
     try {
       const filePath = resolveRunMediaPath(runFolder, fileName, config);
       if (!fs.existsSync(filePath)) return null;
-      return pathToFileURL(filePath).toString();
+      // Return raw bytes + mime so the preload bridge creates a blob: URL.
+      // blob: URLs are the only approach that reliably passes Chromium's
+      // media URL safety check across both dev (Vite) and production (file://).
+      const data = fs.readFileSync(filePath);
+      const ext = path.extname(filePath).toLowerCase().slice(1);
+      const mimeMap: Record<string, string> = {
+        wav: "audio/wav", mp3: "audio/mpeg", m4a: "audio/mp4",
+        ogg: "audio/ogg", flac: "audio/flac", aiff: "audio/aiff",
+        mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
+      };
+      const mime = mimeMap[ext] ?? "application/octet-stream";
+      return { buffer: data.buffer, mime };
     } catch {
       return null;
     }
@@ -694,7 +724,7 @@ export function registerIpcHandlers(): void {
       model: config.llm_provider === "ollama" ? config.ollama.model : config.claude.model,
       task: async ({ signal, updateProgress }) => {
         try {
-          return await processRun({
+          const result = await processRun({
             config,
             runFolder: runContext.folderPath,
             title,
@@ -707,6 +737,12 @@ export function registerIpcHandlers(): void {
               forwardProgress(runContext.folderPath, event);
             },
           });
+          if (result.failed.length > 0) {
+            throw new Error(
+              `${result.failed.length} prompt output(s) failed: ${result.failed.join(", ")}`
+            );
+          }
+          return result;
         } catch (err) {
           if (!isAbortLikeError(err)) {
             broadcastToAll("pipeline:progress", {

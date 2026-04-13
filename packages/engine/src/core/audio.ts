@@ -81,6 +81,47 @@ export function asrAudioExtension(format: AsrAudioFormat): string {
   return format === "opus32k" ? ".ogg" : ".wav";
 }
 
+export interface SilenceCheckResult {
+  meanVolumeDb: number;
+  maxVolumeDb: number;
+  isSilent: boolean;
+}
+
+/**
+ * Analyze an audio file's volume levels to detect silence. An audio file
+ * is considered silent if its max volume is below the threshold (default
+ * -70 dB). This is useful for detecting when system audio capture via
+ * BlackHole is not receiving any routed audio.
+ */
+export async function checkAudioSilence(
+  audioPath: string,
+  thresholdDb = -70
+): Promise<SilenceCheckResult> {
+  try {
+    const { stderr } = await execFileAsync("ffmpeg", [
+      "-i", audioPath,
+      "-af", "volumedetect",
+      "-f", "null",
+      "-",
+    ]).catch((e) => ({ stderr: e.stderr as string, stdout: "" }));
+
+    const meanMatch = stderr.match(/mean_volume:\s*([-\d.]+)\s*dB/);
+    const maxMatch = stderr.match(/max_volume:\s*([-\d.]+)\s*dB/);
+
+    const meanVolumeDb = meanMatch ? parseFloat(meanMatch[1]) : -91;
+    const maxVolumeDb = maxMatch ? parseFloat(maxMatch[1]) : -91;
+
+    return {
+      meanVolumeDb,
+      maxVolumeDb,
+      isSilent: maxVolumeDb < thresholdDb,
+    };
+  } catch {
+    // If ffmpeg/ffprobe isn't available, don't block the flow.
+    return { meanVolumeDb: 0, maxVolumeDb: 0, isSilent: false };
+  }
+}
+
 export async function normalizeAudio(
   inputPath: string,
   outputPath: string,

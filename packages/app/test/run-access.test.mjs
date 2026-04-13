@@ -57,12 +57,20 @@ test("isAllowedRunDocumentName only accepts markdown documents and run.log", () 
   assert.equal(isAllowedRunDocumentName("notes.txt"), false);
 });
 
-test("run media names stay scoped to top-level source recordings", () => {
+test("run media names stay scoped to source recordings (flat and segmented)", () => {
+  // Flat layout
   assert.equal(isAllowedRunMediaName("audio/mic.wav"), true);
   assert.equal(isAllowedRunMediaName("audio/zoom.mp4"), true);
-  assert.equal(isAllowedRunMediaName("audio/nested/clip.wav"), false);
-  assert.equal(isAllowedRunMediaName("../audio/mic.wav"), false);
   assert.equal(isAllowedRunMediaName("audio/normalized-mic.wav"), false);
+  // Segmented layout (audio/<segment>/<file>)
+  assert.equal(isAllowedRunMediaName("audio/2026-04-13_10-31-13/mic.wav"), true);
+  assert.equal(isAllowedRunMediaName("audio/2026-04-13_10-31-13/system.wav"), true);
+  assert.equal(isAllowedRunMediaName("audio/seg-001/recording.mp4"), true);
+  assert.equal(isAllowedRunMediaName("audio/2026-04-13_10-31-13/normalized-mic.wav"), false);
+  // Traversal and nesting beyond segment level
+  assert.equal(isAllowedRunMediaName("audio/../etc/passwd"), false);
+  assert.equal(isAllowedRunMediaName("../audio/mic.wav"), false);
+  assert.equal(isAllowedRunMediaName("audio/seg/deep/clip.wav"), false);
 });
 
 test("resolveRunMediaPath keeps media access scoped to a run folder", () => {
@@ -81,11 +89,28 @@ test("resolveRunMediaPath keeps media access scoped to a run folder", () => {
     path.join(audioDir, "mic.wav")
   );
   assert.throws(
-    () => resolveRunMediaPath(runFolder, "audio/nested/mic.wav", config),
+    () => resolveRunMediaPath(runFolder, "audio/normalized-mic.wav", config),
     /invalid/
   );
+});
+
+test("resolveRunMediaPath resolves segmented recording paths", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-seg-"));
+  const dataPath = path.join(tmpDir, "Meetings");
+  const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "Segment Run");
+  const segDir = path.join(runFolder, RUN_AUDIO_DIR, "2026-04-13_10-31-13");
+
+  fs.mkdirSync(segDir, { recursive: true });
+  fs.writeFileSync(path.join(runFolder, RUN_INDEX_FILE), "---\nrun_id: 1\ntitle: Test\n---\n");
+  fs.writeFileSync(path.join(segDir, "mic.wav"), "audio");
+
+  const config = makeConfig(dataPath);
+  assert.equal(
+    resolveRunMediaPath(runFolder, "audio/2026-04-13_10-31-13/mic.wav", config),
+    path.join(segDir, "mic.wav")
+  );
   assert.throws(
-    () => resolveRunMediaPath(runFolder, "audio/normalized-mic.wav", config),
+    () => resolveRunMediaPath(runFolder, "audio/2026-04-13_10-31-13/normalized-mic.wav", config),
     /invalid/
   );
 });

@@ -40,8 +40,13 @@ export function isAllowedRunMediaName(fileName: string): boolean {
   const normalized = path.posix.normalize(fileName);
   if (normalized !== fileName) return false;
   const parts = normalized.split("/");
-  if (parts.length !== 2 || parts[0] !== RUN_AUDIO_DIR) return false;
-  const baseName = parts[1];
+  // Allow audio/<file> (flat) or audio/<segment>/<file> (segmented recordings)
+  if (parts.length < 2 || parts.length > 3 || parts[0] !== RUN_AUDIO_DIR) return false;
+  if (parts.length === 3) {
+    const segmentName = parts[1];
+    if (!segmentName || segmentName === ".." || segmentName === "." || path.posix.basename(segmentName) !== segmentName) return false;
+  }
+  const baseName = parts[parts.length - 1];
   if (!baseName || path.posix.basename(baseName) !== baseName) return false;
   if (baseName.startsWith("normalized-")) return false;
   return true;

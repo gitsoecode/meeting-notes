@@ -69,7 +69,8 @@ export {
   type PipelinePlannedStep,
 } from "./core/pipeline.js";
 
-export { getAudioInfo, mediaHasAudioStream } from "./core/audio.js";
+export { getAudioInfo, mediaHasAudioStream, checkAudioSilence, type SilenceCheckResult } from "./core/audio.js";
+export { testAudioCapture, type AudioTestReport, type DeviceTestResult } from "./core/audio-test.js";
 
 export {
   buildMarkdown,

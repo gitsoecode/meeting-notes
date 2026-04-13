@@ -3,6 +3,35 @@ import type { Page } from "@playwright/test";
 export async function installMockApi(page: Page) {
   await page.addInitScript(() => {
     const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value));
+
+    // Generate a tiny valid WAV as raw bytes for audio playback tests.
+    function generateTinyWavBytes(): Uint8Array {
+      const sampleRate = 8000;
+      const numSamples = 800;
+      const dataSize = numSamples * 2;
+      const buf = new ArrayBuffer(44 + dataSize);
+      const view = new DataView(buf);
+      const writeStr = (offset: number, str: string) => {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      };
+      writeStr(0, "RIFF");
+      view.setUint32(4, 36 + dataSize, true);
+      writeStr(8, "WAVE");
+      writeStr(12, "fmt ");
+      view.setUint32(16, 16, true);
+      view.setUint16(20, 1, true);
+      view.setUint16(22, 1, true);
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true);
+      view.setUint16(32, 2, true);
+      view.setUint16(34, 16, true);
+      writeStr(36, "data");
+      view.setUint32(40, dataSize, true);
+      for (let i = 0; i < numSamples; i++) {
+        view.setInt16(44 + i * 2, Math.round(Math.sin(i * 0.1) * 1000), true);
+      }
+      return new Uint8Array(buf);
+    }
     const listeners = {
       recordingStatus: new Set(),
       pipelineProgress: new Set(),
@@ -948,7 +977,11 @@ export async function installMockApi(page: Page) {
         },
         async getMediaSource(runFolder, fileName) {
           ensureRunAvailable(runFolder, { prune: true });
-          return `mock-media://${fileName}`;
+          // Return a tiny valid WAV as a blob: URL so <audio> elements can
+          // actually load and play in Playwright tests.
+          const wavBytes = generateTinyWavBytes();
+          const blob = new Blob([wavBytes], { type: "audio/wav" });
+          return URL.createObjectURL(blob);
         },
         async downloadMedia(runFolder) {
           ensureRunAvailable(runFolder, { prune: true });

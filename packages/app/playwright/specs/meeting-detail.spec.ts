@@ -113,6 +113,46 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByText("agenda.pdf")).toBeVisible();
   });
 
+  test("audio players load and have playable source", async ({ meetingDetail, page }) => {
+    await meetingDetail.tab("Recording").click();
+    await expect(page.locator("audio")).toHaveCount(2);
+
+    // Each audio element should have a src attribute set (data URL from mock)
+    const audioElements = page.locator("audio");
+    for (let i = 0; i < 2; i++) {
+      const src = await audioElements.nth(i).getAttribute("src");
+      expect(src).toBeTruthy();
+      expect(src).toContain("blob:");
+    }
+
+    // Wait for metadata to load, then verify duration > 0
+    const loaded = await audioElements.first().evaluate(
+      (el) =>
+        new Promise<{ duration: number; error: string | null }>((resolve) => {
+          const audio = el as HTMLAudioElement;
+          if (audio.readyState >= 1) {
+            resolve({ duration: audio.duration, error: audio.error?.message ?? null });
+            return;
+          }
+          audio.addEventListener("loadedmetadata", () =>
+            resolve({ duration: audio.duration, error: null })
+          );
+          audio.addEventListener("error", () =>
+            resolve({ duration: NaN, error: audio.error?.message ?? "unknown error" })
+          );
+          audio.load();
+        })
+    );
+    expect(loaded.error).toBeNull();
+    expect(loaded.duration).toBeGreaterThan(0);
+
+    // Verify no media error occurred (the element is functional)
+    const mediaError = await audioElements.first().evaluate(
+      (el) => (el as HTMLAudioElement).error?.message ?? null
+    );
+    expect(mediaError).toBeNull();
+  });
+
   test("recording delete dialog cancels cleanly", async ({ meetingDetail, page }) => {
     await meetingDetail.tab("Recording").click();
     await meetingDetail.deleteRecordingButton().click();

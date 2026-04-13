@@ -60,20 +60,37 @@ export class OllamaProvider implements LlmProvider {
     options?: LlmCallOptions
   ): Promise<LlmResponse> {
     const model = modelOverride && modelOverride.trim() ? modelOverride : this.model;
-    const res = await fetch(`${this.baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      signal: options?.signal,
-      body: JSON.stringify({
-        model,
-        stream: false,
-        keep_alive: "5s",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage },
-        ],
-      }),
-    });
+    const url = `${this.baseUrl}/api/chat`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: options?.signal,
+        body: JSON.stringify({
+          model,
+          stream: false,
+          keep_alive: "5s",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage },
+          ],
+        }),
+      });
+    } catch (err) {
+      // Enrich the generic "fetch failed" with diagnostic context.
+      const original = err instanceof Error ? err.message : String(err);
+      let detail = `Ollama request to ${url} failed (model: ${model}). `;
+      try {
+        const alive = await pingOllama(this.baseUrl);
+        detail += alive
+          ? "Ollama is still running — the connection may have been interrupted by system sleep or a timeout."
+          : "Ollama appears to be unreachable — it may have crashed or been stopped.";
+      } catch {
+        detail += "Could not determine if Ollama is still running.";
+      }
+      throw new Error(`${detail} Original error: ${original}`);
+    }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`Ollama /api/chat ${res.status}: ${text || res.statusText}`);

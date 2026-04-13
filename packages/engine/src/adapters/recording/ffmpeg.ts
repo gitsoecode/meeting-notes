@@ -12,7 +12,19 @@ interface SpawnedRecording {
   source: "mic" | "system";
 }
 
+type DiagnosticLogger = {
+  info(message: string, data?: Record<string, unknown>): void;
+  warn(message: string, data?: Record<string, unknown>): void;
+  error(message: string, data?: Record<string, unknown>): void;
+};
+
 export class FfmpegRecorder implements Recorder {
+  private logger?: DiagnosticLogger;
+
+  constructor(logger?: DiagnosticLogger) {
+    this.logger = logger;
+  }
+
   async listAudioDevices(): Promise<string[]> {
     try {
       // ffmpeg writes device list to stderr, exits with non-zero
@@ -64,9 +76,16 @@ export class FfmpegRecorder implements Recorder {
       }
     }
 
+    this.logger?.info("Audio devices available", {
+      devices: knownDevices,
+      requestedMic: options.micDevice || "(system default)",
+      resolvedMic: micDevice,
+      requestedSystem: options.systemDevice || "(none)",
+    });
+
     // Always start mic recording
     const micPath = path.join(audioDir, "mic.wav");
-    const micChild = spawnFfmpegRecord(micDevice, micPath);
+    const micChild = spawnFfmpegRecord(micDevice, micPath, this.logger);
     recordings.push({ child: micChild, outputPath: micPath, source: "mic" });
 
     // Try to start system recording (best-effort)
@@ -75,8 +94,13 @@ export class FfmpegRecorder implements Recorder {
       systemAvailable = knownDevices.some((d) => d === options.systemDevice || d.includes(options.systemDevice));
       if (systemAvailable) {
         const systemPath = path.join(audioDir, "system.wav");
-        const systemChild = spawnFfmpegRecord(options.systemDevice, systemPath);
+        const systemChild = spawnFfmpegRecord(options.systemDevice, systemPath, this.logger);
         recordings.push({ child: systemChild, outputPath: systemPath, source: "system" });
+      } else {
+        this.logger?.warn("System audio device not found in device list", {
+          requested: options.systemDevice,
+          available: knownDevices,
+        });
       }
     }
 
@@ -134,7 +158,7 @@ export class FfmpegRecorder implements Recorder {
   }
 }
 
-function spawnFfmpegRecord(deviceName: string, outputPath: string): ChildProcess {
+function spawnFfmpegRecord(deviceName: string, outputPath: string, logger?: DiagnosticLogger): ChildProcess {
   // AVFoundation audio-only input syntax: ":deviceName" or ":index"
   // Use device name as-is; AVFoundation accepts names directly
   const inputSpec = `:${deviceName}`;
@@ -142,18 +166,34 @@ function spawnFfmpegRecord(deviceName: string, outputPath: string): ChildProcess
   const args = [
     "-f", "avfoundation",
     "-i", inputSpec,
-    "-ar", "16000",
-    "-ac", "1",
+    // Record at the device's native sample rate to avoid real-time
+    // resampling, which can cause choppy audio under load. The
+    // normalizeAudio step downsamples to 16 kHz before ASR.
     "-c:a", "pcm_s16le",
     "-y",
     outputPath,
   ];
 
-  // Run as a foreground child of the CLI: the `start` command now waits
-  // interactively for the user to press Enter, so we want predictable
-  // SIGINT propagation and no stray pipes keeping the event loop alive.
   const child = spawn("ffmpeg", args, {
-    stdio: ["ignore", "ignore", "ignore"],
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+
+  // Collect stderr for diagnostics on non-zero exit.
+  let stderrChunks: string[] = [];
+  child.stderr?.on("data", (chunk: Buffer) => {
+    stderrChunks.push(chunk.toString());
+    // Cap memory: keep only the last ~32 KB of stderr.
+    if (stderrChunks.length > 100) stderrChunks = stderrChunks.slice(-50);
+  });
+  child.on("exit", (code, signal) => {
+    if (code !== 0 && code !== null && signal !== "SIGINT") {
+      const stderr = stderrChunks.join("").slice(-2000);
+      logger?.error(`ffmpeg exited with code ${code} for device "${deviceName}"`, {
+        exitCode: code,
+        signal,
+        stderr,
+      });
+    }
   });
 
   return child;

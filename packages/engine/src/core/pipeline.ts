@@ -458,6 +458,8 @@ function isRetryableError(err: unknown): boolean {
     msg.includes("timeout") ||
     msg.includes("econnreset") ||
     msg.includes("etimedout") ||
+    msg.includes("econnrefused") ||
+    msg.includes("fetch failed") ||
     msg.includes("overloaded")
   );
 }

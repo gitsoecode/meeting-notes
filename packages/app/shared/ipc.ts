@@ -492,7 +492,7 @@ export interface MeetingNotesApi {
     list: () => Promise<RunSummary[]>;
     get: (runFolder: string) => Promise<RunDetail>;
     readDocument: (runFolder: string, fileName: string) => Promise<string>;
-    getMediaSource: (runFolder: string, fileName: string) => Promise<string>;
+    getMediaSource: (runFolder: string, fileName: string) => Promise<string | null>;
     downloadMedia: (runFolder: string, fileName: string) => Promise<DownloadMediaResult>;
     deleteMedia: (runFolder: string, fileName: string) => Promise<void>;
     writeNotes: (runFolder: string, content: string) => Promise<void>;
