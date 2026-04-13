@@ -27,7 +27,7 @@ export class SettingsPage {
     }).first();
   }
 
-  // General card
+  // Other tab card
   obsidianSwitch() {
     const card = this.card("Obsidian Integration");
     return card.getByRole("switch");

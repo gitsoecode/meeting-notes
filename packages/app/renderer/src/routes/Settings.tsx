@@ -277,7 +277,7 @@ export function Settings({ config, onChange }: SettingsProps) {
           <TabsTrigger value="models">Models</TabsTrigger>
           <TabsTrigger value="audio">Audio</TabsTrigger>
           <TabsTrigger value="storage">Storage</TabsTrigger>
-          <TabsTrigger value="system">General</TabsTrigger>
+          <TabsTrigger value="system">Other</TabsTrigger>
         </TabsList>
 
         {/* ── Models tab ── */}
@@ -581,6 +581,89 @@ export function Settings({ config, onChange }: SettingsProps) {
               />
             </CardContent>
           </Card>
+
+          <Card className="overflow-hidden p-5 md:p-6">
+            <CardHeader className="mb-3">
+              <div className="space-y-1">
+                <CardTitle>Chat Launcher</CardTitle>
+                <CardDescription>
+                  Default prompt used when exporting meeting context to an external AI chat app.
+                </CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  Completed meeting prompt
+                </label>
+                <Textarea
+                  value={config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT}
+                  onChange={(e) =>
+                    void save({
+                      ...config,
+                      chat_launcher: {
+                        ...config.chat_launcher,
+                        default_prompt: e.target.value,
+                      },
+                    })
+                  }
+                  rows={3}
+                  className="resize-none"
+                />
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Pre-filled when launching chat from a completed meeting.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  Draft meeting prompt
+                </label>
+                <Textarea
+                  value={config.chat_launcher?.draft_prompt ?? ""}
+                  onChange={(e) =>
+                    void save({
+                      ...config,
+                      chat_launcher: {
+                        default_prompt: config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT,
+                        ...config.chat_launcher,
+                        draft_prompt: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  rows={2}
+                  className="resize-none"
+                  placeholder="Help me prepare for this meeting — suggest talking points and questions."
+                />
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Pre-filled when launching chat from a draft meeting.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-[var(--text-secondary)]">
+                  During-recording prompt
+                </label>
+                <Textarea
+                  value={config.chat_launcher?.recording_prompt ?? ""}
+                  onChange={(e) =>
+                    void save({
+                      ...config,
+                      chat_launcher: {
+                        default_prompt: config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT,
+                        ...config.chat_launcher,
+                        recording_prompt: e.target.value || undefined,
+                      },
+                    })
+                  }
+                  rows={2}
+                  className="resize-none"
+                  placeholder="Help me with real-time questions and action items."
+                />
+                <p className="text-xs text-[var(--text-secondary)]">
+                  Pre-filled when launching chat during an active recording.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* ── Audio tab ── */}
@@ -729,89 +812,6 @@ export function Settings({ config, onChange }: SettingsProps) {
                     void save({ ...config, shortcuts: { ...config.shortcuts, toggle_recording: next } })
                   }
                 />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Chat Launcher</CardTitle>
-                <CardDescription>
-                  Default prompt used when exporting meeting context to an external AI chat app.
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[var(--text-secondary)]">
-                  Completed meeting prompt
-                </label>
-                <Textarea
-                  value={config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT}
-                  onChange={(e) =>
-                    void save({
-                      ...config,
-                      chat_launcher: {
-                        ...config.chat_launcher,
-                        default_prompt: e.target.value,
-                      },
-                    })
-                  }
-                  rows={3}
-                  className="resize-none"
-                />
-                <p className="text-xs text-[var(--text-secondary)]">
-                  Pre-filled when launching chat from a completed meeting.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[var(--text-secondary)]">
-                  Draft meeting prompt
-                </label>
-                <Textarea
-                  value={config.chat_launcher?.draft_prompt ?? ""}
-                  onChange={(e) =>
-                    void save({
-                      ...config,
-                      chat_launcher: {
-                        default_prompt: config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT,
-                        ...config.chat_launcher,
-                        draft_prompt: e.target.value || undefined,
-                      },
-                    })
-                  }
-                  rows={2}
-                  className="resize-none"
-                  placeholder="Help me prepare for this meeting — suggest talking points and questions."
-                />
-                <p className="text-xs text-[var(--text-secondary)]">
-                  Pre-filled when launching chat from a draft meeting.
-                </p>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[var(--text-secondary)]">
-                  During-recording prompt
-                </label>
-                <Textarea
-                  value={config.chat_launcher?.recording_prompt ?? ""}
-                  onChange={(e) =>
-                    void save({
-                      ...config,
-                      chat_launcher: {
-                        default_prompt: config.chat_launcher?.default_prompt ?? DEFAULT_CHAT_PROMPT,
-                        ...config.chat_launcher,
-                        recording_prompt: e.target.value || undefined,
-                      },
-                    })
-                  }
-                  rows={2}
-                  className="resize-none"
-                  placeholder="Help me with real-time questions and action items."
-                />
-                <p className="text-xs text-[var(--text-secondary)]">
-                  Pre-filled when launching chat during an active recording.
-                </p>
               </div>
             </CardContent>
           </Card>

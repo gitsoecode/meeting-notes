@@ -23,7 +23,7 @@ test.describe("Settings", () => {
     await settings.openTab("Storage");
     await expect(settings.dataPathInput()).toBeVisible();
 
-    await settings.openTab("General");
+    await settings.openTab("Other");
     await expect(settings.dependenciesCard()).toBeVisible();
   });
 
@@ -145,7 +145,7 @@ test.describe("Settings", () => {
   });
 
   test("dependencies card shows all rows", async ({ settings, page }) => {
-    await settings.openTab("General");
+    await settings.openTab("Other");
     await expect(page.getByText("ffmpeg", { exact: true })).toBeVisible();
     await expect(page.getByText("BlackHole (2ch)", { exact: true })).toBeVisible();
     await expect(page.getByText("Python", { exact: true })).toBeVisible();
@@ -155,7 +155,7 @@ test.describe("Settings", () => {
   });
 
   test("shortcut section is visible", async ({ page, settings }) => {
-    await settings.openTab("General");
+    await settings.openTab("Other");
     await expect(page.getByText("Toggle recording")).toBeVisible();
     // The shortcut recorder should show current binding
     await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
@@ -195,7 +195,7 @@ test.describe("Settings", () => {
   }) => {
     await app.setDependencyState({ blackhole: "missing", ffmpeg: null });
     await page.reload();
-    await settings.openTab("General");
+    await settings.openTab("Other");
     await expect(settings.dependenciesCard().getByText(/not found/i).first()).toBeVisible();
 
     // Transcription is now on Models tab
@@ -215,7 +215,7 @@ test.describe("Settings", () => {
   });
 
   test("settings page can scroll past shortcuts to system health", async ({ page, settings }) => {
-    await settings.openTab("General");
+    await settings.openTab("Other");
     const systemHealth = page.getByText("System Health", { exact: true });
     await systemHealth.scrollIntoViewIfNeeded();
     await expect(systemHealth).toBeVisible();

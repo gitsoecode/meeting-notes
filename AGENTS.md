@@ -36,6 +36,7 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
   2. targeted Playwright specs for the changed area
   3. `npm run test:e2e --workspace @meeting-notes/app`
   4. `npm test`
+  5. `npm run rebuild:native --workspace @meeting-notes/app` — **always run this after tests finish** so the Electron app can start. Tests rebuild `better-sqlite3` for Node.js; this restores it for Electron.
 - For UI changes, the default testing bar is action completeness, not route render:
   - cover visible buttons, menus, tabs, dropdowns, row actions, bulk actions, and modal confirm/cancel paths on affected pages
   - prefer page-object and semantic assertions over brittle global text checks
