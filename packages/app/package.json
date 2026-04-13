@@ -22,7 +22,7 @@
     "dev:preload": "tsc -p tsconfig.preload.json --watch --preserveWatchOutput",
     "dev:renderer": "vite",
     "preview:renderer": "vite preview --host 127.0.0.1 --port 4173",
-    "start:electron": "wait-on tcp:5173 dist/main/index.js dist/preload/index.js && electron .",
+    "start:electron": "wait-on tcp:5173 dist/main/index.js dist/preload/index.js && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "start": "electron ."
   },
   "dependencies": {

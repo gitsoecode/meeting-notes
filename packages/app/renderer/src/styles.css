@@ -249,6 +249,7 @@ button.ui-switch[data-state="checked"] > .ui-switch-thumb {
 .markdown-editor {
   height: 100%;
   width: 100%;
+  overflow-y: auto;
 }
 
 .markdown-editor .milkdown {
@@ -257,6 +258,7 @@ button.ui-switch[data-state="checked"] > .ui-switch-thumb {
   border: none !important;
   box-shadow: none !important;
   background: transparent !important;
+  overflow-y: auto;
 }
 
 .markdown-editor .milkdown .editor {

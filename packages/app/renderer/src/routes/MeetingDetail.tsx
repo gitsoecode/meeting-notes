@@ -697,7 +697,7 @@ export function MeetingDetail({
   ) : null;
 
   return (
-    <PageScaffold className="gap-4 md:gap-5">
+    <PageScaffold className="gap-4 overflow-hidden md:gap-5">
       <MeetingHeader
         status={detail.status}
         title={detail.title}
@@ -782,6 +782,7 @@ export function MeetingDetail({
             setActiveTabId(value as TabKind);
           });
         }}
+        className="flex min-h-0 flex-1 flex-col"
       >
         <TabsList>
           <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -977,7 +978,7 @@ export function MeetingDetail({
         </TabsContent>
 
         <TabsContent value="notes">
-          <div className="space-y-4">
+          <div className="flex flex-1 min-h-0 flex-col gap-4">
             {isCompletedMeeting && !notesEditMode ? (
               <Card className="p-4 md:p-6">
                 <CardHeader className="mb-4">
@@ -997,7 +998,7 @@ export function MeetingDetail({
                 </CardContent>
               </Card>
             ) : (
-              <Card className="p-4">
+              <Card className="flex flex-1 min-h-0 flex-col p-4">
                 <CardHeader className="mb-4">
                   <div className="flex items-center justify-between w-full">
                     <div className="flex items-center gap-3">
@@ -1010,8 +1011,8 @@ export function MeetingDetail({
                     </CardTitle>
                   </div>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className={`h-[60vh] overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
+                <CardContent className="flex flex-1 min-h-0 flex-col gap-4">
+                  <div className={`flex-1 min-h-0 overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
                     <MarkdownEditor
                       value={notesContent}
                       onChange={onNotesChange}

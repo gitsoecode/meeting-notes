@@ -9,7 +9,7 @@ export function PageScaffold({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("@container/main flex min-h-0 flex-1 flex-col gap-6 p-4 md:p-6", className)}
+      className={cn("@container/main flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-4 md:p-6", className)}
       {...props}
     >
       {children}

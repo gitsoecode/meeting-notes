@@ -294,7 +294,7 @@ export function App() {
             }
             isDirty={isDirty}
           />
-          <main className="h-full overflow-y-auto">
+          <main className="flex min-h-0 flex-1 flex-col">
             {route.name === "record" && (
               <RecordView
                 recording={recording}

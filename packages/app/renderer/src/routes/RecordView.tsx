@@ -621,7 +621,7 @@ export function RecordView({
   const currentStatus = isDraft ? "draft" : isPaused ? "paused" : "recording";
 
   return (
-    <PageScaffold className="gap-4 md:gap-5">
+    <PageScaffold className="gap-4 overflow-hidden md:gap-5">
       {/* Unified header */}
       <MeetingHeader
         status={currentStatus}
@@ -671,7 +671,7 @@ export function RecordView({
 
       {/* ---- DRAFT: tabbed content ---- */}
       {isDraft && (
-        <Tabs value={draftTab} onValueChange={(v) => setDraftTab(v as typeof draftTab)}>
+        <Tabs value={draftTab} onValueChange={(v) => setDraftTab(v as typeof draftTab)} className="flex min-h-0 flex-1 flex-col">
           <TabsList>
             <TabsTrigger value="prep">Prep</TabsTrigger>
             <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -680,13 +680,13 @@ export function RecordView({
           </TabsList>
 
           <TabsContent value="prep" forceMount className={draftTab !== "prep" ? "hidden" : ""}>
-            <div className="h-[60vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
+            <div className="flex-1 min-h-0 overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
               <MarkdownEditor value={prepNotes} onChange={onPrepChange} />
             </div>
           </TabsContent>
 
           <TabsContent value="notes" forceMount className={draftTab !== "notes" ? "hidden" : ""}>
-            <div className="h-[60vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
+            <div className="flex-1 min-h-0 overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
               <MarkdownEditor
                 value={notes}
                 onChange={onNotesChange}
@@ -770,7 +770,7 @@ export function RecordView({
           {/* Live notes — primary editor */}
           <div>
             <div className="mb-2 text-sm font-medium text-[var(--text-primary)]">Live notes</div>
-            <div className="min-h-[50vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
+            <div className="h-[60vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
               <MarkdownEditor
                 value={notes}
                 onChange={onNotesChange}

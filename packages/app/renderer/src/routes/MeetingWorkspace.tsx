@@ -319,6 +319,7 @@ export function MeetingWorkspace({
   };
 
   const refresh = async () => {
+    if (deletedRef.current) return;
     setLoading(true);
     try {
       const nextDetail = await api.runs.get(runFolder);
@@ -659,6 +660,8 @@ export function MeetingWorkspace({
       cancelLabel: isDraft ? "Keep draft" : "Keep meeting",
       confirmVariant: "destructive",
       action: async () => {
+        deletedRef.current = true;
+        if (prepSaveTimer.current != null) window.clearTimeout(prepSaveTimer.current);
         if (isLive) {
           await api.recording.stop({ mode: "delete" });
           setNotes("");
@@ -887,7 +890,7 @@ export function MeetingWorkspace({
             </DropdownMenuItem>
           )}
           <DropdownMenuItem onSelect={() => api.runs.openInFinder(runFolder)}>Open folder</DropdownMenuItem>
-          {!isLive && (
+          {!isRecording && (
             <DropdownMenuItem onSelect={() => void onDelete()} className="text-[var(--error)]">
               {isDraft ? "Delete draft" : "Delete meeting"}
             </DropdownMenuItem>
@@ -898,7 +901,7 @@ export function MeetingWorkspace({
   );
 
   return (
-    <PageScaffold className="gap-4 md:gap-5">
+    <PageScaffold className={`gap-4 md:gap-5 ${isLive && focusedRecording ? "" : "overflow-hidden"}`}>
       <MeetingHeader
         status={effectiveStatus}
         title={detail.title}
@@ -916,7 +919,7 @@ export function MeetingWorkspace({
 
       {/* ---- Focused recording view ---- */}
       {isLive && focusedRecording ? (
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
           {/* Toggle to full workspace — at top */}
           <button
             type="button"
@@ -953,7 +956,7 @@ export function MeetingWorkspace({
           {/* Live notes — primary editor */}
           <div>
             <div className="mb-2 text-sm font-medium text-[var(--text-primary)]">Live notes</div>
-            <div className="min-h-[50vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
+            <div className="h-[60vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
               <MarkdownEditor
                 value={notes}
                 onChange={onNotesChange}
@@ -995,6 +998,7 @@ export function MeetingWorkspace({
             setActiveTabId(value as TabKind);
           });
         }}
+        className="flex min-h-0 flex-1 flex-col"
       >
         <TabsList>
           <TabsTrigger value="metadata">Metadata</TabsTrigger>
@@ -1010,7 +1014,7 @@ export function MeetingWorkspace({
         {/* ---- PREP TAB ---- */}
         <TabsContent value="prep" forceMount className={activeTabId !== "prep" ? "hidden" : ""}>
           {isDraft ? (
-            <div className="h-[60vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
+            <div className="flex-1 min-h-0 overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
               <MarkdownEditor value={prepNotes} onChange={onPrepChange} />
             </div>
           ) : isLive ? (
@@ -1046,7 +1050,7 @@ export function MeetingWorkspace({
         {/* ---- NOTES TAB ---- */}
         <TabsContent value="notes" forceMount className={activeTabId !== "notes" ? "hidden" : ""}>
           {(isDraft || isLive) ? (
-            <div className="min-h-[50vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
+            <div className="flex-1 min-h-0 overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
               <MarkdownEditor
                 value={notes}
                 onChange={onNotesChange}
@@ -1068,7 +1072,7 @@ export function MeetingWorkspace({
               )}
             </div>
           ) : isCompletedMeeting && notesEditMode ? (
-            <div className="space-y-4">
+            <div className="flex flex-1 min-h-0 flex-col gap-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-sm font-medium text-[var(--text-secondary)]">Editing notes</h3>
                 <div className="flex gap-2">
@@ -1089,7 +1093,7 @@ export function MeetingWorkspace({
                   </Button>
                 </div>
               </div>
-              <div className={`h-[60vh] overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
+              <div className={`flex-1 min-h-0 overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
                 <MarkdownEditor
                   value={completedNotesContent}
                   onChange={onNotesChange}
@@ -1494,9 +1498,12 @@ export function MeetingWorkspace({
         onConfirm={async () => {
           setStopMode("delete");
           try {
+            deletedRef.current = true;
+            if (prepSaveTimer.current != null) window.clearTimeout(prepSaveTimer.current);
             if (isLive) { await api.recording.stop({ mode: "delete" }); setNotes(""); }
-            else if (isDraft) { await api.runs.deleteRun(runFolder); onBack(); }
+            else if (isDraft) { await api.runs.deleteRun(runFolder); }
             setConfirmDeleteOpen(false);
+            onBack();
           } catch (err) { setError(err instanceof Error ? err.message : String(err)); }
           finally { setStopMode(null); }
         }}

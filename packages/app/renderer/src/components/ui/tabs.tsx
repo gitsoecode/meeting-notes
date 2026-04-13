@@ -40,7 +40,7 @@ export const TabsContent = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <TabsPrimitive.Content
     ref={ref}
-    className={cn("mt-3 outline-none", className)}
+    className={cn("mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto outline-none", className)}
     {...props}
   />
 ));
