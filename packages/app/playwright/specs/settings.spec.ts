@@ -42,10 +42,7 @@ test.describe("Settings", () => {
     // Close by pressing Escape
     await page.keyboard.press("Escape");
 
-    // Click system select
-    await settings.systemDeviceSelect().click();
-    await expect(page.getByRole("option", { name: "BlackHole 2ch" })).toBeVisible();
-    await page.keyboard.press("Escape");
+    // System audio is now automatic (AudioTee) — no device selector
   });
 
   test("ASR provider switch to OpenAI shows warning", async ({
@@ -147,7 +144,7 @@ test.describe("Settings", () => {
   test("dependencies card shows all rows", async ({ settings, page }) => {
     await settings.openTab("Other");
     await expect(page.getByText("ffmpeg", { exact: true })).toBeVisible();
-    await expect(page.getByText("BlackHole (2ch)", { exact: true })).toBeVisible();
+    // BlackHole removed — system audio is automatic via AudioTee
     await expect(page.getByText("Python", { exact: true })).toBeVisible();
     await expect(page.getByText("Parakeet", { exact: true })).toBeVisible();
     await expect(page.getByText("whisper.cpp", { exact: true })).toBeVisible();
@@ -193,7 +190,7 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
-    await app.setDependencyState({ blackhole: "missing", ffmpeg: null });
+    await app.setDependencyState({ ffmpeg: null });
     await page.reload();
     await settings.openTab("Other");
     await expect(settings.dependenciesCard().getByText(/not found/i).first()).toBeVisible();

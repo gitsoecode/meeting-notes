@@ -141,7 +141,6 @@ test.describe("Setup Wizard", () => {
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ffmpeg: null,
-        blackhole: "missing",
       });
     });
 
