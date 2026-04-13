@@ -29,7 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { relativeDateLabel } from "../constants";
+import { formatScheduledTime, relativeDateLabel, relativeTimeLabel } from "../constants";
+import { getRunSortValue } from "../../../shared/sort";
 import { getDefaultPromptModel } from "../lib/prompt-metadata";
 
 interface MeetingsListProps {
@@ -144,8 +145,7 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
   const filteredRuns = useMemo(() => {
     const query = search.trim().toLowerCase();
     const base = [...runs].sort(
-      (a, b) =>
-        (Date.parse(b.started || b.date) || 0) - (Date.parse(a.started || a.date) || 0)
+      (a, b) => getRunSortValue(b) - getRunSortValue(a)
     );
     if (!query) return base;
     return base.filter((run) => {
@@ -263,7 +263,8 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                     />
                   </TableHead>
                   <TableHead>Meeting</TableHead>
-                  <TableHead>When</TableHead>
+                  <TableHead className="hidden lg:table-cell">Scheduled</TableHead>
+                  <TableHead>Last Updated</TableHead>
                   <TableHead>Duration</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
@@ -309,8 +310,11 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                             </div>
                           ) : null}
                         </TableCell>
+                        <TableCell className="hidden text-sm text-[var(--text-secondary)] lg:table-cell">
+                          {formatScheduledTime(run.scheduled_time)}
+                        </TableCell>
                         <TableCell className="text-sm text-[var(--text-secondary)]">
-                          {relativeDateLabel(run.started || run.date)}
+                          {relativeTimeLabel(run.updated_at || run.started || run.date)}
                         </TableCell>
                         <TableCell className="text-sm text-[var(--text-secondary)]">
                           {run.duration_minutes != null ? `${run.duration_minutes.toFixed(1)}m` : "—"}
@@ -368,7 +372,8 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                       </Badge>
                     </div>
                     <div className="mt-1 text-xs text-[var(--text-secondary)]">
-                      {relativeDateLabel(run.started || run.date)}
+                      {relativeTimeLabel(run.updated_at || run.started || run.date)}
+                      {run.scheduled_time ? ` · ${formatScheduledTime(run.scheduled_time)}` : ""}
                       {run.duration_minutes != null ? ` · ${run.duration_minutes.toFixed(1)}m` : ""}
                     </div>
                     {activeJob ? (

@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS runs (
   asr_provider     TEXT NOT NULL DEFAULT '',
   llm_provider     TEXT NOT NULL DEFAULT '',
   scheduled_time   TEXT,
-  selected_prompts TEXT
+  selected_prompts TEXT,
+  updated_at       TEXT
 );
 
 CREATE TABLE IF NOT EXISTS prompt_outputs (
@@ -75,6 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_runs_status ON runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_date ON runs(date DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_started ON runs(started DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status_started ON runs(status, started DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_updated_at ON runs(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_participants_email ON participants(email);
 CREATE INDEX IF NOT EXISTS idx_prompt_outputs_run ON prompt_outputs(run_id, status);
 

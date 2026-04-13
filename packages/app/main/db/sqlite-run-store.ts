@@ -30,13 +30,14 @@ export class SqliteRunStore implements RunStore {
           title = ?, description = ?, date = ?, started = ?, ended = ?,
           status = ?, source_mode = ?, duration_minutes = ?,
           asr_provider = ?, llm_provider = ?, scheduled_time = ?,
-          selected_prompts = ?
+          selected_prompts = ?, updated_at = ?
         WHERE run_id = ?
       `).run(
         manifest.title, manifest.description, manifest.date, manifest.started,
         manifest.ended, manifest.status, manifest.source_mode, manifest.duration_minutes,
         manifest.asr_provider, manifest.llm_provider, manifest.scheduled_time,
         manifest.selected_prompts ? JSON.stringify(manifest.selected_prompts) : null,
+        new Date().toISOString(),
         manifest.run_id
       );
 
@@ -66,6 +67,10 @@ export class SqliteRunStore implements RunStore {
       state.model ?? null
     );
 
+    this.db.prepare("UPDATE runs SET updated_at = ? WHERE run_id = ?").run(
+      new Date().toISOString(), row.run_id
+    );
+
     // Regenerate index.md with full manifest
     const manifest = this.assembleManifest(
       this.db.prepare("SELECT * FROM runs WHERE run_id = ?").get(row.run_id) as RunRow
@@ -79,14 +84,15 @@ export class SqliteRunStore implements RunStore {
         INSERT INTO runs
           (run_id, folder_path, title, description, date, started, ended, status,
            source_mode, duration_minutes, asr_provider, llm_provider, scheduled_time,
-           selected_prompts)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           selected_prompts, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         manifest.run_id, folderPath, manifest.title, manifest.description,
         manifest.date, manifest.started, manifest.ended, manifest.status,
         manifest.source_mode, manifest.duration_minutes, manifest.asr_provider,
         manifest.llm_provider, manifest.scheduled_time,
-        manifest.selected_prompts ? JSON.stringify(manifest.selected_prompts) : null
+        manifest.selected_prompts ? JSON.stringify(manifest.selected_prompts) : null,
+        new Date().toISOString()
       );
 
       // Prompt outputs
@@ -131,7 +137,7 @@ export class SqliteRunStore implements RunStore {
     del();
   }
 
-  listRuns(): Array<{ manifest: RunManifest; folderPath: string }> {
+  listRuns(): Array<{ manifest: RunManifest; folderPath: string; updatedAt: string | null }> {
     const rows = this.db.prepare("SELECT * FROM runs ORDER BY started DESC").all() as RunRow[];
     // Batch-load all prompt outputs for efficiency
     const allOutputs = this.db.prepare("SELECT * FROM prompt_outputs").all() as PromptOutputRow[];
@@ -145,6 +151,7 @@ export class SqliteRunStore implements RunStore {
     return rows.map((row) => ({
       manifest: this.assembleManifestWithOutputs(row, outputsByRun.get(row.run_id) ?? {}),
       folderPath: row.folder_path,
+      updatedAt: row.updated_at,
     }));
   }
 
@@ -252,6 +259,7 @@ interface RunRow {
   llm_provider: string;
   scheduled_time: string | null;
   selected_prompts: string | null;
+  updated_at: string | null;
 }
 
 interface PromptOutputRow {

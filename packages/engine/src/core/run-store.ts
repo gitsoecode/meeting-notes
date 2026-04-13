@@ -11,5 +11,5 @@ export interface RunStore {
   insertRun(manifest: RunManifest, folderPath: string): void;
   deleteRun(folderPath: string): void;
   deleteRuns(folderPaths: string[]): void;
-  listRuns(): Array<{ manifest: RunManifest; folderPath: string }>;
+  listRuns(): Array<{ manifest: RunManifest; folderPath: string; updatedAt?: string | null }>;
 }

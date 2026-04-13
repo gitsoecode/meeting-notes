@@ -20,6 +20,21 @@ export function migrate(db: Database.Database): void {
     db.pragma("user_version = 2");
     appLogger.info("Database migration v2 applied");
   }
+
+  if (version < 3) {
+    appLogger.info("Applying database migration v3");
+    const cols = db.pragma("table_info(runs)") as Array<{ name: string }>;
+    const hasUpdatedAt = cols.some((c) => c.name === "updated_at");
+    if (!hasUpdatedAt) {
+      db.exec("ALTER TABLE runs ADD COLUMN updated_at TEXT");
+    }
+    db.exec(`
+      UPDATE runs SET updated_at = COALESCE(ended, started, date) WHERE updated_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_runs_updated_at ON runs(updated_at DESC);
+    `);
+    db.pragma("user_version = 3");
+    appLogger.info("Database migration v3 applied");
+  }
 }
 
 export function isEmptyDatabase(db: Database.Database): boolean {

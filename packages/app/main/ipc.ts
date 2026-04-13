@@ -98,7 +98,8 @@ import {
   RUN_ATTACHMENTS_DIR,
 } from "./run-access.js";
 import { bulkReprocessRuns, processRecordedRun, reprocessRun } from "./runs-service.js";
-import { getRunStartedSortValue, validatePromptModelSelection } from "./model-validation.js";
+import { validatePromptModelSelection } from "./model-validation.js";
+import { getRunSortValue } from "../shared/sort.js";
 import { syncToggleRecordingShortcut } from "./shortcuts.js";
 import { assertImportMediaPath, type PickedMediaFile } from "./media-import.js";
 import { broadcastToAll } from "./events.js";
@@ -169,7 +170,7 @@ function isAbortLikeError(err: unknown): boolean {
   return err instanceof OperationAbortedError || (err instanceof Error && err.name === "AbortError");
 }
 
-function toRunSummary(manifest: RunManifest, folderPath: string): RunSummary {
+function toRunSummary(manifest: RunManifest, folderPath: string, updatedAt?: string | null): RunSummary {
   return {
     run_id: manifest.run_id,
     title: manifest.title,
@@ -184,6 +185,7 @@ function toRunSummary(manifest: RunManifest, folderPath: string): RunSummary {
     folder_path: folderPath,
     prompt_output_ids: Object.keys(manifest.prompt_outputs),
     scheduled_time: manifest.scheduled_time ?? null,
+    updated_at: updatedAt ?? null,
   };
 }
 
@@ -526,9 +528,9 @@ export function registerIpcHandlers(): void {
       // Prune stale DB entries whose folders no longer exist on disk
       const stale: string[] = [];
       const valid: RunSummary[] = [];
-      for (const { manifest, folderPath } of all) {
+      for (const { manifest, folderPath, updatedAt } of all) {
         if (fs.existsSync(path.join(folderPath, "index.md"))) {
-          valid.push(toRunSummary(manifest, folderPath));
+          valid.push(toRunSummary(manifest, folderPath, updatedAt));
         } else {
           stale.push(folderPath);
         }
@@ -537,9 +539,7 @@ export function registerIpcHandlers(): void {
         store.deleteRuns(stale);
       }
       return valid.sort(
-        (a, b) =>
-          getRunStartedSortValue(b.started, b.date) -
-          getRunStartedSortValue(a.started, a.date)
+        (a, b) => getRunSortValue(b) - getRunSortValue(a)
       );
     } catch {
       return [];
