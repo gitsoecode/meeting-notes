@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   KeyRound,
   FolderOpen,
@@ -9,10 +9,11 @@ import type {
   AudioDevice,
   DepsCheckResult,
 } from "../../../shared/ipc";
-import { classifyModelClient } from "../constants";
+import { classifyModelClient, findModelEntry } from "../constants";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
 import { ShortcutRecorder } from "../components/ShortcutRecorder";
 import { ModelDropdown } from "../components/ModelDropdown";
+import { LocalModelInstaller } from "../components/LocalModelInstaller";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -63,12 +64,15 @@ export function Settings({ config, onChange }: SettingsProps) {
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [setupAsrOpen, setSetupAsrOpen] = useState(false);
+  const [setupAsrMode, setSetupAsrMode] = useState<"install" | "reinstall" | null>(null);
   const [installedLocal, setInstalledLocal] = useState<string[]>([]);
   const [pullModel, setPullModel] = useState("");
   const [pullOpen, setPullOpen] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmState | null>(null);
   const [confirmingAction, setConfirmingAction] = useState(false);
+  const [installingWhisper, setInstallingWhisper] = useState(false);
+
+  const apiKeysRef = useRef<HTMLDivElement>(null);
 
   const refreshInstalledLocal = () => {
     api.llm
@@ -175,7 +179,30 @@ export function Settings({ config, onChange }: SettingsProps) {
   };
 
   const parakeetInstalled = Boolean(deps?.parakeet);
-  const parakeetActionLabel = parakeetInstalled ? "Check / repair" : "Install Parakeet";
+  const whisperInstalled = Boolean(deps?.whisper);
+
+  const scrollToApiKeys = () => {
+    apiKeysRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const installWhisper = async () => {
+    setInstallingWhisper(true);
+    try {
+      const result = await api.deps.install("whisper-cpp");
+      if (!result.ok) {
+        if (result.brewMissing) {
+          setError("Homebrew is not installed. Install it from brew.sh, then try again.");
+        } else {
+          setError(result.error ?? "Failed to install whisper-cpp.");
+        }
+      }
+      refreshDeps();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstallingWhisper(false);
+    }
+  };
 
   const micDeviceValue =
     config.recording.mic_device === SYSTEM_DEFAULT_DEVICE
@@ -216,6 +243,12 @@ export function Settings({ config, onChange }: SettingsProps) {
             ok: !!deps.parakeet,
           },
           {
+            label: "whisper.cpp",
+            value: deps.whisper ?? "not found",
+            version: null,
+            ok: !!deps.whisper,
+          },
+          {
             label: "Ollama",
             value: deps.ollama.daemon
               ? `running (${deps.ollama.source ?? "unknown"})`
@@ -242,17 +275,20 @@ export function Settings({ config, onChange }: SettingsProps) {
       <Tabs defaultValue="models" className="w-full">
         <TabsList className="mb-4">
           <TabsTrigger value="models">Models</TabsTrigger>
-          <TabsTrigger value="audio">Transcription</TabsTrigger>
+          <TabsTrigger value="audio">Audio</TabsTrigger>
           <TabsTrigger value="storage">Storage</TabsTrigger>
           <TabsTrigger value="system">General</TabsTrigger>
         </TabsList>
 
+        {/* ── Models tab ── */}
         <TabsContent value="models" className="max-w-2xl space-y-5 outline-none">
+
+          {/* Card 1: Text Analysis */}
           <Card className="overflow-hidden p-5 md:p-6">
             <CardHeader className="mb-3">
               <div className="space-y-1">
-                <CardTitle>AI Provider</CardTitle>
-                <CardDescription>Choose your default LLM and manage API keys.</CardDescription>
+                <CardTitle>Text Analysis</CardTitle>
+                <CardDescription>Default model for meeting summaries and prompt outputs.</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -268,6 +304,8 @@ export function Settings({ config, onChange }: SettingsProps) {
                   }
                   installedLocalModels={installedLocal}
                   availableKeys={{ claude: hasClaude, openai: hasOpenai }}
+                  allowCustom={false}
+                  localMode="installed-only"
                   onChange={(next) => {
                     if (!next) return;
                     const kind = classifyModelClient(next);
@@ -296,7 +334,163 @@ export function Settings({ config, onChange }: SettingsProps) {
                   Cloud models are faster; local models stay offline and cost nothing per run.
                 </p>
               </div>
+            </CardContent>
+          </Card>
 
+          {/* Card 2: Transcription */}
+          <Card className="overflow-hidden p-5 md:p-6">
+            <CardHeader className="mb-3">
+              <div className="space-y-1">
+                <CardTitle>Transcription</CardTitle>
+                <CardDescription>How recordings are converted to text.</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <label htmlFor="settings-asr" className="text-sm font-medium text-[var(--text-secondary)]">Provider</label>
+                <Select
+                  value={config.asr_provider}
+                  onValueChange={(value) =>
+                    void save({ ...config, asr_provider: value as AppConfigDTO["asr_provider"] })
+                  }
+                >
+                  <SelectTrigger id="settings-asr">
+                    <SelectValue placeholder="Select provider" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="parakeet-mlx">Parakeet (local, MLX)</SelectItem>
+                    <SelectItem value="openai">OpenAI Whisper (cloud)</SelectItem>
+                    <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Parakeet conditional */}
+              {config.asr_provider === "parakeet-mlx" && (
+                <div className="space-y-2">
+                  {deps == null ? (
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                      <Spinner className="h-3.5 w-3.5" /> Checking…
+                    </div>
+                  ) : parakeetInstalled ? (
+                    <div className="space-y-1.5">
+                      <p className="text-sm text-[var(--success)]">Installed</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{deps.parakeet}</p>
+                      <button
+                        type="button"
+                        className="text-xs text-[var(--text-tertiary)] underline decoration-dotted hover:text-[var(--text-secondary)]"
+                        onClick={() => {
+                          setPendingConfirm({
+                            title: "Reinstall Parakeet?",
+                            description: "This will remove and recreate the Python environment from scratch (~2 GB download).",
+                            confirmLabel: "Reinstall",
+                            confirmVariant: "default",
+                            action: () => setSetupAsrMode("reinstall"),
+                          });
+                        }}
+                      >
+                        Reinstall
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-[var(--warning-text)]">Not installed</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">
+                        Requires Python 3.11+ and ~2 GB disk space.
+                      </p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setPendingConfirm({
+                            title: "Install Parakeet?",
+                            description: "This will create a Python environment and download the Parakeet model (~2 GB). This takes about a minute.",
+                            confirmLabel: "Install",
+                            confirmVariant: "default",
+                            action: () => setSetupAsrMode("install"),
+                          });
+                        }}
+                      >
+                        Install Parakeet
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* OpenAI Whisper conditional */}
+              {config.asr_provider === "openai" && (
+                <div className="space-y-2">
+                  {hasOpenai ? (
+                    <p className="text-sm text-[var(--success)]">Ready</p>
+                  ) : (
+                    <div className="space-y-1">
+                      <p className="text-sm text-[var(--warning-text)]">Needs API key</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">
+                        <button
+                          type="button"
+                          className="underline decoration-dotted hover:text-[var(--text-secondary)]"
+                          onClick={scrollToApiKeys}
+                        >
+                          Add your OpenAI API key
+                        </button>{" "}
+                        below to enable cloud transcription.
+                      </p>
+                    </div>
+                  )}
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    Uploads are capped at 25 MB per file (~80 min after transcoding). Use a local provider for longer recordings.
+                  </p>
+                </div>
+              )}
+
+              {/* whisper.cpp conditional */}
+              {config.asr_provider === "whisper-local" && (
+                <div className="space-y-2">
+                  {deps == null ? (
+                    <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                      <Spinner className="h-3.5 w-3.5" /> Checking…
+                    </div>
+                  ) : whisperInstalled ? (
+                    <div className="space-y-1.5">
+                      <p className="text-sm text-[var(--success)]">Installed</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{deps.whisper}</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <p className="text-sm text-[var(--warning-text)]">Not installed</p>
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={installingWhisper}
+                        onClick={() => {
+                          setPendingConfirm({
+                            title: "Install whisper-cpp?",
+                            description: "This will install whisper-cpp via Homebrew.",
+                            confirmLabel: "Install",
+                            confirmVariant: "default",
+                            action: installWhisper,
+                          });
+                        }}
+                      >
+                        {installingWhisper ? <><Spinner className="h-4 w-4" /> Installing…</> : "Install via Homebrew"}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Card 3: API Keys */}
+          <Card ref={apiKeysRef} className="overflow-hidden p-5 md:p-6">
+            <CardHeader className="mb-3">
+              <div className="space-y-1">
+                <CardTitle>API Keys</CardTitle>
+                <CardDescription>Stored securely in your macOS Keychain.</CardDescription>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
@@ -316,6 +510,7 @@ export function Settings({ config, onChange }: SettingsProps) {
                       Save
                     </Button>
                   </div>
+                  <p className="text-xs text-[var(--text-tertiary)]">Used by Claude models for text analysis.</p>
                 </div>
 
                 <div className="space-y-2">
@@ -336,132 +531,60 @@ export function Settings({ config, onChange }: SettingsProps) {
                       Save
                     </Button>
                   </div>
+                  <p className="text-xs text-[var(--text-tertiary)]">Used by OpenAI models for text analysis and cloud transcription.</p>
                 </div>
               </div>
             </CardContent>
           </Card>
 
+          {/* Card 4: Local Models */}
           <Card className="overflow-hidden p-5 md:p-6">
             <CardHeader className="mb-3">
               <div className="space-y-1">
                 <CardTitle>Local Models</CardTitle>
-                <CardDescription>Manage models running on your machine via Ollama.</CardDescription>
+                <CardDescription>Download and manage Ollama models on your machine.</CardDescription>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[var(--text-secondary)]">Pull a new model</label>
-                <div className="flex gap-2">
-                  <ModelDropdown
-                    className="flex-1"
-                    providerFilter="ollama"
-                    value={pullModel}
-                    onChange={setPullModel}
-                    localMode="all"
-                    allowCustom
-                    triggerClassName="bg-white"
-                  />
-                  <Button onClick={() => setPullOpen(true)} disabled={!pullModel.trim() || pullOpen}>
-                    Pull
-                  </Button>
-                </div>
-              </div>
-
-              {installedLocal.length > 0 && (
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-[var(--text-secondary)]">Installed models</label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {installedLocal.map((model) => (
-                      <div
-                        key={model}
-                        className="flex items-center justify-between rounded-md border border-[var(--border-default)] bg-white px-3 py-1.5 text-sm"
-                      >
-                        <span className="truncate text-[var(--text-primary)]">{model}</span>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 text-xs text-[var(--error)] hover:bg-[var(--error-muted)] hover:text-[var(--error)]"
-                          onClick={() => {
-                            setPendingConfirm({
-                              title: "Remove local model?",
-                              description: `Remove ${model} from local storage?`,
-                              confirmLabel: "Remove model",
-                              cancelLabel: "Keep model",
-                              confirmVariant: "destructive",
-                              action: async () => {
-                                try {
-                                  await api.llm.remove(model);
-                                  refreshInstalledLocal();
-                                } catch (err) {
-                                  setError(err instanceof Error ? err.message : String(err));
-                                }
-                              },
-                            });
-                          }}
-                        >
-                          Remove
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
+            <CardContent>
+              <LocalModelInstaller
+                installedModels={installedLocal}
+                onInstall={(model, sizeGb) => {
+                  const sizeText = sizeGb ? ` (~${sizeGb} GB)` : "";
+                  setPendingConfirm({
+                    title: `Install ${model}?`,
+                    description: `This will download ${model}${sizeText} via Ollama.`,
+                    confirmLabel: "Install",
+                    confirmVariant: "default",
+                    action: () => {
+                      setPullModel(model);
+                      setPullOpen(true);
+                    },
+                  });
+                }}
+                onRemove={(model) => {
+                  setPendingConfirm({
+                    title: "Remove local model?",
+                    description: `Remove ${model} from local storage?`,
+                    confirmLabel: "Remove model",
+                    cancelLabel: "Keep model",
+                    confirmVariant: "destructive",
+                    action: async () => {
+                      try {
+                        await api.llm.remove(model);
+                        refreshInstalledLocal();
+                      } catch (err) {
+                        setError(err instanceof Error ? err.message : String(err));
+                      }
+                    },
+                  });
+                }}
+              />
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Audio tab ── */}
         <TabsContent value="audio" className="max-w-2xl space-y-5 outline-none">
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Speech-to-Text</CardTitle>
-                <CardDescription>Select a transcription provider for your recordings.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="settings-asr" className="text-sm font-medium text-[var(--text-secondary)]">Provider</label>
-                <Select
-                  value={config.asr_provider}
-                  onValueChange={(value) =>
-                    void save({ ...config, asr_provider: value as AppConfigDTO["asr_provider"] })
-                  }
-                >
-                  <SelectTrigger id="settings-asr">
-                    <SelectValue placeholder="Select provider" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="parakeet-mlx">
-                      Parakeet (local, MLX{parakeetInstalled ? ", installed" : ""})
-                    </SelectItem>
-                    <SelectItem value="openai">OpenAI (cloud)</SelectItem>
-                    <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {config.asr_provider === "parakeet-mlx" && (
-                <div className="flex items-center justify-between rounded-md border border-[var(--border-default)] bg-[var(--bg-secondary)] px-3 py-2.5 text-sm">
-                  <div className="flex items-center gap-2">
-                    <span className={`h-2 w-2 rounded-full ${parakeetInstalled ? "bg-[var(--success)]" : "bg-[var(--warning-text)]"}`} />
-                    <span className="text-[var(--text-primary)]">
-                      {parakeetInstalled ? "Parakeet installed" : "Parakeet needs setup"}
-                    </span>
-                  </div>
-                  <Button variant="secondary" size="sm" onClick={() => setSetupAsrOpen(true)}>
-                    {parakeetActionLabel}
-                  </Button>
-                </div>
-              )}
-
-              {config.asr_provider === "openai" && (
-                <div className="rounded-md bg-blue-50 p-3 text-xs text-blue-700">
-                  OpenAI caps uploads at 25 MB per file. We transcode audio to stretch this to ~80 minutes, but longer recordings will fail. Use Parakeet for unlimited local transcription.
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
           <Card className="overflow-hidden p-5 md:p-6">
             <CardHeader className="mb-3">
               <div className="space-y-1">
@@ -521,6 +644,7 @@ export function Settings({ config, onChange }: SettingsProps) {
           </Card>
         </TabsContent>
 
+        {/* ── Storage tab ── */}
         <TabsContent value="storage" className="max-w-2xl space-y-5 outline-none">
           <Card className="overflow-hidden p-5 md:p-6">
             <CardHeader className="mb-3">
@@ -583,8 +707,11 @@ export function Settings({ config, onChange }: SettingsProps) {
               )}
             </CardContent>
           </Card>
+
+          <AudioRetentionCard config={config} onSave={save} />
         </TabsContent>
 
+        {/* ── General tab ── */}
         <TabsContent value="system" className="max-w-2xl space-y-5 outline-none">
           <Card className="overflow-hidden p-5 md:p-6">
             <CardHeader className="mb-3">
@@ -724,12 +851,12 @@ export function Settings({ config, onChange }: SettingsProps) {
         </TabsContent>
       </Tabs>
 
-      {setupAsrOpen && (
+      {setupAsrMode && (
         <SetupAsrModal
-          installed={parakeetInstalled}
+          mode={setupAsrMode}
           binaryPath={deps?.parakeet ?? null}
           onClose={() => {
-            setSetupAsrOpen(false);
+            setSetupAsrMode(null);
             refreshDeps();
           }}
         />
@@ -873,11 +1000,11 @@ function PullLocalModelModal({
 }
 
 function SetupAsrModal({
-  installed,
+  mode,
   binaryPath,
   onClose,
 }: {
-  installed: boolean;
+  mode: "install" | "reinstall";
   binaryPath: string | null;
   onClose: () => void;
 }) {
@@ -885,6 +1012,12 @@ function SetupAsrModal({
   const [running, setRunning] = useState(false);
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const isReinstall = mode === "reinstall";
+  const title = isReinstall ? "Reinstall Parakeet" : "Install Parakeet";
+  const description = isReinstall
+    ? "Removes and recreates the Python environment from scratch."
+    : "Creates a Python environment and downloads the Parakeet model.";
 
   useEffect(() => {
     const unsub = api.on.setupAsrLog((line) => setLog((prev) => [...prev, line]));
@@ -896,7 +1029,7 @@ function SetupAsrModal({
     setLog([]);
     setError(null);
     try {
-      await api.setupAsr({ force: false });
+      await api.setupAsr({ force: isReinstall });
       setDone(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -909,16 +1042,12 @@ function SetupAsrModal({
     <Dialog open onOpenChange={(open) => !open && !running && onClose()}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{installed ? "Check / repair Parakeet" : "Install Parakeet"}</DialogTitle>
-          <DialogDescription>
-            {installed
-              ? <>Refreshes the environment in <code>~/.meeting-notes</code> and reruns the smoke test.</>
-              : <>Creates a Python environment and installs Parakeet MLX into <code>~/.meeting-notes</code>.</>}
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
-          {installed && binaryPath && (
-            <p className="text-xs text-[var(--text-tertiary)]">Current binary: <code>{binaryPath}</code></p>
+          {binaryPath && (
+            <p className="text-xs text-[var(--text-tertiary)]">Binary: <code>{binaryPath}</code></p>
           )}
           <div className="max-h-60 overflow-auto rounded-md border border-[var(--border-default)] bg-white p-3 font-mono text-xs text-[var(--text-secondary)]">
             {log.length > 0 ? (
@@ -932,17 +1061,100 @@ function SetupAsrModal({
           )}
           {done && (
             <div className="rounded-md border border-[var(--success)]/20 bg-[var(--success-muted)] px-3 py-2 text-sm text-[var(--success)]">
-              {installed ? "Parakeet verified." : "Parakeet installed."}
+              Parakeet {isReinstall ? "reinstalled" : "installed"} successfully.
             </div>
           )}
         </div>
         <DialogFooter>
           <Button variant="secondary" onClick={onClose} disabled={running}>Close</Button>
           <Button onClick={onRun} disabled={running}>
-            {running ? <><Spinner className="h-4 w-4" /> {installed ? "Checking…" : "Installing…"}</> : installed ? "Run setup" : "Install"}
+            {running ? <><Spinner className="h-4 w-4" /> {isReinstall ? "Reinstalling…" : "Installing…"}</> : isReinstall ? "Reinstall" : "Install"}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function retentionMode(days: number | null): string {
+  if (days == null) return "never";
+  if (days === 7) return "7";
+  if (days === 30) return "30";
+  return "custom";
+}
+
+function AudioRetentionCard({
+  config,
+  onSave,
+}: {
+  config: AppConfigDTO;
+  onSave: (next: AppConfigDTO) => Promise<void>;
+}) {
+  const mode = retentionMode(config.audio_retention_days);
+  const [customDays, setCustomDays] = useState(
+    mode === "custom" ? String(config.audio_retention_days) : "90"
+  );
+
+  const handleModeChange = (value: string) => {
+    if (value === "never") {
+      void onSave({ ...config, audio_retention_days: null });
+    } else if (value === "custom") {
+      const parsed = parseInt(customDays, 10);
+      void onSave({ ...config, audio_retention_days: parsed > 0 ? parsed : 90 });
+    } else {
+      void onSave({ ...config, audio_retention_days: parseInt(value, 10) });
+    }
+  };
+
+  const handleCustomDaysChange = (value: string) => {
+    setCustomDays(value);
+    const parsed = parseInt(value, 10);
+    if (parsed > 0) {
+      void onSave({ ...config, audio_retention_days: parsed });
+    }
+  };
+
+  return (
+    <Card className="overflow-hidden p-5 md:p-6">
+      <CardHeader className="mb-3">
+        <div className="space-y-1">
+          <CardTitle>Audio File Retention</CardTitle>
+          <CardDescription>
+            Automatically delete audio recordings from completed meetings after a set period.
+            Transcripts and notes are always kept.
+          </CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <label className="text-sm font-medium text-[var(--text-secondary)]">
+            Delete audio after
+          </label>
+          <Select value={mode} onValueChange={handleModeChange}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="never">Never</SelectItem>
+              <SelectItem value="7">7 days</SelectItem>
+              <SelectItem value="30">30 days</SelectItem>
+              <SelectItem value="custom">Custom</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        {mode === "custom" && (
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min={1}
+              value={customDays}
+              onChange={(e) => handleCustomDaysChange(e.target.value)}
+              className="w-24"
+            />
+            <span className="text-sm text-[var(--text-secondary)]">days</span>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

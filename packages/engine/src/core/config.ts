@@ -76,6 +76,11 @@ export interface AppConfig {
     draft_prompt?: string;
     recording_prompt?: string;
   };
+  /**
+   * Number of days after a run ends before its audio files are automatically
+   * deleted. `null` means audio is kept forever (the default).
+   */
+  audio_retention_days: number | null;
 }
 
 /**
@@ -118,6 +123,7 @@ const DEFAULT_CONFIG: AppConfig = {
   shortcuts: {
     toggle_recording: "CommandOrControl+Shift+M",
   },
+  audio_retention_days: null,
 };
 
 export function getConfigDir(): string {

@@ -47,6 +47,7 @@ export async function installMockApi(page: Page) {
       shortcuts: {
         toggle_recording: "CommandOrControl+Shift+M",
       },
+      audio_retention_days: null,
     };
 
     let hasClaude = true;
@@ -313,6 +314,7 @@ export async function installMockApi(page: Page) {
       python: "/usr/bin/python3",
       pythonVersion: "3.9.6",
       parakeet: "/Users/test/.meeting-notes/parakeet",
+      whisper: "/opt/homebrew/bin/whisper-cli",
       ollamaVersion: "0.7.2",
       brewAvailable: true,
     } as {
@@ -322,6 +324,7 @@ export async function installMockApi(page: Page) {
       python: string | null;
       pythonVersion: string | null;
       parakeet: string | null;
+      whisper: string | null;
       ollamaVersion: string | null;
       brewAvailable: boolean | null;
     };
@@ -1543,6 +1546,7 @@ export async function installMockApi(page: Page) {
           python: depsState.python,
           pythonVersion: depsState.pythonVersion,
           parakeet: depsState.parakeet,
+          whisper: depsState.whisper ?? null,
           ollama: {
             daemon: true,
             source: "bundled-spawned",
@@ -1556,6 +1560,7 @@ export async function installMockApi(page: Page) {
           emit("depsInstallLog", `Installed ${target}`);
           if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
           if (target === "blackhole") depsState.blackhole = "installed-not-loaded";
+          if (target === "whisper-cpp") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
           persistState();
           return { ok: true };
         },

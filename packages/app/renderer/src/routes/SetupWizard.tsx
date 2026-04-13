@@ -54,6 +54,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const [dataPath, setDataPath] = useState<string>("");
   const [dataPathTouched, setDataPathTouched] = useState(false);
+  const [retentionValue, setRetentionValue] = useState<string>("never");
+  const [customRetentionDays, setCustomRetentionDays] = useState<string>("90");
 
   const [asrProvider, setAsrProvider] =
     useState<AppConfigDTO["asr_provider"]>("parakeet-mlx");
@@ -244,6 +246,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         recording: { mic_device: "", system_device: "" },
         claude_api_key: claudeKey || undefined,
         openai_api_key: openaiKey || undefined,
+        audio_retention_days:
+          retentionValue === "never"
+            ? null
+            : retentionValue === "custom"
+              ? parseInt(customRetentionDays, 10) || 90
+              : parseInt(retentionValue, 10),
       };
       await api.config.initProject(req);
       onComplete();
@@ -406,6 +414,35 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   />
                   <Button variant="secondary" onClick={pickDataDir}>Pick…</Button>
                 </PickerRow>
+              </Field>
+
+              <Field label="Audio file retention">
+                <Select value={retentionValue} onValueChange={setRetentionValue}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="never">Never delete</SelectItem>
+                    <SelectItem value="7">After 7 days</SelectItem>
+                    <SelectItem value="30">After 30 days</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+                {retentionValue === "custom" && (
+                  <div className="flex items-center gap-2 pt-2">
+                    <Input
+                      type="number"
+                      min={1}
+                      value={customRetentionDays}
+                      onChange={(e) => setCustomRetentionDays(e.target.value)}
+                      className="w-24"
+                    />
+                    <span className="text-sm text-[var(--text-secondary)]">days</span>
+                  </div>
+                )}
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  Audio files are large (~2 MB/min). Transcripts and notes are always kept.
+                </p>
               </Field>
             </WizardStep>
           )}

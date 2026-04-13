@@ -47,6 +47,14 @@ export const LLM_MODELS: LlmModelEntry[] = [
     blurb: "OpenAI's reasoning model for complex tasks.",
   },
   {
+    id: "qwen3.5:4b",
+    label: "qwen3.5:4b",
+    provider: "ollama",
+    sizeGb: 2.6,
+    minRamGb: 8,
+    blurb: "Compact and fast — great for lower-RAM machines.",
+  },
+  {
     id: "qwen3.5:9b",
     label: "qwen3.5:9b",
     provider: "ollama",

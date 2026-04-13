@@ -17,7 +17,7 @@ test.describe("Settings", () => {
     await settings.openTab("Models");
     await expect(settings.defaultModelCombobox()).toBeVisible();
 
-    await settings.openTab("Transcription");
+    await settings.openTab("Audio");
     await expect(settings.micDeviceSelect()).toBeVisible();
 
     await settings.openTab("Storage");
@@ -27,23 +27,11 @@ test.describe("Settings", () => {
     await expect(settings.dependenciesCard()).toBeVisible();
   });
 
-  test("Obsidian toggle shows and hides vault path", async ({ settings }) => {
-    await settings.openTab("Storage");
-    // Initially disabled in mock
-    await expect(settings.vaultPathInput()).not.toBeVisible();
-
-    await settings.obsidianSwitch().click();
-    await expect(settings.vaultPathInput()).toBeVisible();
-
-    await settings.obsidianSwitch().click();
-    await expect(settings.vaultPathInput()).not.toBeVisible();
-  });
-
   test("audio device selects are shadcn comboboxes", async ({
     settings,
     page,
   }) => {
-    await settings.openTab("Transcription");
+    await settings.openTab("Audio");
     // Audio device selects are shadcn Select components (combobox role)
     await expect(settings.micDeviceSelect()).toBeVisible();
     await expect(settings.systemDeviceSelect()).toBeVisible();
@@ -64,8 +52,8 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
-    await settings.openTab("Transcription");
-    // ASR provider is a shadcn Select (combobox), not a native <select>
+    await settings.openTab("Models");
+    // ASR provider is on Models tab now, in the Transcription card
     await settings.asrProviderSelect().click();
     await page.getByRole("option", { name: /OpenAI/ }).click();
     await expect(settings.openaiWarning()).toBeVisible();
@@ -73,7 +61,7 @@ test.describe("Settings", () => {
 
   test("Claude API key save flow", async ({ settings, page }) => {
     await settings.openTab("Models");
-    // Find the Claude key section
+    // Find the Claude key section in the API Keys card
     const keyInput = settings.claudeKeyInput();
     const saveButton = settings.claudeKeySaveButton();
 
@@ -115,14 +103,20 @@ test.describe("Settings", () => {
     await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
   });
 
-  test("pull model modal opens", async ({ settings, page }) => {
+  test("install model modal opens via Other option", async ({ settings, page }) => {
     await settings.openTab("Models");
-    await settings.pullModelInput().click();
-    await page.getByRole("option", { name: "Custom…" }).click();
+    await settings.installModelSelect().click();
+    await page.getByRole("option", { name: "Other…" }).click();
     await page.keyboard.press("Escape");
-    await expect(settings.pullCustomModelInput()).toBeVisible();
-    await settings.pullCustomModelInput().fill("llama3.1:8b");
-    await settings.pullButton().click();
+    await expect(settings.installModelCustomInput()).toBeVisible();
+    await settings.installModelCustomInput().fill("llama3.1:8b");
+    await settings.installButton().click();
+    // Confirm dialog appears first
+    const confirmHeading = page.getByRole("heading", { name: /Install llama3\.1:8b/ });
+    await expect(confirmHeading).toBeVisible();
+    // Click the confirm button inside the dialog (not the card's Install button)
+    const confirmDialog = page.getByRole("dialog").filter({ has: confirmHeading });
+    await confirmDialog.getByRole("button", { name: "Install" }).click();
     // The mock resolves instantly so the title may already be "Pulled …"
     await expect(page.getByRole("heading", { name: /Pull(?:ing|ed) llama3\.1:8b/ })).toBeVisible();
 
@@ -156,6 +150,7 @@ test.describe("Settings", () => {
     await expect(page.getByText("BlackHole (2ch)", { exact: true })).toBeVisible();
     await expect(page.getByText("Python", { exact: true })).toBeVisible();
     await expect(page.getByText("Parakeet", { exact: true })).toBeVisible();
+    await expect(page.getByText("whisper.cpp", { exact: true })).toBeVisible();
     await expect(page.getByText("Ollama", { exact: true })).toBeVisible();
   });
 
@@ -203,11 +198,19 @@ test.describe("Settings", () => {
     await settings.openTab("General");
     await expect(settings.dependenciesCard().getByText(/not found/i).first()).toBeVisible();
 
-    await settings.openTab("Transcription");
+    // Transcription is now on Models tab
+    await settings.openTab("Models");
+    // Parakeet is installed in mock, so the reinstall link should be present
+    // But we need to test the install flow — set parakeet to null
+    await app.setDependencyState({ parakeet: null });
+    await page.reload();
+    await settings.openTab("Models");
     await settings.parakeetInstallButton().click();
-    await expect(page.getByRole("heading", { name: /Install Parakeet|Check \/ repair Parakeet/ })).toBeVisible();
+    // Confirm dialog appears first
+    await page.getByRole("button", { name: "Install" }).click();
+    await expect(page.getByRole("heading", { name: /Install Parakeet/ })).toBeVisible();
     await settings.runParakeetSetupButton().click();
-    await expect(page.getByText(/Parakeet verified|Parakeet installed/).first()).toBeVisible();
+    await expect(page.getByText(/Parakeet.*installed/).first()).toBeVisible();
     await settings.setupParakeetCloseButton().click();
   });
 
@@ -223,5 +226,30 @@ test.describe("Settings", () => {
     await expect(settings.dataPathInput()).toHaveValue(
       "/Users/test/Meeting Notes"
     );
+  });
+
+  test("audio retention dropdown defaults to Never and can change to 30 days", async ({
+    settings,
+    page,
+  }) => {
+    await settings.openTab("Storage");
+    const select = settings.audioRetentionSelect();
+    await expect(select).toBeVisible();
+    await expect(select).toContainText("Never");
+
+    await select.click();
+    await page.getByRole("option", { name: "30 days" }).click();
+    await expect(select).toContainText("30 days");
+  });
+
+  test("audio retention custom option shows number input", async ({
+    settings,
+    page,
+  }) => {
+    await settings.openTab("Storage");
+    const select = settings.audioRetentionSelect();
+    await select.click();
+    await page.getByRole("option", { name: "Custom" }).click();
+    await expect(settings.audioRetentionCustomInput()).toBeVisible();
   });
 });

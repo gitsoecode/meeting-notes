@@ -325,6 +325,8 @@ export interface DepsCheckResult {
   pythonVersion?: string | null;
   /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
   parakeet: string | null;
+  /** Absolute path to whisper-cli if found on PATH, else null. */
+  whisper: string | null;
   /**
    * Local-LLM (Ollama) status. The daemon is owned by the main process; we
    * always have a binary (bundled or system), so the only useful question
@@ -352,7 +354,7 @@ export interface HardwareInfoDTO {
  * behalf. Keep this union in sync with the `deps:install` handler in
  * `main/ipc.ts` — adding a new target requires both sides to agree.
  */
-export type DepsInstallTarget = "ffmpeg" | "blackhole";
+export type DepsInstallTarget = "ffmpeg" | "blackhole" | "whisper-cpp";
 
 export interface DepsInstallResult {
   ok: boolean;
@@ -435,6 +437,7 @@ export interface AppConfigDTO {
     draft_prompt?: string;
     recording_prompt?: string;
   };
+  audio_retention_days: number | null;
 }
 
 export interface InitConfigRequest {
@@ -452,6 +455,7 @@ export interface InitConfigRequest {
   recording: { mic_device: string; system_device: string };
   claude_api_key?: string;
   openai_api_key?: string;
+  audio_retention_days?: number | null;
 }
 
 /**

@@ -49,7 +49,7 @@ export class SettingsPage {
     return this.card("Data Storage").getByRole("button").nth(1);
   }
 
-  // Audio card
+  // Audio card (on Audio tab)
   micDeviceSelect() {
     return this.page.locator("#settings-mic");
   }
@@ -58,43 +58,44 @@ export class SettingsPage {
     return this.page.locator("#settings-sys-audio");
   }
 
-  // Transcription card
+  // Transcription card (on Models tab)
   asrProviderSelect() {
     return this.page.locator("#settings-asr");
   }
 
   parakeetInstallButton() {
-    return this.page.getByRole("button", {
-      name: /Install Parakeet|Check \/ repair/,
+    return this.card("Transcription").getByRole("button", {
+      name: /Install Parakeet/,
     });
   }
 
   openaiWarning() {
-    return this.page.getByText("OpenAI caps uploads at 25 MB");
+    return this.page.getByText(/Uploads are capped at 25 MB/);
   }
 
-  // LLM card
+  // API Keys card (on Models tab)
   claudeKeyInput() {
-    return this.card("AI Provider").getByPlaceholder(/paste key|••••• stored/).first();
+    return this.card("API Keys").getByPlaceholder(/paste key|••••• stored/).first();
   }
 
   claudeKeySaveButton() {
-    return this.card("AI Provider").getByRole("button", { name: "Save" }).first();
+    return this.card("API Keys").getByRole("button", { name: "Save" }).first();
   }
 
   openaiKeyInput() {
-    return this.card("AI Provider").getByPlaceholder(/paste key|••••• stored/).nth(1);
+    return this.card("API Keys").getByPlaceholder(/paste key|••••• stored/).nth(1);
   }
 
   openaiKeySaveButton() {
-    return this.card("AI Provider").getByRole("button", { name: "Save" }).nth(1);
+    return this.card("API Keys").getByRole("button", { name: "Save" }).nth(1);
   }
 
+  // Text Analysis card (on Models tab)
   defaultModelCombobox() {
-    return this.card("AI Provider").getByRole("combobox").first();
+    return this.card("Text Analysis").getByRole("combobox").first();
   }
 
-  // Local models card
+  // Local models card (on Models tab)
   installedModelsList() {
     return this.card("Local Models").getByText("Installed models");
   }
@@ -114,16 +115,16 @@ export class SettingsPage {
     return this.page.getByRole("button", { name: "Keep model" });
   }
 
-  pullModelInput() {
+  installModelSelect() {
     return this.card("Local Models").getByRole("combobox").first();
   }
 
-  pullCustomModelInput() {
-    return this.page.getByPlaceholder(/model id/i).last();
+  installModelCustomInput() {
+    return this.card("Local Models").getByPlaceholder(/deepseek/i);
   }
 
-  pullButton() {
-    return this.card("Local Models").getByRole("button", { name: "Pull" });
+  installButton() {
+    return this.card("Local Models").getByRole("button", { name: "Install" });
   }
 
   pullModelCloseButton() {
@@ -141,7 +142,7 @@ export class SettingsPage {
   }
 
   runParakeetSetupButton() {
-    return this.page.getByRole("dialog").getByRole("button", { name: /Run setup|Install/ });
+    return this.page.getByRole("dialog").getByRole("button", { name: /Reinstall|Install/ });
   }
 
   setupParakeetCloseButton() {
@@ -150,6 +151,19 @@ export class SettingsPage {
 
   depRow(name: string) {
     return this.dependenciesCard().getByText(name, { exact: false });
+  }
+
+  // Audio retention card (on Storage tab)
+  audioRetentionCard() {
+    return this.card("Audio File Retention");
+  }
+
+  audioRetentionSelect() {
+    return this.audioRetentionCard().getByRole("combobox");
+  }
+
+  audioRetentionCustomInput() {
+    return this.audioRetentionCard().locator('input[type="number"]');
   }
 
   // Native selects on this page (for UX audit — visual consistency check)

@@ -246,6 +246,7 @@ program
       ollama: DEFAULT_CONFIG.ollama,
       recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: DEFAULT_CONFIG.shortcuts,
+      audio_retention_days: null,
     };
 
     initProject(config, {

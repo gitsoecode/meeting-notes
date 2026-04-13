@@ -12,6 +12,7 @@ import { setupTray } from "./tray.js";
 import { ensureOllamaDaemon, stopOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { DEFAULT_CONFIG, loadConfig } from "@meeting-notes/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
+import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
 import { getCachedAudioDevices } from "./device-cache.js";
 import { getDb, closeDb } from "./db/connection.js";
@@ -130,6 +131,10 @@ app.whenReady().then(async () => {
       detail: err instanceof Error ? err.message : String(err),
     });
   }
+
+  // Start periodic audio retention cleanup (runs once now, then every 6 hours).
+  const stopRetentionTimer = startAudioRetentionTimer();
+  app.once("before-quit", () => stopRetentionTimer());
 
   mainWindow = createMainWindow();
   setupTray();

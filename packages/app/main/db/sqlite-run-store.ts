@@ -114,6 +114,15 @@ export class SqliteRunStore implements RunStore {
     this.db.prepare("DELETE FROM runs WHERE folder_path = ?").run(folderPath);
   }
 
+  listExpiredAudioRuns(cutoffIso: string): Array<{ folder_path: string }> {
+    return this.db.prepare(`
+      SELECT folder_path FROM runs
+      WHERE ended IS NOT NULL
+        AND ended < ?
+        AND status NOT IN ('draft', 'recording', 'processing')
+    `).all(cutoffIso) as Array<{ folder_path: string }>;
+  }
+
   deleteRuns(folderPaths: string[]): void {
     const del = this.db.transaction(() => {
       const stmt = this.db.prepare("DELETE FROM runs WHERE folder_path = ?");

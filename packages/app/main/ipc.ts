@@ -131,6 +131,7 @@ function configToDto(config: AppConfig): AppConfigDTO {
     recording: config.recording,
     shortcuts: config.shortcuts,
     chat_launcher: config.chat_launcher,
+    audio_retention_days: config.audio_retention_days,
   };
 }
 
@@ -152,6 +153,7 @@ function dtoToConfig(dto: AppConfigDTO): AppConfig {
     recording: dto.recording,
     shortcuts: dto.shortcuts,
     chat_launcher: dto.chat_launcher,
+    audio_retention_days: dto.audio_retention_days,
   };
 }
 
@@ -394,6 +396,7 @@ export function registerIpcHandlers(): void {
       },
       recording: { mic_device: micDevice, system_device: systemDevice },
       shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },
+      audio_retention_days: req.audio_retention_days ?? null,
     };
     if (req.claude_api_key) await setSecret("claude", req.claude_api_key);
     if (req.openai_api_key) await setSecret("openai", req.openai_api_key);
@@ -1083,6 +1086,8 @@ export function registerIpcHandlers(): void {
       const args =
         target === "ffmpeg"
           ? ["install", "ffmpeg"]
+          : target === "whisper-cpp"
+          ? ["install", "whisper-cpp"]
           : ["install", "--cask", "blackhole-2ch"];
 
       broadcastToAll("deps-install:log", `$ brew ${args.join(" ")}`);
@@ -1094,7 +1099,7 @@ export function registerIpcHandlers(): void {
         });
         trackChildProcess(child, {
           type: "brew-install",
-          label: target === "ffmpeg" ? "Installing ffmpeg" : "Installing BlackHole",
+          label: target === "ffmpeg" ? "Installing ffmpeg" : target === "whisper-cpp" ? "Installing whisper-cpp" : "Installing BlackHole",
           command: `${brew} ${args.join(" ")}`,
         });
 
@@ -1404,6 +1409,9 @@ export function registerIpcHandlers(): void {
     } catch {
       parakeet = null;
     }
+    // whisper.cpp: check if whisper-cli is on PATH.
+    const whisperBin = await whichCmd("whisper-cli");
+
     // Ollama: ask the daemon module what state it's in (or attempt to ping a
     // pre-existing system daemon if we haven't started ours yet). We don't
     // spawn from inside deps:check — that's app-startup's job — so a fully
@@ -1445,6 +1453,7 @@ export function registerIpcHandlers(): void {
       pythonVersion,
       blackhole,
       parakeet,
+      whisper: whisperBin,
       ollama: {
         daemon: ollamaDaemonUp,
         source: ollamaSource,
