@@ -3,9 +3,10 @@ import {
   Check,
   ExternalLink,
   FileOutput,
+  Lock,
+  LockOpen,
   MoreHorizontal,
   PlayCircle,
-  RefreshCcw,
   Search,
   SquarePen,
   Trash2,
@@ -64,8 +65,6 @@ import {
 } from "../../../shared/meeting-prompts";
 import { findModelEntry } from "../../../shared/llm-catalog";
 import { getDefaultPromptModel } from "../lib/prompt-metadata";
-import { getDefaultPromptModel } from "../lib/prompt-metadata";
-import { findModelEntry } from "../../../shared/llm-catalog";
 
 interface MeetingDetailProps {
   runFolder: string;
@@ -131,6 +130,14 @@ function getRecordingTypeLabel(fileName: string): string {
   return "Recording";
 }
 
+function EmptyTabContent({ message }: { message: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center">
+      <div className="text-sm text-[var(--text-tertiary)]">{message}</div>
+    </div>
+  );
+}
+
 export function MeetingDetail({
   runFolder,
   config,
@@ -163,6 +170,7 @@ export function MeetingDetail({
   const [confirmingAction, setConfirmingAction] = useState(false);
   const detailSignatureRef = useRef("");
   const initialNotesRef = useRef<string | null>(null);
+  const notesSaveTimer = useRef<number | null>(null);
 
   const invalidateAnalysisCache = (promptOutputId?: string | null) => {
     setTabContents((prev) => {
@@ -509,18 +517,17 @@ export function MeetingDetail({
 
   const onNotesChange = (value: string) => {
     setTabContents((prev) => ({ ...prev, notes: value }));
-  };
-
-  const saveNotes = async () => {
-    if (tabContents.notes == null) return;
-    await api.runs.writeNotes(runFolder, tabContents.notes);
-    initialNotesRef.current = tabContents.notes;
-    setNotesEditMode(false);
+    if (notesSaveTimer.current != null) window.clearTimeout(notesSaveTimer.current);
+    notesSaveTimer.current = window.setTimeout(() => {
+      api.runs.writeNotes(runFolder, value).catch(() => {});
+      initialNotesRef.current = value;
+    }, 400);
   };
 
   const onNotesBlur = () => {
-    if (isCompletedMeeting || tabContents.notes == null) return;
+    if (tabContents.notes == null) return;
     api.runs.writeNotes(runFolder, tabContents.notes).catch(() => {});
+    initialNotesRef.current = tabContents.notes;
   };
 
   const runSummary = async () => {
@@ -817,51 +824,16 @@ export function MeetingDetail({
         </TabsList>
 
         <TabsContent value="summary">
-          <Card className="p-4 md:p-6">
-            <CardHeader className="mb-4">
-              <div className="space-y-2">
-                <Badge variant="accent" className="w-fit">
-                  Primary prompt
-                </Badge>
-                <CardTitle className="text-xl">
-                  {promptCollections.primaryPrompt?.label ?? "Summary"}
-                </CardTitle>
-                <p className="text-sm text-[var(--text-secondary)]">
-                  {promptCollections.primaryPrompt?.description?.trim()
-                    ? promptCollections.primaryPrompt.description
-                    : "The primary meeting recap lives here. Use Analysis for any secondary prompts and outputs."}
-                </p>
+          <div className="min-h-0 space-y-4">
+            {pipelineStatusContent}
+            {promptCollections.summaryHasOutput ? (
+              <div className="flex-1 min-h-0 rounded-md border border-[var(--border-default)] bg-white">
+                <MarkdownEditor value={summaryContent} onChange={() => {}} readOnly />
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => void runSummary()}
-                >
-                  <RefreshCcw className="h-3.5 w-3.5" />
-                  Refresh summary
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => onOpenPromptLibrary(PRIMARY_PROMPT_ID)}
-                >
-                  <SquarePen className="h-3.5 w-3.5" />
-                  Edit summary prompt
-                </Button>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {pipelineStatusContent}
-              {promptCollections.summaryHasOutput ? (
-                <MarkdownView source={summaryContent} className="markdown-view" />
-              ) : (
-                <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-5 text-sm text-[var(--text-secondary)]">
-                  No summary has been generated for this meeting yet. Refresh the summary to create the primary recap.
-                </div>
-              )}
-            </CardContent>
-          </Card>
+            ) : (
+              <EmptyTabContent message="No summary has been generated for this meeting yet." />
+            )}
+          </div>
         </TabsContent>
 
         <TabsContent value="analysis">
@@ -1000,80 +972,40 @@ export function MeetingDetail({
         </TabsContent>
 
         <TabsContent value="notes">
-          <div className="flex flex-1 min-h-0 flex-col gap-4">
-            {isCompletedMeeting && !notesEditMode ? (
-              <Card className="p-4 md:p-6">
-                <CardHeader className="mb-4">
-                  <div className="space-y-2">
-                    <Badge variant="neutral" className="w-fit">
-                      Read mode
-                    </Badge>
-                    <CardTitle className="text-xl">View mode</CardTitle>
-                  </div>
-                  <Button onClick={() => setNotesEditMode(true)}>
-                    <SquarePen className="h-4 w-4" />
-                    Edit
-                  </Button>
-                </CardHeader>
-                <CardContent>
-                  <MarkdownView source={notesContent} className="markdown-view" />
-                </CardContent>
-              </Card>
+          {isCompletedMeeting ? (
+            notesContent.trim() || notesEditMode ? (
+              <div className="relative flex min-h-0 flex-1 flex-col rounded-md border border-[var(--border-default)] bg-white">
+                <button
+                  type="button"
+                  onClick={() => setNotesEditMode(!notesEditMode)}
+                  className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  title={notesEditMode ? "Lock editing" : "Unlock editing"}
+                >
+                  {notesEditMode ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                </button>
+                <div className="flex-1 min-h-0">
+                  <MarkdownEditor
+                    value={notesContent}
+                    onChange={onNotesChange}
+                    onBlur={onNotesBlur}
+                    readOnly={!notesEditMode}
+                  />
+                </div>
+              </div>
             ) : (
-              <Card className="flex flex-1 min-h-0 flex-col p-4">
-                <CardHeader className="mb-4">
-                  <div className="flex items-center justify-between w-full">
-                    <div className="flex items-center gap-3">
-                      <Badge variant={isCompletedMeeting ? "warning" : "accent"} className="w-fit">
-                        {isCompletedMeeting ? "Editing unlocked" : "Live notes"}
-                      </Badge>
-                    </div>
-                    <CardTitle className="text-xl">
-                      {isCompletedMeeting ? "Edit completed meeting notes" : "Notes"}
-                    </CardTitle>
-                  </div>
-                </CardHeader>
-                <CardContent className="flex flex-1 min-h-0 flex-col gap-4">
-                  <div className={`flex-1 min-h-0 overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
-                    <MarkdownEditor
-                      value={notesContent}
-                      onChange={onNotesChange}
-                      onBlur={onNotesBlur}
-                    />
-                  </div>
-                  {isCompletedMeeting ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex gap-3">
-                        <Button 
-                          onClick={() => void saveNotes()} 
-                          className={`transition-all duration-300 ${isNotesDirty ? "bg-[var(--accent)] shadow-lg ring-4 ring-[var(--accent)]/15 scale-105" : ""}`}
-                        >
-                          Save notes
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          onClick={() => {
-                            requestNotesDiscard(
-                              () => {
-                                setNotesEditMode(false);
-                                setTabContents((prev) => ({
-                                  ...prev,
-                                  notes: initialNotesRef.current ?? "",
-                                }));
-                              },
-                              "Discard your note edits and return to read mode?"
-                            );
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-            )}
-          </div>
+              <EmptyTabContent message="No notes for this meeting." />
+            )
+          ) : (
+            <div className="flex min-h-0 flex-1 flex-col rounded-md border border-[var(--border-default)] bg-white">
+              <div className="flex-1 min-h-0">
+                <MarkdownEditor
+                  value={notesContent}
+                  onChange={onNotesChange}
+                  onBlur={onNotesBlur}
+                />
+              </div>
+            </div>
+          )}
         </TabsContent>
 
         <TabsContent value="transcript">

@@ -106,12 +106,10 @@ code {
 }
 
 .markdown-view {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-default);
-  border-radius: 12px;
-  padding: 28px 36px;
+  padding: 1.25rem 1.5rem;
   line-height: 1.65;
-  box-shadow: var(--shadow-sm);
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .markdown-view h1,
@@ -262,7 +260,7 @@ button.ui-switch[data-state="checked"] > .ui-switch-thumb {
   border: none !important;
   box-shadow: none !important;
   background: transparent !important;
-  overflow-y: auto;
+  overflow: hidden;
 }
 
 .markdown-editor .milkdown .editor {
@@ -318,7 +316,3 @@ button.ui-switch[data-state="checked"] > .ui-switch-thumb {
   font-size: 12px !important;
 }
 
-/* Ensure standard markdown view matches the editor feel */
-.markdown-view {
-  padding: 1.5rem 2rem;
-}

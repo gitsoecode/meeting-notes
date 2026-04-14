@@ -40,6 +40,11 @@ import {
 import { AudioMeter } from "../components/AudioMeter";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DisclosurePanel } from "../components/DisclosurePanel";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "../components/ui/resizable";
 import { MarkdownEditor } from "../components/MarkdownEditor";
 import { MarkdownView } from "../components/MarkdownView";
 import { MeetingHeader } from "../components/MeetingHeader";
@@ -675,11 +680,11 @@ export function MeetingWorkspace({
   const onNotesChange = (value: string) => {
     if (isDraft || isLive) {
       setNotes(value);
-      if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
-      saveTimer.current = window.setTimeout(() => { api.runs.writeNotes(runFolder, value).catch(() => {}); }, 400);
     } else {
       setTabContents((prev) => ({ ...prev, notes: value }));
     }
+    if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => { api.runs.writeNotes(runFolder, value).catch(() => {}); }, 400);
   };
 
   const onPrepChange = (value: string) => {
@@ -924,72 +929,84 @@ export function MeetingWorkspace({
         actions={headerActions}
       />
 
-      {/* ---- Focused recording view ---- */}
+      {/* ---- Focused recording view — side-by-side prep + notes ---- */}
       {isLive && focusedRecording ? (
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
-          {/* Toggle to full workspace — at top */}
-          <button
-            type="button"
-            onClick={() => setFocusedRecording(false)}
-            className="inline-flex items-center gap-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-          >
-            <Maximize2 className="h-3.5 w-3.5" /> View full workspace
-          </button>
-
-          {/* Prep notes — collapsible, lockable */}
-          {(prepNotes.trim() || !prepLocked) && (
-            <DisclosurePanel
-              label="Prep notes"
-              icon={<NotebookPen className="h-4 w-4" />}
-              defaultOpen={!!prepNotes.trim()}
-              actions={
-                <Button variant="ghost" size="sm" onClick={() => setPrepLocked(!prepLocked)} className="h-7 w-7 p-0" title={prepLocked ? "Unlock editing" : "Lock editing"}>
-                  {prepLocked ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-                </Button>
-              }
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          {/* Toggle to full workspace */}
+          <div className="shrink-0">
+            <button
+              type="button"
+              onClick={() => setFocusedRecording(false)}
+              className="inline-flex items-center gap-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
             >
-              {prepLocked ? (
-                <div className="prose prose-sm max-w-none text-[var(--text-primary)]">
-                  {prepNotes.trim() ? <MarkdownView source={prepNotes} /> : <span className="text-[var(--text-tertiary)]">No prep notes.</span>}
-                </div>
-              ) : (
-                <div className="h-[40vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
-                  <MarkdownEditor value={prepNotes} onChange={onPrepChange} />
-                </div>
-              )}
-            </DisclosurePanel>
-          )}
-
-          {/* Live notes — primary editor */}
-          <div>
-            <div className="mb-2 text-sm font-medium text-[var(--text-primary)]">Live notes</div>
-            <div className="h-[60vh] overflow-hidden rounded-md border border-[var(--border-default)] bg-white">
-              <MarkdownEditor
-                value={notes}
-                onChange={onNotesChange}
-                onBlur={() => { api.runs.writeNotes(runFolder, notes).catch(() => {}); }}
-              />
-            </div>
+              <Maximize2 className="h-3.5 w-3.5" /> View full workspace
+            </button>
           </div>
 
-          {/* Compact capture health */}
-          <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
-            <AudioMeter label="Mic" active={isRecording} />
-            <span>·</span>
-            <span className={recording.system_captured ? "" : "text-[var(--warning-text)]"}>
-              {recording.system_captured ? "System audio capturing" : "System audio not available"}
-            </span>
-          </div>
+          {/* Resizable side-by-side panes */}
+          <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 rounded-lg border border-[var(--border-subtle)] bg-white">
+            {/* Prep pane */}
+            <ResizablePanel defaultSize={35} minSize={20}>
+              <div className="flex h-full flex-col">
+                <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
+                  <span className="text-sm font-medium text-[var(--text-primary)]">Prep</span>
+                  <Button variant="ghost" size="sm" onClick={() => setPrepLocked(!prepLocked)} className="h-7 w-7 p-0" title={prepLocked ? "Unlock editing" : "Lock editing"}>
+                    {prepLocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
+                  </Button>
+                </div>
+                {prepLocked ? (
+                  <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                    {prepNotes.trim() ? (
+                      <div className="prose prose-sm max-w-none text-[var(--text-primary)]">
+                        <MarkdownView source={prepNotes} />
+                      </div>
+                    ) : (
+                      <span className="text-sm text-[var(--text-tertiary)]">No prep notes.</span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex-1 min-h-0 overflow-hidden">
+                    <MarkdownEditor value={prepNotes} onChange={onPrepChange} />
+                  </div>
+                )}
+              </div>
+            </ResizablePanel>
 
-          {/* System audio warning banner */}
-          {recording.system_audio_warning && (
-            <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-muted)] px-4 py-3 text-sm text-[var(--warning-text)]">
-              {recording.system_audio_warning}
+            <ResizableHandle withHandle />
+
+            {/* Notes pane */}
+            <ResizablePanel defaultSize={65} minSize={30}>
+              <div className="flex h-full flex-col">
+                <div className="shrink-0 border-b border-[var(--border-subtle)] px-3 py-2">
+                  <span className="text-sm font-medium text-[var(--text-primary)]">Live notes</span>
+                </div>
+                <div className="flex-1 min-h-0 overflow-hidden">
+                  <MarkdownEditor
+                    value={notes}
+                    onChange={onNotesChange}
+                    onBlur={() => { api.runs.writeNotes(runFolder, notes).catch(() => {}); }}
+                  />
+                </div>
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+
+          {/* Compact capture health + pipeline */}
+          <div className="shrink-0 space-y-2">
+            <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
+              <AudioMeter label="Mic" active={isRecording} />
+              <span>·</span>
+              <span className={recording.system_captured ? "" : "text-[var(--warning-text)]"}>
+                {recording.system_captured ? "System audio capturing" : "System audio not available"}
+              </span>
             </div>
-          )}
-
-          {/* Pipeline progress */}
-          {sections.length > 0 && <PipelineStatus sections={sections} title="Live processing" />}
+            {recording.system_audio_warning && (
+              <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-muted)] px-4 py-3 text-sm text-[var(--warning-text)]">
+                {recording.system_audio_warning}
+              </div>
+            )}
+            {sections.length > 0 && <PipelineStatus sections={sections} title="Live processing" />}
+          </div>
         </div>
       ) : (
       <>
@@ -1040,7 +1057,7 @@ export function MeetingWorkspace({
               defaultOpen={!!prepNotes.trim()}
               actions={
                 <Button variant="ghost" size="sm" onClick={() => setPrepLocked(!prepLocked)} className="h-7 w-7 p-0" title={prepLocked ? "Unlock editing" : "Lock editing"}>
-                  {prepLocked ? <LockOpen className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
+                  {prepLocked ? <Lock className="h-3.5 w-3.5" /> : <LockOpen className="h-3.5 w-3.5" />}
                 </Button>
               }
             >
@@ -1054,9 +1071,19 @@ export function MeetingWorkspace({
                 </div>
               )}
             </DisclosurePanel>
-          ) : prepNotes.trim() ? (
-            <div className="prose prose-sm max-w-none text-[var(--text-primary)]">
-              <MarkdownView source={prepNotes} />
+          ) : prepNotes.trim() || !prepLocked ? (
+            <div className="relative flex min-h-0 flex-1 flex-col rounded-md border border-[var(--border-default)] bg-white">
+              <button
+                type="button"
+                onClick={() => setPrepLocked(!prepLocked)}
+                className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                title={prepLocked ? "Unlock editing" : "Lock editing"}
+              >
+                {prepLocked ? <Lock className="h-4 w-4" /> : <LockOpen className="h-4 w-4" />}
+              </button>
+              <div className="flex-1 min-h-0">
+                <MarkdownEditor value={prepNotes} onChange={onPrepChange} readOnly={prepLocked} />
+              </div>
             </div>
           ) : (
             <EmptyTabContent message="No prep notes for this meeting." />
@@ -1082,50 +1109,29 @@ export function MeetingWorkspace({
                 <EmptyTabContent message="Notes will appear after processing completes." />
               )}
             </div>
-          ) : isCompletedMeeting && !notesEditMode ? (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-[var(--text-secondary)]">Meeting notes</h3>
-                <Button variant="secondary" size="sm" onClick={() => setNotesEditMode(true)}>
-                  <SquarePen className="h-3.5 w-3.5" /> Edit
-                </Button>
-              </div>
-              {completedNotesContent.trim() ? (
-                <MarkdownView source={completedNotesContent} className="markdown-view" />
-              ) : (
-                <EmptyTabContent message="No notes for this meeting." />
-              )}
-            </div>
-          ) : isCompletedMeeting && notesEditMode ? (
-            <div className="flex flex-1 min-h-0 flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium text-[var(--text-secondary)]">Editing notes</h3>
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    onClick={() => void saveCompletedNotes()}
-                    className={isNotesDirty ? "bg-[var(--accent)] shadow-lg ring-4 ring-[var(--accent)]/15" : ""}
-                  >
-                    Save notes
-                  </Button>
-                  <Button variant="secondary" size="sm" onClick={() => {
-                    requestNotesDiscard(() => {
-                      setNotesEditMode(false);
-                      setTabContents((prev) => ({ ...prev, notes: initialNotesRef.current ?? "" }));
-                    }, "Discard your note edits?");
-                  }}>
-                    Cancel
-                  </Button>
+          ) : isCompletedMeeting ? (
+            completedNotesContent.trim() || notesEditMode ? (
+              <div className="relative flex min-h-0 flex-1 flex-col rounded-md border border-[var(--border-default)] bg-white">
+                <button
+                  type="button"
+                  onClick={() => setNotesEditMode(!notesEditMode)}
+                  className="absolute right-3 top-3 z-10 rounded-md p-1.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+                  title={notesEditMode ? "Lock editing" : "Unlock editing"}
+                >
+                  {notesEditMode ? <LockOpen className="h-4 w-4" /> : <Lock className="h-4 w-4" />}
+                </button>
+                <div className="flex-1 min-h-0">
+                  <MarkdownEditor
+                    value={completedNotesContent}
+                    onChange={onNotesChange}
+                    onBlur={() => { api.runs.writeNotes(runFolder, completedNotesContent).catch(() => {}); }}
+                    readOnly={!notesEditMode}
+                  />
                 </div>
               </div>
-              <div className={`flex-1 min-h-0 overflow-hidden rounded-md border transition-colors bg-white ${isNotesDirty ? "border-[var(--warning)]/50 ring-1 ring-[var(--warning)]/10" : "border-[var(--border-default)]"}`}>
-                <MarkdownEditor
-                  value={completedNotesContent}
-                  onChange={onNotesChange}
-                  onBlur={() => { api.runs.writeNotes(runFolder, completedNotesContent).catch(() => {}); }}
-                />
-              </div>
-            </div>
+            ) : (
+              <EmptyTabContent message="No notes for this meeting." />
+            )
           ) : (
             <EmptyTabContent message="No notes for this meeting." />
           )}
@@ -1136,32 +1142,16 @@ export function MeetingWorkspace({
           {(isDraft || isLive) ? (
             <EmptyTabContent message="Summary will be generated after recording." />
           ) : isProcessing ? (
-            <div className="space-y-4">{pipelineStatusContent}<EmptyTabContent message="Summary is being generated…" /></div>
+            <div className="min-h-0 space-y-4">{pipelineStatusContent}<EmptyTabContent message="Summary is being generated…" /></div>
           ) : (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0 space-y-1">
-                  <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-                    {promptCollections.primaryPrompt?.label ?? "Summary"}
-                  </h3>
-                  <p className="text-sm text-[var(--text-secondary)]">
-                    {promptCollections.primaryPrompt?.description?.trim() || "The primary meeting recap."}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => void startReprocess({ runFolder, onlyIds: [PRIMARY_PROMPT_ID] })}>
-                    <RefreshCcw className="h-3.5 w-3.5" /> Refresh
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => onOpenPromptLibrary(PRIMARY_PROMPT_ID)}>
-                    <SquarePen className="h-3.5 w-3.5" /> Edit prompt
-                  </Button>
-                </div>
-              </div>
+            <div className="min-h-0 space-y-4">
               {pipelineStatusContent}
               {hasSummaryContent ? (
-                <MarkdownView source={summaryContent} className="markdown-view" />
+                <div className="flex-1 min-h-0 rounded-md border border-[var(--border-default)] bg-white">
+                  <MarkdownEditor value={summaryContent} onChange={() => {}} readOnly />
+                </div>
               ) : (
-                <EmptyTabContent message="No summary has been generated yet. Click Refresh to create one." />
+                <EmptyTabContent message="No summary has been generated yet." />
               )}
             </div>
           )}
