@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!--
+    Makes the audiotee helper binary inherit its TCC "responsibility" from
+    the parent process (Electron in dev, the packaged Meeting Notes.app in
+    production). Without this, macOS treats audiotee as its own app and
+    requires a separate "System Audio Recording Only" grant keyed to the
+    ad-hoc-signed audiotee binary itself, which the user can't actually
+    grant through System Settings.
+  -->
+  <key>com.apple.security.inherit</key>
+  <true/>
+</dict>
+</plist>

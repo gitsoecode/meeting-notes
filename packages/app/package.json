@@ -7,7 +7,7 @@
   "license": "SEE LICENSE IN LICENSE",
   "main": "dist/main/index.js",
   "scripts": {
-    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3 && npm run patch:audiotee",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer && npm run build:assets",
     "build:assets": "npm run build:icons && node -e \"require('fs').cpSync('assets','dist/assets',{recursive:true});\"",
     "build:icons": "/usr/bin/python3 scripts/generate-icons.py",
@@ -16,14 +16,16 @@
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
     "package:mac": "npm run build && npm run check:bundle && electron-builder --mac --config.directories.output=release",
+    "patch:audiotee": "node scripts/patch-audiotee.mjs",
+    "postinstall": "node scripts/patch-audiotee.mjs",
     "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @meeting-notes/engine && npm run build:main && node --test test/*.test.mjs",
     "test:e2e": "npm run build:renderer && playwright test",
-    "dev": "npm run build:assets && concurrently -k -r \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run start:electron\"",
+    "dev": "npm run patch:audiotee && npm run build:assets && concurrently -k -r \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run start:electron\"",
     "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
     "dev:preload": "tsc -p tsconfig.preload.json --watch --preserveWatchOutput",
     "dev:renderer": "vite",
     "preview:renderer": "vite preview --host 127.0.0.1 --port 4173",
-    "start:electron": "wait-on tcp:5173 dist/main/index.js dist/preload/index.js && VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
+    "start:electron": "node scripts/launch-electron-dev.mjs",
     "start": "electron ."
   },
   "dependencies": {
@@ -94,10 +96,18 @@
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Meeting Notes uses your microphone to capture your voice during meetings for local transcription.",
         "NSAudioCaptureUsageDescription": "Meeting Notes captures system audio so the other participants in your meeting can be transcribed."
-      }
-    }
+      },
+      "extraFiles": [
+        {
+          "from": "../../node_modules/audiotee/bin/audiotee",
+          "to": "MacOS/audiotee"
+        }
+      ]
+    },
+    "afterSign": "scripts/after-sign.mjs"
   }
 }

@@ -6,6 +6,7 @@ import type {
   AppLogEntry,
   AppLogQuery,
   ActivityProcess,
+  AudioMonitorSnapshot,
   InitConfigRequest,
   ProcessRecordingRequest,
   StartRecordingRequest,
@@ -48,6 +49,9 @@ const api: MeetingNotesApi = {
     continueRecording: (req: ContinueRecordingRequest) =>
       ipcRenderer.invoke("recording:continue", req),
     listAudioDevices: () => ipcRenderer.invoke("recording:list-audio-devices"),
+    startAudioMonitor: (req?: { micDevice?: string }) =>
+      ipcRenderer.invoke("audio-monitor:start", req),
+    stopAudioMonitor: () => ipcRenderer.invoke("audio-monitor:stop"),
   },
   runs: {
     list: () => ipcRenderer.invoke("runs:list"),
@@ -135,6 +139,18 @@ const api: MeetingNotesApi = {
   },
   system: {
     detectHardware: () => ipcRenderer.invoke("system:detect-hardware"),
+    openAudioPermissionPane: () =>
+      ipcRenderer.invoke("system:open-audio-permission-pane"),
+    openMicrophonePermissionPane: () =>
+      ipcRenderer.invoke("system:open-microphone-permission-pane"),
+    getAppIdentity: () => ipcRenderer.invoke("system:get-app-identity"),
+    revealAppBundle: () => ipcRenderer.invoke("system:reveal-app-bundle"),
+    requestMicrophonePermission: () =>
+      ipcRenderer.invoke("system:request-microphone-permission"),
+    getMicrophonePermission: () =>
+      ipcRenderer.invoke("system:get-microphone-permission"),
+    probeSystemAudioPermission: () =>
+      ipcRenderer.invoke("system:probe-system-audio-permission"),
   },
   logs: {
     tailApp: (lines) => ipcRenderer.invoke("logs:tail-app", lines),
@@ -212,6 +228,11 @@ const api: MeetingNotesApi = {
       const handler = (_e: unknown, process: ActivityProcess) => cb(process);
       ipcRenderer.on("logs:process-update", handler);
       return () => ipcRenderer.removeListener("logs:process-update", handler);
+    },
+    audioMonitorLevels: (cb: (snapshot: AudioMonitorSnapshot) => void) => {
+      const handler = (_e: unknown, snapshot: AudioMonitorSnapshot) => cb(snapshot);
+      ipcRenderer.on("audio-monitor:levels", handler);
+      return () => ipcRenderer.removeListener("audio-monitor:levels", handler);
     },
   },
 };

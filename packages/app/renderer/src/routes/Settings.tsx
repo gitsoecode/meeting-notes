@@ -14,6 +14,7 @@ import { PageIntro, PageScaffold } from "../components/PageScaffold";
 import { ShortcutRecorder } from "../components/ShortcutRecorder";
 import { ModelDropdown } from "../components/ModelDropdown";
 import { LocalModelInstaller } from "../components/LocalModelInstaller";
+import { AudioLevelMeters } from "../components/AudioLevelMeters";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -32,9 +33,6 @@ import { Switch } from "../components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Table, TableBody, TableCell, TableRow } from "../components/ui/table";
 import { Textarea } from "../components/ui/textarea";
-
-const SYSTEM_DEFAULT_DEVICE = "";
-const SYSTEM_DEFAULT_DEVICE_VALUE = "__system_default__";
 
 const DEFAULT_CHAT_PROMPT =
   "Below is the full context from a meeting I recorded and processed. " +
@@ -203,11 +201,6 @@ export function Settings({ config, onChange }: SettingsProps) {
       setInstallingWhisper(false);
     }
   };
-
-  const micDeviceValue =
-    config.recording.mic_device === SYSTEM_DEFAULT_DEVICE
-      ? SYSTEM_DEFAULT_DEVICE_VALUE
-      : config.recording.mic_device;
 
   const dependencyRows =
     deps == null
@@ -658,58 +651,28 @@ export function Settings({ config, onChange }: SettingsProps) {
         {/* ── Audio tab ── */}
         <TabsContent value="audio" className="max-w-2xl space-y-5 outline-none">
           <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
+            <CardHeader className="mb-4">
               <div className="space-y-1">
-                <CardTitle>Audio Devices</CardTitle>
-                <CardDescription>Configure audio capture devices.</CardDescription>
+                <CardTitle>Audio Input</CardTitle>
+                <CardDescription>
+                  Pick your microphone and verify both channels are receiving audio. Changes take effect immediately.
+                </CardDescription>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <label htmlFor="settings-mic" className="text-sm font-medium text-[var(--text-secondary)]">Microphone</label>
-                <Select
-                  value={micDeviceValue}
-                  onValueChange={(value) =>
-                    void save({
-                      ...config,
-                      recording: {
-                        ...config.recording,
-                        mic_device: value === SYSTEM_DEFAULT_DEVICE_VALUE ? SYSTEM_DEFAULT_DEVICE : value,
-                      },
-                    })
-                  }
-                >
-                  <SelectTrigger id="settings-mic">
-                    <SelectValue placeholder="System default" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={SYSTEM_DEFAULT_DEVICE_VALUE}>System default</SelectItem>
-                    {devices.map((d) => (
-                      <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1">
-                <div className="text-sm font-medium text-[var(--text-secondary)]">System Audio</div>
-                {deps?.systemAudioSupported ? (
-                  <>
-                    <p className="text-sm text-[var(--success)]">Automatic (macOS 14.2+)</p>
-                    <p className="text-xs text-[var(--text-tertiary)]">
-                      System audio is captured automatically via CoreAudio — no extra drivers needed.
-                      The System Audio Recording permission will be requested on first use.
-                    </p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm text-[var(--text-secondary)]">Not available</p>
-                    <p className="text-xs text-[var(--text-tertiary)]">
-                      System audio capture requires macOS 14.2 or later. Mic-only recording still works.
-                    </p>
-                  </>
-                )}
-              </div>
+            <CardContent>
+              <AudioLevelMeters
+                active
+                micDevice={config.recording.mic_device}
+                availableDevices={devices}
+                systemAudioSupported={deps?.systemAudioSupported ?? true}
+                onMicDeviceChange={(device) =>
+                  void save({
+                    ...config,
+                    recording: { ...config.recording, mic_device: device },
+                  })
+                }
+                onDevicesRefreshed={setDevices}
+              />
             </CardContent>
           </Card>
         </TabsContent>

@@ -310,6 +310,24 @@ export interface AudioDevice {
   name: string;
 }
 
+/**
+ * A single channel snapshot from the live audio-level monitor used in
+ * Settings → Audio. Values are in dBFS (full-scale digital), where 0 dB
+ * is the loudest possible signal and -90 dB is effective silence.
+ */
+export interface AudioMonitorLevel {
+  peakDb: number;
+  rmsDb: number;
+  source: string;
+  active: boolean;
+  error?: string;
+}
+
+export interface AudioMonitorSnapshot {
+  mic: AudioMonitorLevel;
+  system: AudioMonitorLevel;
+}
+
 /** @deprecated BlackHole is no longer required — system audio is captured via AudioTee. */
 export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 
@@ -484,6 +502,15 @@ export interface MeetingNotesApi {
     resume: () => Promise<void>;
     continueRecording: (req: ContinueRecordingRequest) => Promise<{ run_folder: string; run_id: string }>;
     listAudioDevices: () => Promise<AudioDevice[]>;
+    /**
+     * Start the live audio-level monitor (Settings → Audio meter).
+     * Accepts an optional `micDevice` override so the meter can follow
+     * the dropdown selection without requiring a config save first.
+     * Returns the freshly enumerated device list as a side effect.
+     */
+    startAudioMonitor: (req?: { micDevice?: string }) => Promise<AudioDevice[]>;
+    /** Stop the live audio-level monitor. */
+    stopAudioMonitor: () => Promise<void>;
   };
   // Runs
   runs: {
@@ -553,6 +580,62 @@ export interface MeetingNotesApi {
   };
   system: {
     detectHardware: () => Promise<HardwareInfoDTO>;
+    /**
+     * Open System Settings → Privacy & Security → Screen & System Audio
+     * Recording. Used from Settings when system audio capture appears to be
+     * silently recording zeros because the TCC permission is not granted.
+     */
+    openAudioPermissionPane: () => Promise<void>;
+    /** Open System Settings → Privacy & Security → Microphone. */
+    openMicrophonePermissionPane: () => Promise<void>;
+    /**
+     * Return the app's display name and the **bundle name TCC shows in
+     * System Settings**. In a packaged build they're both "Meeting Notes".
+     * In dev, the bundle is "Electron" so users have to grant the
+     * permission to "Electron" (not "Meeting Notes"). The UI uses
+     * `tccBundleName` when telling the user what to look for.
+     */
+    getAppIdentity: () => Promise<{
+      displayName: string;
+      tccBundleName: string;
+      /**
+       * Absolute path to the running .app bundle (e.g.,
+       * `/path/to/node_modules/electron/dist/Electron.app` in dev, or
+       * `/Applications/Meeting Notes.app` in prod). Used so the UI can
+       * "Reveal in Finder" — macOS often won't list an app in the System
+       * Audio Recording Only list until it's been manually added via the
+       * "+" button, which needs the bundle path.
+       */
+      bundlePath: string | null;
+      isDev: boolean;
+      isPackaged: boolean;
+    }>;
+    /** Open Finder with the running .app bundle selected so the user can drag it into System Settings. */
+    revealAppBundle: () => Promise<void>;
+    /** Trigger the macOS microphone permission prompt (no-op if already granted). */
+    requestMicrophonePermission: () => Promise<{
+      granted: boolean;
+      status: string;
+      error?: string;
+    }>;
+    /** Read microphone permission status without prompting. */
+    getMicrophonePermission: () => Promise<{ status: string }>;
+    /**
+     * Probe whether AudioTee is actually receiving system audio. Returns
+     * "granted" if we saw non-zero samples, "denied" if everything is
+     * stuck at zero (classic TCC-permission-missing case), "unsupported"
+     * on non-macOS, or "failed" on unexpected errors.
+     */
+    probeSystemAudioPermission: () => Promise<
+      | {
+          status: "granted" | "denied";
+          totalSamples: number;
+          zeroSamples: number;
+          totalBytes: number;
+        }
+      | { status: "unsupported" }
+      | { status: "failed"; error: string }
+    >;
   };
   // Logs
   logs: {
@@ -600,6 +683,7 @@ export interface MeetingNotesApi {
     jobUpdate: (cb: (job: JobSummary) => void) => () => void;
     logEntry: (cb: (entry: AppLogEntry) => void) => () => void;
     processUpdate: (cb: (process: ActivityProcess) => void) => () => void;
+    audioMonitorLevels: (cb: (snapshot: AudioMonitorSnapshot) => void) => () => void;
   };
 }
 

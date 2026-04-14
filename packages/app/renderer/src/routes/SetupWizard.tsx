@@ -79,6 +79,28 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const [restartingAudio, setRestartingAudio] = useState(false);
   const [restartAudioError, setRestartAudioError] = useState<string | null>(null);
 
+  // Audio permissions (macOS). micPermission = native TCC status for mic;
+  // systemAudioProbe = AudioTee zero-sample probe. Both are checked lazily
+  // when the user lands on the dependencies step so we don't pop prompts
+  // early in the flow.
+  const [micPermission, setMicPermission] = useState<"unknown" | "granted" | "denied" | "not-determined" | "restricted">("unknown");
+  const [micPermissionBusy, setMicPermissionBusy] = useState(false);
+  const [systemAudioProbe, setSystemAudioProbe] = useState<
+    | { status: "unknown" }
+    | { status: "probing" }
+    | { status: "granted" }
+    | { status: "denied" }
+    | { status: "unsupported" }
+    | { status: "failed"; error: string }
+  >({ status: "unknown" });
+  const [appIdentity, setAppIdentity] = useState<{
+    displayName: string;
+    tccBundleName: string;
+    bundlePath: string | null;
+    isDev: boolean;
+    isPackaged: boolean;
+  } | null>(null);
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -130,8 +152,41 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     if (step === 4) {
       api.depsCheck().then(setDeps).catch(() => {});
       api.deps.checkBrew().then(setBrewAvailable).catch(() => setBrewAvailable(false));
+      // Load app identity so we can tell the user what to look for in
+      // System Settings (e.g., "Electron" in dev, "Meeting Notes" in prod).
+      api.system.getAppIdentity().then(setAppIdentity).catch(() => {});
+      // Read current mic permission state (doesn't prompt).
+      api.system
+        .getMicrophonePermission()
+        .then(({ status }) => setMicPermission(status as typeof micPermission))
+        .catch(() => {});
     }
   }, [step]);
+
+  const requestMicrophonePermission = async () => {
+    setMicPermissionBusy(true);
+    try {
+      const res = await api.system.requestMicrophonePermission();
+      setMicPermission(res.status as typeof micPermission);
+    } catch {
+      // noop
+    } finally {
+      setMicPermissionBusy(false);
+    }
+  };
+
+  const probeSystemAudio = async () => {
+    setSystemAudioProbe({ status: "probing" });
+    try {
+      const res = await api.system.probeSystemAudioPermission();
+      if (res.status === "granted") setSystemAudioProbe({ status: "granted" });
+      else if (res.status === "denied") setSystemAudioProbe({ status: "denied" });
+      else if (res.status === "unsupported") setSystemAudioProbe({ status: "unsupported" });
+      else setSystemAudioProbe({ status: "failed", error: res.error ?? "unknown error" });
+    } catch (err) {
+      setSystemAudioProbe({ status: "failed", error: err instanceof Error ? err.message : String(err) });
+    }
+  };
 
   useEffect(() => {
     if (dataPathTouched) return;
@@ -646,26 +701,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     brewAvailable={brewAvailable}
                     onInstall={() => installDep("ffmpeg")}
                   />
-                  {/* System audio info row — not a blocker */}
-                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
-                    <div className="flex flex-wrap items-center gap-3">
-                      <div className="text-sm font-medium text-[var(--text-primary)]">System audio</div>
-                      {deps.systemAudioSupported ? (
-                        <>
-                          <DependencyStateBadge ok warning={false} />
-                          <span className="text-xs text-[var(--text-secondary)]">Automatic (macOS 14.2+)</span>
-                        </>
-                      ) : (
-                        <>
-                          <Badge variant="secondary" className="gap-1 normal-case tracking-normal">
-                            <Info className="h-3 w-3" />
-                            Optional
-                          </Badge>
-                          <span className="text-xs text-[var(--text-secondary)]">Requires macOS 14.2+ — mic-only recording still works</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  {/* Audio permissions — actionable during setup so recording works on first try */}
+                  <AudioPermissionsPanel
+                    systemAudioSupported={deps.systemAudioSupported}
+                    micPermission={micPermission}
+                    micPermissionBusy={micPermissionBusy}
+                    systemAudioProbe={systemAudioProbe}
+                    appIdentity={appIdentity}
+                    onRequestMic={requestMicrophonePermission}
+                    onProbeSystemAudio={probeSystemAudio}
+                  />
                   {asrProvider === "parakeet-mlx" && (
                     <DependencyRow
                       name="Parakeet"
@@ -952,4 +997,181 @@ function joinPath(a: string, b: string): string {
 function basename(p: string): string {
   const parts = p.split("/").filter(Boolean);
   return parts[parts.length - 1] ?? "";
+}
+
+// ---- Audio permissions panel used in the Dependencies wizard step ----
+
+type SystemAudioProbeState =
+  | { status: "unknown" }
+  | { status: "probing" }
+  | { status: "granted" }
+  | { status: "denied" }
+  | { status: "unsupported" }
+  | { status: "failed"; error: string };
+
+function AudioPermissionsPanel({
+  systemAudioSupported,
+  micPermission,
+  micPermissionBusy,
+  systemAudioProbe,
+  appIdentity,
+  onRequestMic,
+  onProbeSystemAudio,
+}: {
+  systemAudioSupported: boolean;
+  micPermission: "unknown" | "granted" | "denied" | "not-determined" | "restricted";
+  micPermissionBusy: boolean;
+  systemAudioProbe: SystemAudioProbeState;
+  appIdentity: { displayName: string; tccBundleName: string; bundlePath: string | null; isDev: boolean; isPackaged: boolean } | null;
+  onRequestMic: () => void;
+  onProbeSystemAudio: () => void;
+}) {
+  const bundleLabel = appIdentity?.tccBundleName ?? "Meeting Notes";
+  const isDev = appIdentity?.isDev ?? false;
+
+  return (
+    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 space-y-4">
+      <div className="text-sm font-medium text-[var(--text-primary)]">Audio permissions</div>
+
+      {/* Microphone */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-sm text-[var(--text-primary)] min-w-[120px]">Microphone</div>
+          {micPermission === "granted" ? (
+            <Badge className="gap-1 bg-[var(--success-muted,#dcfce7)] text-[var(--success,#15803d)]">
+              <CheckCircle2 className="h-3 w-3" />
+              Granted
+            </Badge>
+          ) : micPermission === "denied" || micPermission === "restricted" ? (
+            <Badge variant="destructive" className="gap-1">
+              <XCircle className="h-3 w-3" />
+              Denied
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="gap-1">
+              <Info className="h-3 w-3" />
+              {micPermission === "not-determined" ? "Not yet granted" : "Unknown"}
+            </Badge>
+          )}
+          {micPermission !== "granted" ? (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={onRequestMic}
+              disabled={micPermissionBusy}
+            >
+              {micPermissionBusy ? "Requesting…" : "Grant microphone access"}
+            </Button>
+          ) : null}
+          {micPermission === "denied" ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => api.system.openMicrophonePermissionPane().catch(() => {})}
+            >
+              Open Settings
+            </Button>
+          ) : null}
+        </div>
+        <div className="text-xs text-[var(--text-secondary)]">
+          Needed to record your voice. macOS will show a permission prompt the first time.
+        </div>
+      </div>
+
+      {/* System audio */}
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="text-sm text-[var(--text-primary)] min-w-[120px]">System audio</div>
+          {!systemAudioSupported ? (
+            <>
+              <Badge variant="secondary" className="gap-1">
+                <Info className="h-3 w-3" />
+                Unsupported
+              </Badge>
+              <span className="text-xs text-[var(--text-secondary)]">Requires macOS 14.2+</span>
+            </>
+          ) : systemAudioProbe.status === "granted" ? (
+            <Badge className="gap-1 bg-[var(--success-muted,#dcfce7)] text-[var(--success,#15803d)]">
+              <CheckCircle2 className="h-3 w-3" />
+              Granted
+            </Badge>
+          ) : systemAudioProbe.status === "denied" ? (
+            <Badge variant="destructive" className="gap-1">
+              <XCircle className="h-3 w-3" />
+              Not granted
+            </Badge>
+          ) : systemAudioProbe.status === "probing" ? (
+            <Badge variant="secondary" className="gap-1">
+              <Spinner className="h-3 w-3" />
+              Checking (≈2s)…
+            </Badge>
+          ) : systemAudioProbe.status === "failed" ? (
+            <Badge variant="destructive" className="gap-1">
+              <AlertTriangle className="h-3 w-3" />
+              Failed
+            </Badge>
+          ) : (
+            <Badge variant="secondary" className="gap-1">
+              <Info className="h-3 w-3" />
+              Not yet checked
+            </Badge>
+          )}
+          {systemAudioSupported && systemAudioProbe.status !== "granted" && systemAudioProbe.status !== "probing" ? (
+            <Button size="sm" variant="secondary" onClick={onProbeSystemAudio}>
+              Check system audio
+            </Button>
+          ) : null}
+        </div>
+        {systemAudioSupported && systemAudioProbe.status === "denied" ? (
+          <div className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning-muted,rgba(245,158,11,0.08))] px-3 py-2 text-xs space-y-2">
+            <div className="text-[var(--text-secondary)]">
+              macOS is delivering silent audio because the <strong>"System Audio Recording Only"</strong> permission
+              hasn't been granted.{" "}
+              {isDev ? (
+                <>Because this is a development build, grant the permission to <strong className="text-[var(--text-primary)]">"Electron"</strong> (not "Meeting Notes"). A packaged build will correctly show "Meeting Notes".</>
+              ) : (
+                <>Grant it to <strong className="text-[var(--text-primary)]">"{bundleLabel}"</strong>.</>
+              )}
+            </div>
+            <ol className="ml-4 list-decimal space-y-0.5 text-[var(--text-secondary)]">
+              <li>Open System Settings (button below).</li>
+              <li>Scroll to <strong className="text-[var(--text-primary)]">"System Audio Recording Only"</strong>.</li>
+              <li>
+                If <strong className="text-[var(--text-primary)]">{isDev ? "Electron" : bundleLabel}</strong> is in
+                the list, turn its switch on. Otherwise click <strong className="text-[var(--text-primary)]">+</strong>{" "}
+                and drag it from the Finder window (use <em>Reveal in Finder</em>).
+              </li>
+              <li>Come back here and click <em>Check system audio</em>.</li>
+            </ol>
+            {appIdentity?.bundlePath ? (
+              <div className="font-mono text-[10px] text-[var(--text-tertiary)] break-all">
+                {appIdentity.bundlePath}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => api.system.openAudioPermissionPane().catch(() => {})}
+              >
+                Open System Settings
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => api.system.revealAppBundle().catch(() => {})}
+              >
+                Reveal {isDev ? "Electron" : bundleLabel} in Finder
+              </Button>
+            </div>
+          </div>
+        ) : systemAudioSupported ? (
+          <div className="text-xs text-[var(--text-secondary)]">
+            Captures the other participants in your meeting (browser, Zoom, Teams, etc.). The check plays nothing —
+            it just verifies audio data is flowing through macOS's CoreAudio tap.
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }

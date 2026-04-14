@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
-import { ipcMain, dialog, shell, clipboard } from "electron";
+import { ipcMain, dialog, shell, clipboard, app, systemPreferences } from "electron";
 import matter from "gray-matter";
 import {
   loadConfig,
@@ -42,6 +42,8 @@ import {
   type RunManifest,
 } from "@meeting-notes/engine";
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
+import { startAudioMonitor, stopAudioMonitor } from "./audio-monitor.js";
+import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware, isSystemAudioSupported } from "./system.js";
 import type {
@@ -502,6 +504,155 @@ export function registerIpcHandlers(): void {
       systemDevice: config.recording.system_device,
       durationMs: 4000,
     });
+  });
+
+  ipcMain.handle(
+    "audio-monitor:start",
+    async (_e, req?: { micDevice?: string }) => {
+      const config = loadConfig();
+      // Always re-enumerate devices so USB plug/unplug shows up immediately
+      // in the Settings dropdown and the meter picks the right source.
+      invalidateDeviceCache();
+      const devices = await getCachedAudioDevices();
+      await startAudioMonitor({
+        micDevice: req?.micDevice ?? config.recording.mic_device,
+        availableDevices: devices,
+      });
+      return devices.map((name) => ({ name }));
+    }
+  );
+
+  ipcMain.handle("audio-monitor:stop", async () => {
+    await stopAudioMonitor();
+  });
+
+  ipcMain.handle("system:open-audio-permission-pane", async () => {
+    // Deep-link into System Settings → Privacy & Security → Screen & System
+    // Audio Recording. This is where the "System Audio Recording Only" list
+    // lives; the user needs to add whatever bundle is running AudioTee
+    // (Electron in dev, the signed app in prod, or the terminal emulator for
+    // CLI usage).
+    const url = "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture";
+    await shell.openExternal(url);
+  });
+
+  ipcMain.handle("system:open-microphone-permission-pane", async () => {
+    const url = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+    await shell.openExternal(url);
+  });
+
+  ipcMain.handle("system:get-app-identity", async () => {
+    // `app.getName()` returns whatever `app.setName()` set, which is
+    // "Meeting Notes" since we call setName in main/index.ts. But TCC
+    // identifies apps by the **bundle** — in dev the bundle is Electron.
+    // Expose both so the UI can tell users what name to look for in
+    // System Settings.
+    const isDev = Boolean(process.env.VITE_DEV_SERVER_URL) || !app.isPackaged;
+    const displayName = app.getName();
+    const tccBundleName = isDev ? "Electron" : displayName;
+
+    // Resolve the running .app bundle path so the UI can offer a
+    // "Reveal in Finder" button. macOS often won't show an app in the
+    // System Audio Recording list until it's been added via the "+"
+    // button — revealing the bundle makes that trivial.
+    let bundlePath: string | null = null;
+    try {
+      const exe = app.getPath("exe");
+      // /path/to/Electron.app/Contents/MacOS/Electron  →  /path/to/Electron.app
+      const appBundleIdx = exe.lastIndexOf(".app/");
+      if (appBundleIdx !== -1) {
+        bundlePath = exe.slice(0, appBundleIdx + 4);
+      }
+    } catch {
+      // ignore
+    }
+
+    return {
+      displayName,
+      tccBundleName,
+      bundlePath,
+      isDev,
+      isPackaged: app.isPackaged,
+    };
+  });
+
+  ipcMain.handle("system:reveal-app-bundle", async () => {
+    try {
+      const exe = app.getPath("exe");
+      const appBundleIdx = exe.lastIndexOf(".app/");
+      const bundlePath = appBundleIdx !== -1 ? exe.slice(0, appBundleIdx + 4) : exe;
+      shell.showItemInFolder(bundlePath);
+    } catch {
+      // ignore
+    }
+  });
+
+  ipcMain.handle("system:request-microphone-permission", async () => {
+    // `systemPreferences.askForMediaAccess` prompts for microphone access and
+    // returns the result. On macOS it immediately returns true if already
+    // granted, false if denied, or triggers the system prompt on first call.
+    if (process.platform !== "darwin") return { granted: true, status: "granted" as const };
+    try {
+      const granted = await systemPreferences.askForMediaAccess("microphone");
+      const status = systemPreferences.getMediaAccessStatus("microphone");
+      return { granted, status };
+    } catch (err) {
+      return {
+        granted: false,
+        status: "error" as const,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  ipcMain.handle("system:get-microphone-permission", async () => {
+    if (process.platform !== "darwin") return { status: "granted" as const };
+    return { status: systemPreferences.getMediaAccessStatus("microphone") };
+  });
+
+  ipcMain.handle("system:probe-system-audio-permission", async () => {
+    // AudioTee has no pre-flight permission check — when the "System Audio
+    // Recording Only" TCC permission isn't granted it happily streams buffers
+    // of all-zero bytes instead of erroring. Probe by starting a brief
+    // capture and checking whether *any* non-zero sample arrives. Used by
+    // the setup wizard and the Settings meter.
+    if (process.platform !== "darwin") {
+      return { status: "unsupported" as const };
+    }
+    try {
+      const { AudioTee } = await import("audiotee");
+      const tee = new AudioTee({ sampleRate: 16000, binaryPath: resolveAudioTeeBinary() });
+      let totalSamples = 0;
+      let zeroSamples = 0;
+      let totalBytes = 0;
+      tee.on("data", (chunk: { data?: Buffer }) => {
+        if (!chunk.data) return;
+        totalBytes += chunk.data.length;
+        const len = chunk.data.length - (chunk.data.length % 2);
+        for (let i = 0; i < len; i += 2) {
+          let s = chunk.data[i] | (chunk.data[i + 1] << 8);
+          if (s & 0x8000) s |= ~0xffff;
+          if (s === 0) zeroSamples += 1;
+          totalSamples += 1;
+        }
+      });
+      await tee.start();
+      // Give AudioTee a chance to deliver data. ~1.6 s is enough at 16k.
+      await new Promise((resolve) => setTimeout(resolve, 1600));
+      await tee.stop();
+      if (totalBytes === 0) {
+        return { status: "failed" as const, error: "AudioTee started but never produced data." };
+      }
+      if (totalSamples >= 4000 && zeroSamples === totalSamples) {
+        return { status: "denied" as const, totalSamples, zeroSamples, totalBytes };
+      }
+      return { status: "granted" as const, totalSamples, zeroSamples, totalBytes };
+    } catch (err) {
+      return {
+        status: "failed" as const,
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
   });
 
   ipcMain.handle(

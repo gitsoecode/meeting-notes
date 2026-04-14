@@ -59,11 +59,13 @@ export class FfmpegRecorder implements Recorder {
     // Use pre-enumerated device list if provided, otherwise spawn ffmpeg to enumerate.
     const knownDevices = options.devices ?? await this.listAudioDevices();
 
-    // Resolve "system default" (empty mic device) to whatever AVFoundation
-    // currently lists first.
+    // Resolve "system default" or empty mic device to the first physical
+    // microphone. Virtual/loopback devices (BlackHole, Zoom, Loom, Teams,
+    // etc.) should never be auto-selected — they exist for routing and
+    // produce silence unless explicitly configured as an audio source.
     let micDevice = options.micDevice;
-    if (!micDevice || micDevice.trim() === "") {
-      micDevice = knownDevices[0] ?? "";
+    if (!micDevice || micDevice.trim() === "" || micDevice === "default") {
+      micDevice = pickPhysicalMic(knownDevices);
       if (!micDevice) {
         throw new Error("No audio input devices available (system default requested but ffmpeg listed none)");
       }
@@ -86,6 +88,7 @@ export class FfmpegRecorder implements Recorder {
       audioTeeSession = await startAudioTeeCapture({
         outputDir: audioDir,
         sampleRate: 48000,
+        binaryPath: options.audioTeeBinaryPath,
         onError: (err) => {
           this.logger?.error("AudioTee system capture error", {
             error: err.message,
@@ -196,4 +199,33 @@ function spawnFfmpegRecord(deviceName: string, outputPath: string, logger?: Diag
   });
 
   return child;
+}
+
+/**
+ * Known virtual/loopback audio device name fragments. These devices are
+ * used for inter-app audio routing and produce silence unless something
+ * is explicitly sending audio to them. They should never be auto-selected
+ * as the "default" microphone.
+ */
+const VIRTUAL_DEVICE_PATTERNS = [
+  "blackhole",
+  "zoomaudiodevice",
+  "loomaudiodevice",
+  "microsoft teams audio",
+  "soundflower",
+  "loopback",
+  "virtual",
+  "aggregate",
+];
+
+/**
+ * Pick the first physical (non-virtual) microphone from the device list.
+ * Falls back to the first device if no physical mic is found (better than
+ * failing outright).
+ */
+export function pickPhysicalMic(devices: string[]): string {
+  const physical = devices.find(
+    (d) => !VIRTUAL_DEVICE_PATTERNS.some((p) => d.toLowerCase().includes(p))
+  );
+  return physical ?? devices[0] ?? "";
 }

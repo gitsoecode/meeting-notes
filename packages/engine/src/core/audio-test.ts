@@ -1,7 +1,8 @@
 import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
-import { FfmpegRecorder } from "../adapters/recording/ffmpeg.js";
+import { FfmpegRecorder, pickPhysicalMic } from "../adapters/recording/ffmpeg.js";
+import { startAudioTeeCapture } from "../adapters/recording/audiotee-recorder.js";
 import { checkAudioSilence } from "./audio.js";
 
 export interface DeviceTestResult {
@@ -25,9 +26,9 @@ export interface AudioTestReport {
 }
 
 /**
- * Record a short clip from each configured audio device and analyze the
- * results. This lets the user verify their setup is working without
- * needing a real meeting.
+ * Record a short clip from mic (via ffmpeg) and system audio (via AudioTee)
+ * and analyze the results. This lets the user verify their setup is working
+ * without needing a real meeting.
  */
 export async function testAudioCapture(opts: {
   micDevice: string;
@@ -38,23 +39,21 @@ export async function testAudioCapture(opts: {
   const recorder = new FfmpegRecorder();
   const devices = await recorder.listAudioDevices();
 
-  // Resolve system default
+  // Resolve mic device using smart selection (skips virtual devices)
   let micDevice = opts.micDevice;
-  if (!micDevice || micDevice.trim() === "") {
-    micDevice = devices[0] ?? "";
+  if (!micDevice || micDevice.trim() === "" || micDevice === "default") {
+    micDevice = pickPhysicalMic(devices);
   }
 
   const results: DeviceTestResult[] = [];
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-audio-test-"));
 
   try {
-    // Test mic device
-    results.push(await testDevice(recorder, devices, micDevice, "mic", tmpDir, durationMs));
+    // Test mic device via ffmpeg
+    results.push(await testMicDevice(recorder, devices, micDevice, tmpDir, durationMs));
 
-    // Test system device
-    if (opts.systemDevice) {
-      results.push(await testDevice(recorder, devices, opts.systemDevice, "system", tmpDir, durationMs));
-    }
+    // Test system audio via AudioTee (not device-based anymore)
+    results.push(await testSystemAudioTee(tmpDir, durationMs));
   } finally {
     // Clean up temp files
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -63,16 +62,15 @@ export async function testAudioCapture(opts: {
   return {
     devices,
     micDevice,
-    systemDevice: opts.systemDevice,
+    systemDevice: "(AudioTee)",
     results,
   };
 }
 
-async function testDevice(
+async function testMicDevice(
   recorder: FfmpegRecorder,
   knownDevices: string[],
   deviceName: string,
-  role: "mic" | "system",
   tmpDir: string,
   durationMs: number
 ): Promise<DeviceTestResult> {
@@ -83,7 +81,7 @@ async function testDevice(
   if (!found) {
     return {
       deviceName,
-      role,
+      role: "mic",
       found: false,
       recorded: false,
       fileSizeBytes: 0,
@@ -95,12 +93,12 @@ async function testDevice(
     };
   }
 
-  const outputPath = path.join(tmpDir, `${role}.wav`);
+  const outputPath = path.join(tmpDir, "mic.wav");
 
   try {
     const session = await recorder.start({
-      micDevice: role === "mic" ? deviceName : "",
-      systemDevice: role === "system" ? deviceName : "",
+      micDevice: deviceName,
+      systemDevice: "",
       outputDir: tmpDir,
       devices: knownDevices,
     });
@@ -109,15 +107,12 @@ async function testDevice(
     await new Promise((resolve) => setTimeout(resolve, durationMs));
     await session.stop();
 
-    // The file will be mic.wav or system.wav depending on which device was set
-    const testFile = role === "mic"
-      ? path.join(tmpDir, "mic.wav")
-      : path.join(tmpDir, "system.wav");
+    const testFile = path.join(tmpDir, "mic.wav");
 
     if (!fs.existsSync(testFile)) {
       return {
         deviceName,
-        role,
+        role: "mic",
         found: true,
         recorded: false,
         fileSizeBytes: 0,
@@ -132,16 +127,9 @@ async function testDevice(
     const stat = fs.statSync(testFile);
     const silence = await checkAudioSilence(testFile);
 
-    // Clean up for next test
-    fs.unlinkSync(testFile);
-    const otherFile = role === "mic"
-      ? path.join(tmpDir, "system.wav")
-      : path.join(tmpDir, "mic.wav");
-    if (fs.existsSync(otherFile)) fs.unlinkSync(otherFile);
-
     return {
       deviceName,
-      role,
+      role: "mic",
       found: true,
       recorded: stat.size > 100,
       fileSizeBytes: stat.size,
@@ -153,7 +141,94 @@ async function testDevice(
   } catch (err) {
     return {
       deviceName,
-      role,
+      role: "mic",
+      found: true,
+      recorded: false,
+      fileSizeBytes: 0,
+      durationSeconds: 0,
+      meanVolumeDb: -91,
+      maxVolumeDb: -91,
+      isSilent: true,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+/**
+ * Test system audio capture via AudioTee. Records for the given duration
+ * and checks that the captured WAV file contains non-silent audio.
+ */
+async function testSystemAudioTee(
+  tmpDir: string,
+  durationMs: number
+): Promise<DeviceTestResult> {
+  const deviceName = "AudioTee (CoreAudio tap)";
+  const systemDir = path.join(tmpDir, "system-test");
+
+  try {
+    const session = await startAudioTeeCapture({
+      outputDir: systemDir,
+      sampleRate: 48000,
+      onError: (err) => {
+        // captured below via session.started
+        void err;
+      },
+    });
+
+    if (!session.started) {
+      return {
+        deviceName,
+        role: "system",
+        found: false,
+        recorded: false,
+        fileSizeBytes: 0,
+        durationSeconds: 0,
+        meanVolumeDb: -91,
+        maxVolumeDb: -91,
+        isSilent: true,
+        error: "AudioTee failed to start. System audio capture requires macOS 14.2+ and the System Audio Recording permission in System Settings → Privacy & Security.",
+      };
+    }
+
+    // Wait for the test duration
+    await new Promise((resolve) => setTimeout(resolve, durationMs));
+    await session.stop();
+
+    const testFile = session.systemPath;
+
+    if (!fs.existsSync(testFile)) {
+      return {
+        deviceName,
+        role: "system",
+        found: true,
+        recorded: false,
+        fileSizeBytes: 0,
+        durationSeconds: durationMs / 1000,
+        meanVolumeDb: -91,
+        maxVolumeDb: -91,
+        isSilent: true,
+        error: "System audio WAV file was not created after recording",
+      };
+    }
+
+    const stat = fs.statSync(testFile);
+    const silence = await checkAudioSilence(testFile);
+
+    return {
+      deviceName,
+      role: "system",
+      found: true,
+      recorded: stat.size > 100,
+      fileSizeBytes: stat.size,
+      durationSeconds: durationMs / 1000,
+      meanVolumeDb: silence.meanVolumeDb,
+      maxVolumeDb: silence.maxVolumeDb,
+      isSilent: silence.isSilent,
+    };
+  } catch (err) {
+    return {
+      deviceName,
+      role: "system",
       found: true,
       recorded: false,
       fileSizeBytes: 0,

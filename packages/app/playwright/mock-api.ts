@@ -43,6 +43,7 @@ export async function installMockApi(page: Page) {
       jobUpdate: new Set(),
       logEntry: new Set(),
       processUpdate: new Set(),
+      audioMonitorLevels: new Set(),
     };
     const stateStorageKey = "__meeting_notes_mock_state__";
     const promptsStorageKey = "__meeting_notes_prompts__";
@@ -1026,6 +1027,13 @@ export async function installMockApi(page: Page) {
         async listAudioDevices() {
           return [{ name: "Built-in Mic" }, { name: "MacBook Pro Microphone" }];
         },
+        async startAudioMonitor() {
+          // no-op in tests; real audio capture isn't available in Playwright
+          return [{ name: "Built-in Mic" }, { name: "MacBook Pro Microphone" }];
+        },
+        async stopAudioMonitor() {
+          // no-op in tests
+        },
       },
       runs: {
         async list() {
@@ -1590,6 +1598,38 @@ export async function installMockApi(page: Page) {
             appleSilicon: true,
           };
         },
+        async openAudioPermissionPane() {
+          // no-op in tests
+        },
+        async openMicrophonePermissionPane() {
+          // no-op in tests
+        },
+        async getAppIdentity() {
+          return {
+            displayName: "Meeting Notes",
+            tccBundleName: "Meeting Notes",
+            bundlePath: "/Applications/Meeting Notes.app",
+            isDev: false,
+            isPackaged: true,
+          };
+        },
+        async revealAppBundle() {
+          // no-op in tests
+        },
+        async requestMicrophonePermission() {
+          return { granted: true, status: "granted" };
+        },
+        async getMicrophonePermission() {
+          return { status: "granted" };
+        },
+        async probeSystemAudioPermission() {
+          return {
+            status: "granted" as const,
+            totalSamples: 16000,
+            zeroSamples: 0,
+            totalBytes: 32000,
+          };
+        },
       },
       logs: {
         async tailApp() {
@@ -1707,6 +1747,9 @@ export async function installMockApi(page: Page) {
         },
         processUpdate(cb) {
           return subscribe("processUpdate", cb);
+        },
+        audioMonitorLevels(cb) {
+          return subscribe("audioMonitorLevels", cb);
         },
       },
     };

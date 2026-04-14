@@ -12,7 +12,7 @@ Everything the app needs at runtime, how it gets there today, and what the updat
 | **whisper-cli** | System PATH via `brew install whisper-cpp` | Yes — static binary | None | User runs `brew upgrade` |
 | **Parakeet MLX** | Python venv at `~/.meeting-notes/parakeet-venv/` via `setup-asr.ts` | No — ~2GB, Python + pip + mlx-audio | None | "Check / repair" button reinstalls |
 | **Python 3.11+** | Expected on PATH (macOS ships 3.9) | No (or heavyweight) | None | User manages |
-| **System audio** | Automatic via CoreAudio taps (macOS 14.2+) | N/A — OS-level | None | No user action needed |
+| **System audio (AudioTee helper)** | `audiotee` npm package; binary at `node_modules/audiotee/bin/audiotee` | Yes — bundled via `extraFiles` into `Contents/MacOS/audiotee` | Follows npm dep | Ship new `.app` |
 | **Ollama models** | `~/.ollama/models/` via `/api/pull` | No — user data | Tags only | User re-pulls |
 | **LLM model catalog** | Hardcoded `llm-catalog.ts` | N/A — source code | Frozen at build | Ship new `.app` |
 | **better-sqlite3** | npm dep, native C++ addon | Compiled at build | Build-time | `electron-rebuild` |
@@ -49,6 +49,32 @@ Everything the app needs at runtime, how it gets there today, and what the updat
    The UI already handles the "not installed" state gracefully with an install button.
 
 7. **First-launch experience.** Both the SetupWizard and Settings auto-detect deps. A fresh DMG install with bundled ollama + ffmpeg + whisper-cli shows most things green on first launch. Make sure both paths work — wizard for first run, settings for later.
+
+8. **AudioTee helper + macOS TCC attribution (critical for system-audio capture).** This is subtle and catches people. The `audiotee` Swift helper binary is what actually calls Core Audio taps to capture system output. macOS TCC attributes permission requests to the *responsible process*, which is determined by bundle identity. If the helper is ad-hoc signed with its own identifier (the default on npm), macOS treats it as its *own* app — completely separate from the main Meeting Notes bundle — and the user's "System Audio Recording Only" grant on Meeting Notes is never consulted. Symptom: AudioTee silently streams buffers of all-zero bytes, meters show no signal, recording produces silent tracks. See `node_modules/audiotee/README.md#permissions`.
+
+   **What the repo does to fix this:**
+   - `packages/app/resources/audiotee-inherit.entitlements` declares `com.apple.security.inherit` so the helper inherits its parent's TCC responsibility.
+   - `package.json` → `build.mac.extraFiles` copies `node_modules/audiotee/bin/audiotee` into `Contents/MacOS/audiotee` of the packaged bundle. **It must be in `Contents/MacOS/` — anywhere else (e.g., `Contents/Resources/bin/`) and macOS still sees it as a separate app.**
+   - `package.json` → `build.afterSign` runs `packages/app/scripts/after-sign.mjs`, which re-signs the bundled `audiotee` binary with the inherit entitlement after electron-builder's default signing. This is required because electron-builder's default signing does *not* apply this entitlement to binaries in `Contents/MacOS/`.
+   - `packages/app/main/audiotee-binary.ts` resolves the helper at runtime via `path.resolve(process.execPath, "..", "audiotee")`, which works identically in dev and production.
+   - `packages/app/package.json` → `build.mac.extendInfo` sets `NSMicrophoneUsageDescription` and `NSAudioCaptureUsageDescription` so macOS presents the right purpose strings when prompting.
+   - `packages/app/package.json` → `build.mac.hardenedRuntime: true` is required for notarization and interacts with how codesign treats helper binaries — do not disable.
+
+   **Do NOT:**
+   - Change `extraFiles.to` away from `MacOS/audiotee`. `Contents/Resources/` or any other sub-path breaks TCC inheritance.
+   - Drop the `afterSign` hook. Without it, the helper ships without the inherit entitlement and system audio capture silently fails.
+   - Remove `com.apple.security.inherit` from `audiotee-inherit.entitlements`. It is specifically what makes TCC treat the helper as part of Meeting Notes.app.
+   - Allow `hardenedRuntime: false` in the mac build config — notarization requires it, and the signing chain we rely on breaks without it.
+
+   **Verifying a build before shipping:**
+   ```sh
+   codesign -dv --entitlements - "dist/mac/Meeting Notes.app/Contents/MacOS/audiotee"
+   ```
+   Expected: `com.apple.security.inherit → true`, and the signature must be valid (`codesign --verify --strict` exits 0). The `check-bundled-binaries.mjs` preflight runs automatically during `package:mac` and will fail the build if the helper source or entitlements file is missing.
+
+9. **Dev-mode AudioTee requires `open -a` launch.** In development, `electron .` run from a terminal gives the terminal emulator TCC responsibility — not Electron. To make dev behavior mirror production, `npm run dev` calls `scripts/launch-electron-dev.mjs` which uses `open -n -W -a Electron.app`. It also runs `scripts/patch-audiotee.mjs` first, which copies `node_modules/audiotee/bin/audiotee` into `node_modules/electron/dist/Electron.app/Contents/MacOS/audiotee` and re-signs it with the inherit entitlement so dev gets the same signing chain as production. This patch re-runs on `postinstall`, `rebuild:native`, and `dev`, so `npm install` or a fresh clone always leaves the dev tree in a working state.
+
+10. **After a Developer ID / notarized build, re-verify audio end-to-end.** When the signing identity changes (ad-hoc → Developer ID), the helper's signature changes too, which may reset TCC state. The first run of a notarized build may re-prompt the user for System Audio Recording; that's expected. After that first grant the permission sticks across updates as long as `appId` stays `com.meeting-notes.app`.
 
 ## Update System Design
 

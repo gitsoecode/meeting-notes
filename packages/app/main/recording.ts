@@ -37,6 +37,8 @@ import { finishTrackedProcess, startTrackedProcess } from "./activity-monitor.js
 import { scheduleJob } from "./jobs.js";
 import { resolveRunFolderPath } from "./run-access.js";
 import { getCachedAudioDevices } from "./device-cache.js";
+import { stopAudioMonitor } from "./audio-monitor.js";
+import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { getStore } from "./store.js";
 
 export interface ActiveRecordingState {
@@ -140,6 +142,9 @@ export async function startRecording(
   description: string | null = null
 ): Promise<{ run_folder: string; run_id: string }> {
   validateStartRecording(currentState());
+  // Release the audio-level monitor (if the user left it running in Settings)
+  // before we grab the mic/system devices for the real recording.
+  await stopAudioMonitor();
   const config = loadConfig();
   const runContext = createRun(config, title, { sourceMode: "both", quiet: true }, description);
   const { folderPath, manifest, logger } = runContext;
@@ -159,6 +164,7 @@ export async function startRecording(
     systemDevice: config.recording.system_device,
     outputDir: audioDir,
     devices,
+    audioTeeBinaryPath: resolveAudioTeeBinary(),
   });
 
   // Set a visible warning if system audio capture failed at startup.
@@ -471,6 +477,9 @@ async function startCaptureIntoSegment(
   startedAt: string,
   logger: Logger
 ): Promise<ActiveRecordingState> {
+  // Release the live audio meter, if it was running, so the real recording
+  // gets exclusive use of the mic/system taps.
+  await stopAudioMonitor();
   const now = new Date();
   const segmentName = formatAudioSegmentName(now);
   const segmentDir = path.join(runFolder, "audio", segmentName);
@@ -483,6 +492,7 @@ async function startCaptureIntoSegment(
     systemDevice: config.recording.system_device,
     outputDir: segmentDir,
     devices,
+    audioTeeBinaryPath: resolveAudioTeeBinary(),
   });
 
   // Update manifest to add this segment

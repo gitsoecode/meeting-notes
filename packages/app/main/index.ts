@@ -1,4 +1,10 @@
 import { app, BrowserWindow, globalShortcut, nativeImage, net, protocol } from "electron";
+// Must be called before app.whenReady() to have any chance of taking effect.
+// In dev this cosmetically renames the app (menu bar, dock tooltip) but TCC
+// still identifies the bundle as "Electron" because we're running the stock
+// Electron.app from node_modules. In a packaged build the bundle itself is
+// named "Meeting Notes" so TCC agrees.
+app.setName("Meeting Notes");
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";

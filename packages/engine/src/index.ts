@@ -98,7 +98,7 @@ export { moveDataDirectory } from "./core/data-path.js";
 
 export { migrateVaultPromptsToHome } from "./core/migrate-prompts.js";
 
-export { FfmpegRecorder } from "./adapters/recording/ffmpeg.js";
+export { FfmpegRecorder, pickPhysicalMic } from "./adapters/recording/ffmpeg.js";
 export { startAudioTeeCapture, recoverRawFile, type AudioTeeSession } from "./adapters/recording/audiotee-recorder.js";
 export type {
   Recorder,

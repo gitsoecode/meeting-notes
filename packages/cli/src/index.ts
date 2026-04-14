@@ -692,7 +692,7 @@ program
 
     console.log("Testing audio capture devices...\n");
     console.log(`  Mic device:    ${config.recording.mic_device || "(system default)"}`);
-    console.log(`  System device: ${config.recording.system_device || "(none)"}`);
+    console.log(`  System device: AudioTee (CoreAudio tap)`);
     console.log(`  Duration:      ${durationMs}ms\n`);
 
     const report = await testAudioCapture({
@@ -714,9 +714,9 @@ program
         console.log(`  Error:     ${result.error}`);
       }
       if (result.isSilent && result.role === "system" && result.found) {
-        console.log("  \u26A0\uFE0F  System audio is silent. Make sure you have a Multi-Output Device");
-        console.log("     in Audio MIDI Setup that sends audio to both your output device");
-        console.log("     (speakers/headphones) AND BlackHole.");
+        console.log("  \u26A0\uFE0F  System audio is silent. Make sure the System Audio Recording");
+        console.log("     permission is granted in System Settings \u2192 Privacy & Security.");
+        console.log("     AudioTee requires macOS 14.2+.");
       }
       console.log();
     }

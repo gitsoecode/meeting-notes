@@ -16,6 +16,15 @@ interface AudioTeeSessionOptions {
   outputDir: string;
   sampleRate?: number;
   onError?: (error: Error) => void;
+  /**
+   * Absolute path to the audiotee binary. When the embedding app (Electron)
+   * has bundled a patched copy of the binary inside its own app bundle so it
+   * inherits the parent's TCC responsibility, pass that path here. If
+   * omitted, AudioTee falls back to the stock `node_modules/audiotee/bin/audiotee`
+   * binary, which on macOS is treated by TCC as its own app and silently
+   * records zeros unless explicitly granted System Audio Recording permission.
+   */
+  binaryPath?: string;
 }
 
 export interface AudioTeeSession {
@@ -49,7 +58,7 @@ export async function startAudioTeeCapture(
   let stopped = false;
 
   try {
-    tee = new AudioTee({ sampleRate });
+    tee = new AudioTee({ sampleRate, binaryPath: opts.binaryPath });
     writeStream = fs.createWriteStream(rawPath);
 
     tee.on("data", (chunk: AudioChunk) => {
