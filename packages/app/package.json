@@ -84,6 +84,9 @@
       "dist/**/*",
       "package.json"
     ],
+    "asarUnpack": [
+      "node_modules/@meeting-notes/engine/dist/defaults/audio/**/*"
+    ],
     "extraResources": [
       {
         "from": "resources/bin",

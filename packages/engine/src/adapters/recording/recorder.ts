@@ -23,14 +23,42 @@ export interface RecordingStopResult {
 }
 
 /**
- * Wall-clock timestamps captured just before each capture pipeline hands off
- * to its underlying producer (ffmpeg for the mic, AudioTee for system audio).
- * Used by the engine's AEC step as a coarse offset hint so cross-correlation
- * doesn't have to search the full acceptable range.
+ * Quality label for a per-stream first-sample wall-clock anchor.
+ * - `first-chunk` (system) / `stderr-time` (mic): trustworthy — the timestamp
+ *   tracks the real first-sample arrival.
+ * - `tee-start` (system) / `spawn-time` (mic): degraded — captured before
+ *   first sample was known to have arrived.
+ */
+export type MicStartSource = "stderr-time" | "spawn-time";
+export type SystemStartSource = "first-chunk" | "tee-start";
+
+export interface StreamCaptureMeta {
+  /** Wall-clock ms at (approximate) first-sample arrival. */
+  firstSampleAtMs?: number;
+  /** Which mechanism produced `firstSampleAtMs`. */
+  firstSampleSource?: MicStartSource | SystemStartSource;
+  /** Wall-clock ms when this stream's capture was stopped. */
+  stoppedAtMs?: number;
+  /** `stoppedAtMs − durationMs`; independent first-sample estimate. */
+  endAnchorAtMs?: number;
+  /** Final file duration in ms (from ffprobe / known sample count). */
+  durationMs?: number;
+}
+
+/**
+ * Wall-clock timing metadata for mic and system streams. Used by the
+ * engine's alignment step as a trustworthy primary offset hint — the
+ * cross-correlation search is reduced to a bounded refinement around this
+ * anchor rather than the primary source of truth.
+ *
+ * Legacy `micStartedAtMs` / `systemStartedAtMs` are kept populated for
+ * backward compatibility with older run folders.
  */
 export interface CaptureMeta {
   micStartedAtMs?: number;
   systemStartedAtMs?: number;
+  mic?: StreamCaptureMeta;
+  system?: StreamCaptureMeta;
 }
 
 export interface RecordingSession {

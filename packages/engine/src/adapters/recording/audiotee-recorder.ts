@@ -33,11 +33,17 @@ export interface AudioTeeSession {
   /** Path to the final system.wav (written on stop). */
   systemPath: string;
   /**
-   * Wall-clock ms when the AudioTee capture call returned — used as a coarse
-   * start-time hint for cross-correlation alignment between the mic and
-   * system tracks. Only set when `started` is true.
+   * Wall-clock ms at the first audio chunk (or fallback: when `tee.start()`
+   * resolved, if no chunk arrived). Primary alignment anchor for the system
+   * stream.
    */
   startedAtMs?: number;
+  /** Which mechanism produced `startedAtMs`. */
+  startedAtSource?: "first-chunk" | "tee-start";
+  /** Wall-clock ms when `stop()` was called. Populated after stop(). */
+  stoppedAtMs?: number;
+  /** Final duration of the captured system audio in ms. Populated after stop(). */
+  durationMs?: number;
   /** Stop recording and finalize the WAV file. */
   stop(): Promise<void>;
 }
@@ -62,7 +68,11 @@ export async function startAudioTeeCapture(
   let totalBytes = 0;
   let started = false;
   let stopped = false;
-  let startedAtMs: number | undefined;
+  const session: AudioTeeSession = {
+    started: false,
+    systemPath,
+    stop: async () => {},
+  };
 
   try {
     tee = new AudioTee({ sampleRate, binaryPath: opts.binaryPath });
@@ -70,6 +80,15 @@ export async function startAudioTeeCapture(
 
     tee.on("data", (chunk: AudioChunk) => {
       if (!stopped && chunk.data) {
+        // Anchor the system-stream timestamp to the first real chunk.
+        // `tee.start()` only waits for the Core Audio tap to be live, which
+        // can precede first-sample arrival by hundreds of ms. The first
+        // chunk always upgrades the anchor, even if a `tee-start` fallback
+        // was seeded earlier.
+        if (session.startedAtSource !== "first-chunk") {
+          session.startedAtMs = Date.now();
+          session.startedAtSource = "first-chunk";
+        }
         writeStream.write(chunk.data);
         totalBytes += chunk.data.length;
       }
@@ -81,7 +100,12 @@ export async function startAudioTeeCapture(
 
     await tee.start();
     started = true;
-    startedAtMs = Date.now();
+    // Fallback anchor if no chunk has arrived yet when caller reads it;
+    // overwritten by the first-chunk handler above when that fires.
+    if (session.startedAtMs === undefined) {
+      session.startedAtMs = Date.now();
+      session.startedAtSource = "tee-start";
+    }
   } catch (err) {
     // Permission denied, binary not found, macOS too old, etc.
     opts.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -92,40 +116,40 @@ export async function startAudioTeeCapture(
     };
   }
 
-  return {
-    started,
-    systemPath,
-    startedAtMs,
-    stop: async () => {
-      if (stopped) return;
-      stopped = true;
+  session.started = started;
+  session.stop = async () => {
+    if (stopped) return;
+    stopped = true;
+    session.stoppedAtMs = Date.now();
 
-      try {
-        await tee.stop();
-      } catch {
-        // Best effort — AudioTee may already be stopped.
-      }
+    try {
+      await tee.stop();
+    } catch {
+      // Best effort — AudioTee may already be stopped.
+    }
 
-      // Close the write stream and wait for it to flush.
-      await new Promise<void>((resolve, reject) => {
-        writeStream.end(() => {
-          writeStream.close((err) => (err ? reject(err) : resolve()));
-        });
+    // Close the write stream and wait for it to flush.
+    await new Promise<void>((resolve, reject) => {
+      writeStream.end(() => {
+        writeStream.close((err) => (err ? reject(err) : resolve()));
       });
+    });
 
-      // Finalize: write WAV header + raw PCM data → system.wav
-      if (totalBytes > 0) {
-        finalizeRawToWav(rawPath, systemPath, sampleRate, totalBytes);
-      }
+    // Finalize: write WAV header + raw PCM data → system.wav
+    if (totalBytes > 0) {
+      finalizeRawToWav(rawPath, systemPath, sampleRate, totalBytes);
+      // 16-bit mono PCM: bytes ÷ (sampleRate × 2) gives seconds.
+      session.durationMs = Math.round((totalBytes / (sampleRate * 2)) * 1000);
+    }
 
-      // Clean up the raw file.
-      try {
-        fs.unlinkSync(rawPath);
-      } catch {
-        // Already deleted or never created.
-      }
-    },
+    // Clean up the raw file.
+    try {
+      fs.unlinkSync(rawPath);
+    } catch {
+      // Already deleted or never created.
+    }
   };
+  return session;
 }
 
 /**

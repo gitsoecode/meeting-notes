@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const execFileAsync = promisify(execFile);
 
@@ -93,6 +94,47 @@ export interface SilenceCheckResult {
   isSilent: boolean;
 }
 
+export interface AudioMixInput {
+  path: string;
+  offsetMs?: number;
+  gainDb?: number;
+}
+
+export interface ConservativeGainOptions {
+  targetMeanDb?: number;
+  minGainDb?: number;
+  maxGainDb?: number;
+  peakHeadroomDb?: number;
+  silenceFloorDb?: number;
+}
+
+export interface SpeechCleanupPlan {
+  strategy: "arnndn" | "ffmpeg-fallback";
+  filterGraph: string;
+  modelPath?: string;
+}
+
+export interface SpeechCleanupResult {
+  strategy: "arnndn" | "ffmpeg-fallback";
+  /** Quality label for downstream consumers / observability. */
+  quality: SpeechCleanupQuality;
+  modelPath?: string;
+  outputPath: string;
+}
+
+/**
+ * End-to-end cleanup quality tracked on the track context:
+ * - `arnndn-primary` — the bundled RNNoise model ran (intended path).
+ * - `ffmpeg-fallback` — ffmpeg-only denoise ran (degraded; model missing
+ *   or arnndn graph failed).
+ * - `raw-mic` — no cleanup at all (both primary and fallback failed, or
+ *   cleanup was skipped).
+ */
+export type SpeechCleanupQuality =
+  | "arnndn-primary"
+  | "ffmpeg-fallback"
+  | "raw-mic";
+
 /**
  * Analyze an audio file's volume levels to detect silence. An audio file
  * is considered silent if its max volume is below the threshold (default
@@ -128,10 +170,56 @@ export async function checkAudioSilence(
   }
 }
 
+export async function analyzeAudioLevels(audioPath: string): Promise<SilenceCheckResult> {
+  return checkAudioSilence(audioPath, -55);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+export function chooseConservativeGainDb(
+  levels: SilenceCheckResult,
+  opts: ConservativeGainOptions = {}
+): number {
+  const targetMeanDb = opts.targetMeanDb ?? -22;
+  const minGainDb = opts.minGainDb ?? -8;
+  const maxGainDb = opts.maxGainDb ?? 6;
+  const peakHeadroomDb = opts.peakHeadroomDb ?? -1;
+  const silenceFloorDb = opts.silenceFloorDb ?? -55;
+
+  if (
+    !Number.isFinite(levels.meanVolumeDb) ||
+    !Number.isFinite(levels.maxVolumeDb) ||
+    levels.maxVolumeDb <= silenceFloorDb
+  ) {
+    return 0;
+  }
+
+  let effectiveMaxGainDb = maxGainDb;
+  if (levels.meanVolumeDb <= -35 || levels.maxVolumeDb <= -18) {
+    effectiveMaxGainDb = Math.min(effectiveMaxGainDb, 4);
+  }
+  if (levels.meanVolumeDb <= -45 || levels.maxVolumeDb <= -24) {
+    effectiveMaxGainDb = Math.min(effectiveMaxGainDb, 2);
+  }
+
+  let gainDb = clamp(targetMeanDb - levels.meanVolumeDb, minGainDb, effectiveMaxGainDb);
+  const maxAllowedGainDb = peakHeadroomDb - levels.maxVolumeDb;
+  gainDb = Math.min(gainDb, maxAllowedGainDb);
+
+  if (!Number.isFinite(gainDb) || Math.abs(gainDb) < 0.25) {
+    return 0;
+  }
+
+  return +gainDb.toFixed(1);
+}
+
 export async function normalizeAudio(
   inputPath: string,
   outputPath: string,
-  format: AsrAudioFormat = "wav16"
+  format: AsrAudioFormat = "wav16",
+  opts: { gainDb?: number } = {}
 ): Promise<void> {
   const dir = path.dirname(outputPath);
   fs.mkdirSync(dir, { recursive: true });
@@ -144,10 +232,15 @@ export async function normalizeAudio(
     format === "opus32k"
       ? ["-c:a", "libopus", "-b:a", "32k", "-application", "voip"]
       : ["-c:a", "pcm_s16le"];
+  const filterArgs =
+    opts.gainDb && Math.abs(opts.gainDb) >= 0.25
+      ? ["-af", `volume=${opts.gainDb.toFixed(1)}dB`]
+      : [];
 
   try {
     await execFileAsync("ffmpeg", [
       ...commonArgs,
+      ...filterArgs,
       ...formatArgs,
       "-y", // overwrite
       outputPath,
@@ -157,6 +250,260 @@ export async function normalizeAudio(
       "ffmpeg not found or conversion failed. Install ffmpeg:\n  brew install ffmpeg"
     );
   }
+}
+
+function escapeFilterValue(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "\\'");
+}
+
+export function resolveArnndnModelPath(): string | null {
+  const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+  const envPath = process.env.MEETING_NOTES_ARNNDN_MODEL?.trim();
+  const distCandidate = path.join(moduleDir, "../defaults/audio/arnndn.rnnn");
+  // Electron asar: ffmpeg is spawned as a child process and can't read from
+  // inside `app.asar`. electron-builder's `asarUnpack` places an unpacked
+  // copy at `app.asar.unpacked/…`. Check that location first when running
+  // from inside an ASAR archive.
+  const unpackedCandidate = distCandidate.replace(
+    `${path.sep}app.asar${path.sep}`,
+    `${path.sep}app.asar.unpacked${path.sep}`
+  );
+  const candidates = [
+    envPath || "",
+    unpackedCandidate,
+    distCandidate,
+    path.join(moduleDir, "../../src/defaults/audio/arnndn.rnnn"),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+export function buildSpeechCleanupPlan(modelPath = resolveArnndnModelPath()): SpeechCleanupPlan {
+  const fallbackFilterGraph = [
+    "aformat=sample_fmts=flt:channel_layouts=mono",
+    "highpass=f=120",
+    "lowpass=f=7200",
+    "afftdn=nf=-28:nr=10:tn=1",
+    "agate=threshold=0.015:ratio=1.25:attack=5:release=180",
+  ].join(",");
+
+  if (!modelPath) {
+    return {
+      strategy: "ffmpeg-fallback",
+      filterGraph: fallbackFilterGraph,
+    };
+  }
+
+  const escaped = escapeFilterValue(modelPath);
+  return {
+    strategy: "arnndn",
+    modelPath,
+    filterGraph: [
+      "aformat=sample_fmts=flt:channel_layouts=mono",
+      "highpass=f=120",
+      "lowpass=f=7200",
+      `arnndn=m='${escaped}':mix=0.85`,
+      "agate=threshold=0.012:ratio=1.15:attack=5:release=180",
+    ].join(","),
+  };
+}
+
+async function runSpeechCleanupFilter(
+  inputPath: string,
+  outputPath: string,
+  plan: SpeechCleanupPlan
+): Promise<void> {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  await execFileAsync("ffmpeg", [
+    "-hide_banner",
+    "-loglevel", "error",
+    "-i", inputPath,
+    "-af", plan.filterGraph,
+    "-ar", "48000",
+    "-ac", "1",
+    "-c:a", "pcm_s16le",
+    "-y",
+    outputPath,
+  ]);
+}
+
+export async function cleanMicForSpeech(
+  inputPath: string,
+  outputPath: string,
+  logger?: DiagnosticLogger
+): Promise<SpeechCleanupResult> {
+  const primaryPlan = buildSpeechCleanupPlan();
+  try {
+    await runSpeechCleanupFilter(inputPath, outputPath, primaryPlan);
+    const quality: SpeechCleanupQuality =
+      primaryPlan.strategy === "arnndn" ? "arnndn-primary" : "ffmpeg-fallback";
+    logger?.info("Mic speech cleanup written", {
+      inputPath,
+      outputPath,
+      strategy: primaryPlan.strategy,
+      quality,
+      modelPath: primaryPlan.modelPath ?? null,
+    });
+    return {
+      strategy: primaryPlan.strategy,
+      quality,
+      modelPath: primaryPlan.modelPath,
+      outputPath,
+    };
+  } catch (err) {
+    if (primaryPlan.strategy === "arnndn") {
+      logger?.warn("Mic speech cleanup with arnndn failed; using fallback chain", {
+        inputPath,
+        error: err instanceof Error ? err.message : String(err),
+        modelPath: primaryPlan.modelPath ?? null,
+      });
+      const fallbackPlan = buildSpeechCleanupPlan(null);
+      await runSpeechCleanupFilter(inputPath, outputPath, fallbackPlan);
+      logger?.info("Mic speech cleanup written", {
+        inputPath,
+        outputPath,
+        strategy: fallbackPlan.strategy,
+        quality: "ffmpeg-fallback",
+        modelPath: null,
+      });
+      return {
+        strategy: fallbackPlan.strategy,
+        quality: "ffmpeg-fallback",
+        outputPath,
+      };
+    }
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+}
+
+// ---- Sample-rate / drop-rate drift correction ----
+
+/**
+ * A stream's file duration vs its wall-clock capture duration can diverge
+ * sharply on USB audio interfaces under load (sample drops, sample-rate
+ * mismatch between device clock and system clock). Observed: 50.2s of real
+ * capture producing a 44.5s file — 11% of samples dropped, causing the
+ * stream to play back too fast and desync the mix over time.
+ *
+ * This function measures the discrepancy and, if it exceeds a threshold,
+ * applies `atempo` to stretch or compress the audio so its playback
+ * duration matches wall-clock duration. The corrected file replaces the
+ * input so downstream steps (denoise, AEC, ASR, mix) see wall-clock-
+ * correct audio.
+ */
+export interface DriftCorrectionResult {
+  applied: boolean;
+  reason: "stretched" | "compressed" | "below-threshold" | "no-data";
+  /** File duration (from ffprobe) in ms before correction. */
+  fileDurationMs?: number;
+  /** Wall-clock capture duration in ms (from capture-meta). */
+  wallClockMs?: number;
+  /** atempo factor applied (<1 stretches, >1 compresses). Undefined if not applied. */
+  atempo?: number;
+  /** File duration after correction in ms, when applied. */
+  correctedDurationMs?: number;
+}
+
+export async function correctStreamDrift(
+  audioPath: string,
+  wallClockMs: number,
+  opts: {
+    /** Minimum |1 − atempo| before correction is applied. Default 0.01 (1%). */
+    thresholdRatio?: number;
+    logger?: DiagnosticLogger;
+  } = {}
+): Promise<DriftCorrectionResult> {
+  const threshold = opts.thresholdRatio ?? 0.01;
+
+  if (!Number.isFinite(wallClockMs) || wallClockMs <= 0) {
+    return { applied: false, reason: "no-data" };
+  }
+
+  let fileDurationMs = 0;
+  try {
+    const info = await getAudioInfo(audioPath);
+    fileDurationMs = info.durationMs;
+  } catch {
+    return { applied: false, reason: "no-data" };
+  }
+  if (fileDurationMs <= 0) {
+    return { applied: false, reason: "no-data" };
+  }
+
+  // atempo = fileDur/wallClock. <1 stretches (fixes the common USB-drop
+  // case where the file is shorter than the real capture). >1 compresses.
+  const atempo = fileDurationMs / wallClockMs;
+  const deviation = Math.abs(1 - atempo);
+  if (deviation < threshold) {
+    return {
+      applied: false,
+      reason: "below-threshold",
+      fileDurationMs,
+      wallClockMs,
+    };
+  }
+
+  // atempo has a valid range of [0.5, 100]. For extreme drops beyond 2x,
+  // chain atempos. We cap at two stages to keep the filter chain short.
+  const stages: number[] = [];
+  if (atempo < 0.5) {
+    stages.push(0.5, atempo / 0.5);
+  } else if (atempo > 100) {
+    return { applied: false, reason: "no-data" };
+  } else {
+    stages.push(atempo);
+  }
+  const filterGraph = stages.map((s) => `atempo=${s.toFixed(6)}`).join(",");
+
+  const tmpPath = audioPath + ".drift.tmp.wav";
+  try {
+    await execFileAsync("ffmpeg", [
+      "-hide_banner",
+      "-loglevel", "error",
+      "-i", audioPath,
+      "-af", filterGraph,
+      "-c:a", "pcm_s16le",
+      "-y",
+      tmpPath,
+    ]);
+  } catch (err) {
+    opts.logger?.warn("Drift correction ffmpeg failed", {
+      audioPath,
+      atempo,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    try { fs.rmSync(tmpPath, { force: true }); } catch {}
+    return { applied: false, reason: "no-data", fileDurationMs, wallClockMs };
+  }
+
+  // Verify the corrected file is actually closer to wall-clock before
+  // replacing the original.
+  let correctedDurationMs = 0;
+  try {
+    correctedDurationMs = (await getAudioInfo(tmpPath)).durationMs;
+  } catch {
+    // Proceed; we'll still report the intended atempo.
+  }
+
+  fs.renameSync(tmpPath, audioPath);
+  opts.logger?.info("Drift corrected", {
+    audioPath,
+    fileDurationMs,
+    wallClockMs,
+    atempo: +atempo.toFixed(6),
+    correctedDurationMs: correctedDurationMs || null,
+  });
+  return {
+    applied: true,
+    reason: atempo < 1 ? "stretched" : "compressed",
+    fileDurationMs,
+    wallClockMs,
+    atempo,
+    correctedDurationMs: correctedDurationMs || undefined,
+  };
 }
 
 // ---- Offset estimation + AEC preprocessing ----
@@ -268,6 +615,9 @@ export interface OffsetEstimate {
   confidence: number;
 }
 
+/** Anchor-quality classifier used to size the xcorr search window. */
+export type AnchorQuality = "trusted" | "degraded" | "missing";
+
 /**
  * Estimate the time offset (in ms) between mic and system-audio captures.
  * A positive value means the system track is delayed relative to the mic
@@ -285,6 +635,12 @@ export async function estimateMicSystemOffsetMs(
     hintOffsetMs?: number;
     maxOffsetMs?: number;
     windowSec?: number;
+    /**
+     * When set, narrows the default search radius for `trusted` anchors.
+     * An explicit `maxOffsetMs` always wins over this. `degraded` and
+     * `missing` use the wide default so xcorr can still discover the truth.
+     */
+    anchorQuality?: AnchorQuality;
     logger?: DiagnosticLogger;
   }
 ): Promise<OffsetEstimate> {
@@ -292,7 +648,9 @@ export async function estimateMicSystemOffsetMs(
   // avfoundation vs AudioTee pipeline latency can exceed 2s in real runs
   // (device warmup, buffer prefill). A 5s search radius still converges
   // quickly since the search seeds from the capture-meta hint.
-  const maxMs = opts?.maxOffsetMs ?? 5000;
+  const defaultMaxMs =
+    opts?.anchorQuality === "trusted" ? 800 : 5000;
+  const maxMs = opts?.maxOffsetMs ?? defaultMaxMs;
   const windowSec = opts?.windowSec ?? 30;
   const clampedHint = Math.max(-maxMs, Math.min(maxMs, hintMs));
 
@@ -451,6 +809,14 @@ export async function mergeAudioFiles(
   inputPaths: string[],
   outputPath: string
 ): Promise<void> {
+  return mergeTimedAudioFiles(inputPaths.map((path) => ({ path })), outputPath);
+}
+
+export async function mergeTimedAudioFiles(
+  inputs: AudioMixInput[],
+  outputPath: string
+): Promise<void> {
+  const inputPaths = inputs.map((input) => input.path);
   if (inputPaths.length === 0) return;
   if (inputPaths.length === 1) {
     // Single input — just copy.
@@ -466,12 +832,25 @@ export async function mergeAudioFiles(
   // device native rate (often 44.1 or 48 kHz) while the AudioTee system track
   // is 48 kHz; without this normalization step amix silently fails on input
   // mismatch and no combined.wav gets written.
-  const inputArgs = inputPaths.flatMap((p) => ["-i", p]);
-  const resampleChain = inputPaths
-    .map((_, i) => `[${i}:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono[a${i}]`)
+  const inputArgs = inputs.flatMap((input) => {
+    const args: string[] = [];
+    if (input.offsetMs && Math.abs(input.offsetMs) >= 1) {
+      args.push("-itsoffset", (-input.offsetMs / 1000).toFixed(3));
+    }
+    args.push("-i", input.path);
+    return args;
+  });
+  const resampleChain = inputs
+    .map((input, i) => {
+      const gainFilter =
+        input.gainDb && Math.abs(input.gainDb) >= 0.25
+          ? `,volume=${input.gainDb.toFixed(1)}dB`
+          : "";
+      return `[${i}:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono${gainFilter}[a${i}]`;
+    })
     .join(";");
-  const mixInputs = inputPaths.map((_, i) => `[a${i}]`).join("");
-  const filterGraph = `${resampleChain};${mixInputs}amix=inputs=${inputPaths.length}:duration=longest[out]`;
+  const mixInputs = inputs.map((_, i) => `[a${i}]`).join("");
+  const filterGraph = `${resampleChain};${mixInputs}amix=inputs=${inputs.length}:duration=longest[out]`;
   try {
     await execFileAsync("ffmpeg", [
       ...inputArgs,
