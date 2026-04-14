@@ -4,6 +4,7 @@
   "description": "Meeting Notes desktop app",
   "private": true,
   "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
   "main": "dist/main/index.js",
   "scripts": {
     "rebuild:native": "electron-rebuild -f -w better-sqlite3",
@@ -92,7 +93,11 @@
     ],
     "mac": {
       "icon": "assets/app-icon.icns",
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Meeting Notes uses your microphone to capture your voice during meetings for local transcription.",
+        "NSAudioCaptureUsageDescription": "Meeting Notes captures system audio so the other participants in your meeting can be transcribed."
+      }
     }
   }
 }

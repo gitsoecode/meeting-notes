@@ -4,6 +4,7 @@
   "description": "Local-first meeting recording and processing system",
   "type": "module",
   "private": true,
+  "license": "SEE LICENSE IN LICENSE",
   "workspaces": [
     "packages/engine",
     "packages/cli",

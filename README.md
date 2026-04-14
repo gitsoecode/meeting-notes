@@ -244,3 +244,13 @@ Notes:
 - `npm test` and `npm run test --workspace @meeting-notes/app` may rebuild `better-sqlite3` for the current plain Node runtime first. That is expected for tests.
 - The Electron app needs the Electron-targeted rebuild above if you see `ERR_DLOPEN_FAILED` or a `NODE_MODULE_VERSION` mismatch while launching, opening, or starting a meeting.
 - On this repo, `/usr/bin/python3` is the safest Python for native rebuilds because older `node-gyp` versions may fail with newer Python releases.
+
+---
+
+## License
+
+Meeting Notes is licensed under the [Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2)](./LICENSE). Copyright © 2026 Gistlist, LLC.
+
+In short: you can read, use, modify, and redistribute this code for any purpose — **except** building a commercial product or service that competes with Meeting Notes. Internal use, non-commercial research, and education are explicitly allowed. Two years after each release, that code automatically converts to Apache 2.0.
+
+This is **source-available** (sometimes called "fair source"), not OSI-approved open source.
