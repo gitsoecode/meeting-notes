@@ -38,6 +38,7 @@ import { resolveRunFolderPath } from "./run-access.js";
 import { getCachedAudioDevices } from "./device-cache.js";
 import { stopAudioMonitor } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
+import { resolveMicCaptureBinary } from "./mic-capture-binary.js";
 import { getStore } from "./store.js";
 
 export interface ActiveRecordingState {
@@ -164,6 +165,7 @@ export async function startRecording(
     outputDir: audioDir,
     devices,
     audioTeeBinaryPath: resolveAudioTeeBinary(),
+    micCaptureBinaryPath: resolveMicCaptureBinary(),
   });
 
   // Set a visible warning if system audio capture failed at startup.
@@ -508,6 +510,7 @@ async function startCaptureIntoSegment(
     outputDir: segmentDir,
     devices,
     audioTeeBinaryPath: resolveAudioTeeBinary(),
+    micCaptureBinaryPath: resolveMicCaptureBinary(),
   });
 
   // Update manifest to add this segment

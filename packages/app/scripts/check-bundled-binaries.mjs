@@ -26,6 +26,12 @@ const requiredBinaries = [
     setup:
       "The entitlements plist lives at packages/app/resources/audiotee-inherit.entitlements. It should be checked into git.",
   },
+  {
+    name: "mic-capture",
+    file: path.join(appRoot, "resources", "bin", "mic-capture"),
+    setup:
+      "The native microphone capture helper is built from packages/app/native/mic-capture.swift. Run `npm run build:mic-capture` (or a full `npm run build`) before packaging. Without it the engine falls back to ffmpeg's AVFoundation demuxer, which drops ~10–12% of samples on USB mics.",
+  },
 ];
 
 const missing = [];

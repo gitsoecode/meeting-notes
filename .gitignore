@@ -9,3 +9,8 @@ packages/app/build/
 packages/app/playwright-report/
 packages/app/test-results/
 test-results/
+
+# Bundled binaries (built from source by scripts, or dropped in locally
+# out-of-band). Never checked into git. `.gitkeep` keeps the directory.
+packages/app/resources/bin/*
+!packages/app/resources/bin/.gitkeep

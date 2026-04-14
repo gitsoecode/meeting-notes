@@ -95,18 +95,38 @@ test("FfmpegRecorder: capture-meta reports upgraded first-sample sources on a re
   assert.ok(meta.mic, "captureMeta.mic should be populated");
   assert.ok(fs.existsSync(session.paths.mic), "mic.wav should exist on disk");
 
-  // The critical regression gate: the stderr `time=` parser must fire
-  // before stop(). If it doesn't, capture-meta ships the spawn-time
-  // fallback — which is exactly the bug that produced a 5ms offset for a
-  // 3.7s real gap in the field.
-  assert.equal(
-    meta.mic.firstSampleSource,
-    "stderr-time",
-    `mic.firstSampleSource should upgrade to "stderr-time", got "${meta.mic.firstSampleSource}"`
+  // The critical regression gate: the mic first-sample anchor must be
+  // upgraded from the spawn-time fallback by stop(). The live source
+  // varies with the backend:
+  //  - native helper → "mic-capture-first-sample"  (preferred; bundled)
+  //  - ffmpeg        → "stderr-time"               (fallback; degraded)
+  assert.ok(
+    meta.mic.firstSampleSource === "mic-capture-first-sample" ||
+      meta.mic.firstSampleSource === "stderr-time",
+    `mic.firstSampleSource should upgrade to mic-capture-first-sample or stderr-time, got "${meta.mic.firstSampleSource}"`
   );
   assert.ok(meta.mic.stoppedAtMs && meta.mic.stoppedAtMs > 0, "mic.stoppedAtMs required");
   assert.ok(meta.mic.durationMs && meta.mic.durationMs > 1000, "mic.durationMs should be > 1s");
   assert.ok(meta.mic.endAnchorAtMs, "mic.endAnchorAtMs required");
+
+  // Drop-rate gate: the fraction of wall-clock time missing from the file.
+  // For ffmpeg AVFoundation (degraded mode) this is the ~10-12% mid-
+  // recording sample drop. For the native helper the only shortfall is a
+  // ~300-500ms startup warmup before the hardware begins delivering
+  // samples — a fixed cost, not proportional. This test uses a larger
+  // budget for the 3-second capture than the 10-second drift test below
+  // because that fixed cost is a bigger proportion of short captures.
+  const micWallMs = meta.mic.stoppedAtMs - meta.mic.firstSampleAtMs;
+  const dropRatio = 1 - meta.mic.durationMs / micWallMs;
+  if (meta.mic.firstSampleSource === "mic-capture-first-sample") {
+    // On a 3s capture, allow up to 15% (≈450ms absolute startup warmup).
+    assert.ok(
+      dropRatio < 0.15,
+      `native helper 3s drop rate too high; got ${(dropRatio * 100).toFixed(1)}% ` +
+        `(file=${meta.mic.durationMs}ms wall=${micWallMs}ms). ` +
+        `Expected startup warmup only (~300-500ms, no mid-capture drops).`
+    );
+  }
 
   if (session.systemCaptured) {
     assert.ok(meta.system, "captureMeta.system should be populated when AudioTee captures");
@@ -201,6 +221,62 @@ test("FfmpegRecorder: recording writes to local scratch and moves finalized file
     leftoverScratch,
     [],
     `scratch directories should be cleaned up after stop, found: ${leftoverScratch.join(", ")}`
+  );
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+test("FfmpegRecorder: native mic helper has no pathological mid-recording drops (<6% on 10s)", async (t) => {
+  if (await shouldSkipLiveRecording(t)) return;
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "live-native-drop-test-"));
+  const logger = { info() {}, warn() {}, error() {} };
+
+  let session;
+  try {
+    const recorder = new FfmpegRecorder(logger);
+    try {
+      session = await recorder.start({
+        micDevice: "",
+        systemDevice: "",
+        outputDir: tmpDir,
+      });
+    } catch (err) {
+      t.skip(`could not start recorder: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    // 10s is long enough that the fixed ~300-500ms startup warmup is a
+    // small proportion of the total capture. The regression we're
+    // guarding against is the AVFoundation behavior of losing ~11% of
+    // samples continuously throughout the recording.
+    await new Promise((r) => setTimeout(r, 10_000));
+    await session.stop();
+  } finally {
+    try { if (session) await session.stop(); } catch {}
+  }
+
+  const meta = session.captureMeta;
+  assert.ok(meta?.mic, "mic capture-meta required");
+
+  // If the native helper isn't available in this environment, skip the
+  // assertion rather than fail — drift correction handles the ffmpeg
+  // case. The check:bundle script guards against shipping without it.
+  if (meta.mic.firstSampleSource !== "mic-capture-first-sample") {
+    t.diagnostic(
+      `native helper not in use (source=${meta.mic.firstSampleSource}); skipping drop-rate gate`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    return;
+  }
+
+  const wallMs = meta.mic.stoppedAtMs - meta.mic.firstSampleAtMs;
+  const fileMs = meta.mic.durationMs;
+  const dropRatio = 1 - fileMs / wallMs;
+  assert.ok(
+    dropRatio < 0.06,
+    `native helper 10s drop rate too high (regression to AVFoundation-style drops?); ` +
+      `got ${(dropRatio * 100).toFixed(2)}% (file=${fileMs}ms wall=${wallMs}ms)`
   );
 
   fs.rmSync(tmpDir, { recursive: true, force: true });

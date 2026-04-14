@@ -5,6 +5,11 @@ import os from "node:os";
 import path from "node:path";
 import type { Recorder, RecorderOptions, RecordingSession } from "./recorder.js";
 import { startAudioTeeCapture, type AudioTeeSession } from "./audiotee-recorder.js";
+import {
+  resolveNativeMicBinary,
+  startNativeMic,
+  type NativeMicSession,
+} from "./native-mic-recorder.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,28 +94,89 @@ export class FfmpegRecorder implements Recorder {
       resolvedMic: micDevice,
     });
 
-    // Start mic recording via ffmpeg — into scratch.
+    // Start mic recording — into scratch.
+    //
+    // Preferred backend: SoX (CoreAudio HAL driver). ffmpeg's AVFoundation
+    // audio demuxer drops ~10–12% of samples from USB microphones on
+    // macOS 14+; SoX does not. Falls back to ffmpeg AVFoundation when no
+    // sox binary is available (degraded mode, drift correction compensates).
     const scratchMicPath = path.join(captureScratchDir, "mic.wav");
     const finalMicPath = path.join(finalAudioDir, "mic.wav");
-    // Pre-spawn wall clock as a degraded fallback. AVFoundation warmup can
-    // easily be 500–2000ms, so this is NOT close to first sample.
     const spawnTimeMs = Date.now();
     const micTiming: {
       firstSampleAtMs?: number;
-      firstSampleSource?: "stderr-time" | "spawn-time";
+      firstSampleSource?:
+        | "mic-capture-first-sample"
+        | "stderr-time"
+        | "spawn-time";
       stoppedAtMs?: number;
-    } = {};
-    // Seed a degraded spawn-time anchor so there is always *some* value;
-    // the stderr `time=` handler upgrades it to `stderr-time` on the first
-    // status line ffmpeg emits after encoding begins.
-    micTiming.firstSampleAtMs = spawnTimeMs;
-    micTiming.firstSampleSource = "spawn-time";
-    const micChild = spawnFfmpegRecord(micDevice, scratchMicPath, this.logger, (parsedTimeMs) => {
-      if (micTiming.firstSampleSource !== "stderr-time") {
-        micTiming.firstSampleAtMs = Date.now() - parsedTimeMs;
-        micTiming.firstSampleSource = "stderr-time";
-      }
-    });
+    } = {
+      firstSampleAtMs: spawnTimeMs,
+      firstSampleSource: "spawn-time",
+    };
+
+    // Prefer the bundled native `mic-capture` helper (no third-party
+    // dependencies, clean CoreAudio delivery). Fall back to ffmpeg's
+    // AVFoundation demuxer only if the helper is missing — that path
+    // drops ~10–12% of samples and runs in degraded mode.
+    const nativeMicBinary =
+      options.micCaptureBinaryPath ?? resolveNativeMicBinary();
+    let micPid: number | undefined;
+    let micStopFn: () => Promise<void>;
+
+    if (nativeMicBinary) {
+      this.logger?.info("Mic capture: using native CoreAudio helper", {
+        binaryPath: nativeMicBinary,
+      });
+      const nativeSession: NativeMicSession = startNativeMic({
+        binaryPath: nativeMicBinary,
+        outputPath: scratchMicPath,
+        logger: this.logger,
+        onFirstSample: () => {
+          if (micTiming.firstSampleSource !== "mic-capture-first-sample") {
+            micTiming.firstSampleAtMs = Date.now();
+            micTiming.firstSampleSource = "mic-capture-first-sample";
+          }
+        },
+      });
+      micPid = nativeSession.pid || undefined;
+      micStopFn = () => nativeSession.stop();
+    } else {
+      this.logger?.warn(
+        "Mic capture: native helper missing — falling back to ffmpeg AVFoundation (degraded; expect ~10–12% sample drops that drift correction will stretch back to wall-clock).",
+        {}
+      );
+      const micChild = spawnFfmpegRecord(micDevice, scratchMicPath, this.logger, (parsedTimeMs) => {
+        if (micTiming.firstSampleSource !== "stderr-time") {
+          micTiming.firstSampleAtMs = Date.now() - parsedTimeMs;
+          micTiming.firstSampleSource = "stderr-time";
+        }
+      });
+      micPid = micChild.pid;
+      micStopFn = async () => {
+        if (micChild.pid && !micChild.killed) {
+          try {
+            process.kill(micChild.pid, "SIGINT");
+          } catch {
+            // already exited
+          }
+        }
+        await new Promise<void>((resolve) => {
+          if (micChild.exitCode !== null) return resolve();
+          micChild.on("exit", () => resolve());
+          setTimeout(() => {
+            if (micChild.pid && !micChild.killed) {
+              try {
+                process.kill(micChild.pid, "SIGKILL");
+              } catch {
+                // ignore
+              }
+            }
+            resolve();
+          }, 5000);
+        });
+      };
+    }
 
     // Start system audio capture via AudioTee (macOS 14.2+, no BlackHole needed)
     const finalSystemPath = path.join(finalAudioDir, "system.wav");
@@ -150,7 +216,7 @@ export class FfmpegRecorder implements Recorder {
     const captureMeta: RecordingSession["captureMeta"] = {};
     const logger = this.logger;
     const session: RecordingSession = {
-      pids: [micChild.pid!].filter((p): p is number => p !== undefined),
+      pids: [micPid].filter((p): p is number => p !== undefined),
       paths: {
         mic: finalMicPath,
         system: systemPath,
@@ -158,39 +224,14 @@ export class FfmpegRecorder implements Recorder {
       systemCaptured,
       captureMeta,
       stop: async () => {
-        // Stop mic (ffmpeg) via SIGINT
         micTiming.stoppedAtMs = Date.now();
-        if (micChild.pid && !micChild.killed) {
-          try {
-            process.kill(micChild.pid, "SIGINT");
-          } catch {
-            // already exited
-          }
-        }
+        // Stop mic (sox or ffmpeg) — both send SIGINT and await exit.
+        await micStopFn();
 
         // Stop system audio (AudioTee)
         if (audioTeeSession?.started) {
           await audioTeeSession.stop();
         }
-
-        // Wait for ffmpeg to exit
-        await new Promise<void>((resolve) => {
-          if (micChild.exitCode !== null) {
-            resolve();
-            return;
-          }
-          micChild.on("exit", () => resolve());
-          setTimeout(() => {
-            if (micChild.pid && !micChild.killed) {
-              try {
-                process.kill(micChild.pid, "SIGKILL");
-              } catch {
-                // ignore
-              }
-            }
-            resolve();
-          }, 5000);
-        });
 
         // Move finalized files from scratch to the real run folder. On the
         // same volume this is an atomic rename; cross-volume falls back to

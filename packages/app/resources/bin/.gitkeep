@@ -1,13 +1,15 @@
-# Bundled binaries (downloaded out-of-band, not checked in)
+# Bundled binaries (built from source or dropped in out-of-band; never
+# checked into git — see .gitignore). electron-builder's `extraResources`
+# copies this directory into `<App>.app/Contents/Resources/bin/`.
 #
-# Drop the universal macOS Ollama binary here as `ollama` before building
-# the .app bundle. The build picks it up via electron-builder's
-# extraResources, lands it at `process.resourcesPath/bin/ollama`, and
-# packages/app/main/bundled.ts resolves it from there at runtime.
+# Contents after `npm run build`:
+#   - mic-capture    built by scripts/build-mic-capture.mjs from
+#                    native/mic-capture.swift (universal arm64 + x86_64).
+#                    Replaces ffmpeg avfoundation for mic capture; it
+#                    does not drop samples under macOS 14+ USB mics.
+#   - ollama         drop in manually before packaging:
+#                      curl -L https://github.com/ollama/ollama/releases/latest/download/ollama-darwin -o ollama
+#                      chmod +x ollama
+#                    Resolved at runtime by packages/app/main/bundled.ts.
 #
-# Download:
-#   curl -L https://github.com/ollama/ollama/releases/latest/download/ollama-darwin -o ollama
-#   chmod +x ollama
-#
-# This file exists only to keep the directory tracked in git. Do not check
-# in the binary itself — large, signed artifacts belong out of band.
+# This file exists only to keep the directory tracked in git.

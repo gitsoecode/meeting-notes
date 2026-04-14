@@ -14,6 +14,15 @@ export interface RecorderOptions {
    * binary gets produced.
    */
   audioTeeBinaryPath?: string;
+  /**
+   * Absolute path to the bundled `mic-capture` helper binary. When
+   * provided, a native CoreAudio capture path is used instead of
+   * ffmpeg's AVFoundation demuxer (which drops ~10–12 % of samples on
+   * USB microphones under macOS 14+). If omitted, the engine tries to
+   * auto-resolve the helper from the dev tree; when nothing is found,
+   * it falls back to ffmpeg AVFoundation (degraded mode).
+   */
+  micCaptureBinaryPath?: string;
 }
 
 export interface RecordingStopResult {
@@ -29,7 +38,10 @@ export interface RecordingStopResult {
  * - `tee-start` (system) / `spawn-time` (mic): degraded — captured before
  *   first sample was known to have arrived.
  */
-export type MicStartSource = "stderr-time" | "spawn-time";
+export type MicStartSource =
+  | "mic-capture-first-sample"
+  | "stderr-time"
+  | "spawn-time";
 export type SystemStartSource = "first-chunk" | "tee-start";
 
 export interface StreamCaptureMeta {
