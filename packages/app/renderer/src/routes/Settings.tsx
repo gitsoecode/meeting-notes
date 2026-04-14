@@ -220,17 +220,6 @@ export function Settings({ config, onChange }: SettingsProps) {
             ok: !!deps.ffmpeg,
           },
           {
-            label: "BlackHole (2ch)",
-            value:
-              deps.blackhole === "loaded"
-                ? "loaded"
-                : deps.blackhole === "installed-not-loaded"
-                ? "installed but not loaded"
-                : "not found",
-            version: null,
-            ok: deps.blackhole === "loaded",
-          },
-          {
             label: "Python",
             value: deps.python ?? "not found",
             version: deps.pythonVersion ?? null,
@@ -672,7 +661,7 @@ export function Settings({ config, onChange }: SettingsProps) {
             <CardHeader className="mb-3">
               <div className="space-y-1">
                 <CardTitle>Audio Devices</CardTitle>
-                <CardDescription>Pick which mic and system audio device to capture.</CardDescription>
+                <CardDescription>Configure audio capture devices.</CardDescription>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -702,26 +691,24 @@ export function Settings({ config, onChange }: SettingsProps) {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <label htmlFor="settings-sys-audio" className="text-sm font-medium text-[var(--text-secondary)]">System Audio (Loopback)</label>
-                <Select
-                  value={config.recording.system_device}
-                  onValueChange={(value) =>
-                    void save({ ...config, recording: { ...config.recording, system_device: value } })
-                  }
-                >
-                  <SelectTrigger id="settings-sys-audio">
-                    <SelectValue placeholder="Select device" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {devices.map((d) => (
-                      <SelectItem key={d.name} value={d.name}>{d.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-[var(--text-tertiary)]">
-                  Requires BlackHole or a similar loopback driver to capture meeting participants.
-                </p>
+              <div className="space-y-1">
+                <div className="text-sm font-medium text-[var(--text-secondary)]">System Audio</div>
+                {deps?.systemAudioSupported ? (
+                  <>
+                    <p className="text-sm text-[var(--success)]">Automatic (macOS 14.2+)</p>
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      System audio is captured automatically via CoreAudio — no extra drivers needed.
+                      The System Audio Recording permission will be requested on first use.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-[var(--text-secondary)]">Not available</p>
+                    <p className="text-xs text-[var(--text-tertiary)]">
+                      System audio capture requires macOS 14.2 or later. Mic-only recording still works.
+                    </p>
+                  </>
+                )}
               </div>
             </CardContent>
           </Card>

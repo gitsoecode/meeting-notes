@@ -185,6 +185,66 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByRole("button", { name: "End meeting" })).toBeVisible();
   });
 
+  test("processing meeting shows progress on notes and summary tabs instead of empty state", async ({
+    app,
+    meetingsList,
+    page,
+  }) => {
+    await app.navigateTo("Meetings");
+    await meetingsList.waitForReady();
+    await meetingsList.meetingRow("Customer call").click();
+
+    // Should show processing state, not "No notes for this meeting"
+    const notesTab = page.getByRole("tab", { name: "Notes" });
+    await notesTab.click();
+    await expect(page.getByText("No notes for this meeting.")).toHaveCount(0);
+    await expect(page.getByText(/Notes will appear|Processing/i).first()).toBeVisible();
+
+    // Summary tab should also show processing state
+    const summaryTab = page.getByRole("tab", { name: "Summary" });
+    await summaryTab.click();
+    await expect(page.getByText("Summary is being generated")).toBeVisible();
+  });
+
+  test("draft meeting shows editor on notes tab and start recording button", async ({
+    app,
+    meetingsList,
+    page,
+  }) => {
+    await app.navigateTo("Meetings");
+    await meetingsList.waitForReady();
+    await meetingsList.meetingRow("Draft standup").click();
+
+    // Draft should show the notes editor (not read-only)
+    const notesTab = page.getByRole("tab", { name: "Notes" });
+    await notesTab.click();
+    // The draft notes tab renders a CodeMirror editor, not an empty state
+    await expect(page.getByText("No notes for this meeting.")).toHaveCount(0);
+
+    // Prep tab should show the prep notes
+    const prepTab = page.getByRole("tab", { name: "Prep" });
+    await prepTab.click();
+    await expect(page.getByText("Check yesterday's blockers")).toBeVisible();
+
+    // Start recording button should be available
+    await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible();
+  });
+
+  test("error meeting shows failed state and allows reprocessing", async ({
+    app,
+    meetingsList,
+    page,
+  }) => {
+    await app.navigateTo("Meetings");
+    await meetingsList.waitForReady();
+    await meetingsList.meetingRow("Failed import").click();
+
+    // Analysis tab should show the failure
+    const analysisTab = page.getByRole("tab", { name: "Analysis" });
+    await analysisTab.click();
+    await expect(page.getByText(/failed/i).first()).toBeVisible();
+  });
+
   test("delete cancels and confirms cleanly", async ({ meetingDetail, page }) => {
     await meetingDetail.moreActionsButton().click();
     await meetingDetail.deleteButton().click();

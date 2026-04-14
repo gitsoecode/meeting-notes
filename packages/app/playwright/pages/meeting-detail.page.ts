@@ -213,7 +213,7 @@ export class MeetingDetailPage {
   }
 
   async waitForReady() {
-    await this.page.locator("header h1").filter({ hasText: "Meeting workspace" }).waitFor();
+    await this.page.locator("header h1").filter({ hasText: "Meeting" }).waitFor();
     await this.backButton().waitFor();
     await this.page.getByRole("tablist").waitFor();
   }

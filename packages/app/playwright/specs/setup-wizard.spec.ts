@@ -164,7 +164,52 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.installButton("Install via Homebrew")).toBeVisible();
     await expect(page.getByRole("button", { name: "Restart audio" })).toHaveCount(0);
     await wizard.installButton("Install via Homebrew").click();
-    await wizard.skipBlackholeCheckbox().click();
+    await expect(wizard.finishButton()).toBeEnabled();
+  });
+
+  test("Homebrew missing shows install instructions on dependencies step", async ({
+    wizard,
+    page,
+  }) => {
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setDependencyState({
+        ffmpeg: null,
+        brewAvailable: false,
+      });
+    });
+
+    // Navigate to deps step
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // data dir
+    await wizard.nextButton().click(); // transcription
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await wizard.nextButton().click(); // deps
+
+    // Should show Homebrew install instructions with the install command
+    await expect(page.getByText(/Homebrew is not installed/)).toBeVisible();
+    await expect(page.getByText(/Homebrew is the macOS package manager/)).toBeVisible();
+  });
+
+  test("system audio shows optional badge when unsupported", async ({
+    wizard,
+    page,
+  }) => {
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setDependencyState({
+        systemAudioSupported: false,
+      });
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await wizard.nextButton().click();
+
+    // System audio should show as optional, not a blocking failure
+    await expect(page.getByText("Optional")).toBeVisible();
+    await expect(page.getByText(/mic-only recording still works/)).toBeVisible();
+    // Finish should still be enabled (system audio is not a blocker)
     await expect(wizard.finishButton()).toBeEnabled();
   });
 

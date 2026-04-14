@@ -786,8 +786,17 @@ export function RecordView({
           <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
             <AudioMeter label="Mic" active={isRecording} />
             <span>·</span>
-            <span>{recording.system_captured ? "System audio capturing" : "System audio not available"}</span>
+            <span className={recording.system_captured ? "" : "text-[var(--warning-text)]"}>
+              {recording.system_captured ? "System audio capturing" : "System audio not available"}
+            </span>
           </div>
+
+          {/* System audio warning banner */}
+          {recording.system_audio_warning && (
+            <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-muted)] px-4 py-3 text-sm text-[var(--warning-text)]">
+              {recording.system_audio_warning}
+            </div>
+          )}
 
           {/* Pipeline progress */}
           {sections.length > 0 && (

@@ -105,10 +105,6 @@ export class SetupWizardPage {
     return this.page.getByText(name, { exact: false });
   }
 
-  skipBlackholeCheckbox() {
-    return this.page.getByText("Skip — I don't need to capture");
-  }
-
   recheckButton() {
     return this.page.getByRole("button", { name: "Re-check" });
   }

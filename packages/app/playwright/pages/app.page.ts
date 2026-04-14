@@ -34,7 +34,8 @@ export class AppPage {
   }
 
   recordingBadge() {
-    return this.header.getByText("Recording");
+    // The recording status chip is rendered by MeetingHeader inside main
+    return this.page.locator("main .text-red-700").getByText("Recording");
   }
 
   sidebarRecordingDot() {

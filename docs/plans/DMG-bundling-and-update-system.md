@@ -12,7 +12,7 @@ Everything the app needs at runtime, how it gets there today, and what the updat
 | **whisper-cli** | System PATH via `brew install whisper-cpp` | Yes — static binary | None | User runs `brew upgrade` |
 | **Parakeet MLX** | Python venv at `~/.meeting-notes/parakeet-venv/` via `setup-asr.ts` | No — ~2GB, Python + pip + mlx-audio | None | "Check / repair" button reinstalls |
 | **Python 3.11+** | Expected on PATH (macOS ships 3.9) | No (or heavyweight) | None | User manages |
-| **BlackHole 2ch** | `brew install --cask blackhole-2ch` — kernel audio driver | No | None | User manages |
+| **System audio** | Automatic via CoreAudio taps (macOS 14.2+) | N/A — OS-level | None | No user action needed |
 | **Ollama models** | `~/.ollama/models/` via `/api/pull` | No — user data | Tags only | User re-pulls |
 | **LLM model catalog** | Hardcoded `llm-catalog.ts` | N/A — source code | Frozen at build | Ship new `.app` |
 | **better-sqlite3** | npm dep, native C++ addon | Compiled at build | Build-time | `electron-rebuild` |
@@ -180,7 +180,7 @@ Meeting Notes 0.2.0 (built 2026-04-10)
 3. Set up codesigning + notarization in electron-builder config
 4. Create a build script: download platform binaries → `resources/bin/` → `electron-rebuild` → `electron-builder`
 5. Generate `versions.json` at build time from package.json + binary versions
-6. For deps that can't be bundled (Python, BlackHole), ensure Homebrew detection/install works on a fresh system via `deps:install` IPC
+6. For deps that can't be bundled (Python), ensure Homebrew detection/install works on a fresh system via `deps:install` IPC
 
 ### Phase B — Model catalog refactor
 7. Refactor `llm-catalog.ts`: split into `CLOUD_MODELS` + `RECOMMENDED_LOCAL`, drop hardcoded `sizeGb`/`minRamGb`

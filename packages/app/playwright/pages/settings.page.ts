@@ -54,8 +54,8 @@ export class SettingsPage {
     return this.page.locator("#settings-mic");
   }
 
-  systemDeviceSelect() {
-    return this.page.locator("#settings-sys-audio");
+  systemAudioStatus() {
+    return this.page.getByText(/Automatic \(macOS|Not available/);
   }
 
   // Transcription card (on Models tab)

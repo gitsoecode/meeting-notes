@@ -247,6 +247,34 @@ export async function installMockApi(page: Page) {
         folder_path: "/runs/customer-call",
         prompt_output_ids: ["summary"],
       },
+      {
+        run_id: "run-3",
+        title: "Draft standup",
+        description: "Prepared but not yet recorded.",
+        date: "2026-04-10",
+        started: null,
+        ended: null,
+        status: "draft",
+        source_mode: "both",
+        duration_minutes: null,
+        tags: [],
+        folder_path: "/runs/draft-standup",
+        prompt_output_ids: [],
+      },
+      {
+        run_id: "run-4",
+        title: "Failed import",
+        description: "Recording that failed during processing.",
+        date: "2026-04-09",
+        started: "2026-04-09T14:00:00.000Z",
+        ended: "2026-04-09T14:30:00.000Z",
+        status: "error",
+        source_mode: "file",
+        duration_minutes: 30,
+        tags: ["import"],
+        folder_path: "/runs/failed-import",
+        prompt_output_ids: ["summary"],
+      },
     ];
 
     const manifests = {
@@ -288,6 +316,32 @@ export async function installMockApi(page: Page) {
           },
         },
       },
+      "/runs/draft-standup": {
+        description: "Prepared but not yet recorded.",
+        participants: [],
+        tags: [],
+        source_mode: "both",
+        asr_provider: "parakeet-mlx",
+        llm_provider: "ollama",
+        prompt_outputs: {},
+      },
+      "/runs/failed-import": {
+        description: "Recording that failed during processing.",
+        participants: ["Jesse"],
+        tags: ["import"],
+        source_mode: "file",
+        asr_provider: "parakeet-mlx",
+        llm_provider: "ollama",
+        prompt_outputs: {
+          summary: {
+            status: "failed",
+            label: "Summary + Action Items",
+            filename: "summary.md",
+            model: "qwen3.5:9b",
+            error: "Transcription failed: audio file is empty or corrupt.",
+          },
+        },
+      },
     };
 
     const files = {
@@ -305,6 +359,13 @@ export async function installMockApi(page: Page) {
         { name: "notes.md", size: 260, kind: "document" },
         { name: "transcript.md", size: 580, kind: "document" },
         { name: "audio/customer-call.mp4", size: 15800000, kind: "media" },
+      ],
+      "/runs/draft-standup": [
+        { name: "index.md", size: 120, kind: "document" },
+      ],
+      "/runs/failed-import": [
+        { name: "index.md", size: 160, kind: "document" },
+        { name: "audio/uploaded.mp4", size: 8200000, kind: "media" },
       ],
     };
 
@@ -324,14 +385,19 @@ export async function installMockApi(page: Page) {
         "transcript.md":
           "---\nsource: mock\n---\n### Others\n\n`00:00` We need clarification on pricing.\n",
       },
+      "/runs/draft-standup": {},
+      "/runs/failed-import": {},
     };
     const prepDocs = {
       "/runs/weekly-planning": "# Prep\n\n- Review backlog\n- Confirm owners\n",
       "/runs/customer-call": "# Customer prep\n\n- Bring pricing notes\n",
+      "/runs/draft-standup": "# Standup prep\n\n- Check yesterday's blockers\n",
     };
     const attachmentsByRun = {
       "/runs/weekly-planning": [{ name: "agenda.pdf", size: 32000 }],
       "/runs/customer-call": [],
+      "/runs/draft-standup": [],
+      "/runs/failed-import": [],
     } as Record<string, Array<{ name: string; size: number }>>;
     const missingFolders = new Set<string>();
     const missingAttachmentDirs = new Set<string>();

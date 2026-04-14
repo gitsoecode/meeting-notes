@@ -50,6 +50,8 @@ export interface ActiveRecordingState {
   micPath?: string;
   systemPath?: string;
   systemCaptured: boolean;
+  /** Visible warning about system audio issues (permission denied, silent, etc.) */
+  systemAudioWarning?: string;
   processIds: string[];
 }
 
@@ -92,6 +94,7 @@ export async function getStatus(): Promise<RecordingStatus> {
       started_at: active.startedAt,
       run_folder: active.runFolder,
       system_captured: active.systemCaptured,
+      system_audio_warning: active.systemAudioWarning,
     };
   }
   if (pausedRunFolder) {
@@ -158,6 +161,12 @@ export async function startRecording(
     devices,
   });
 
+  // Set a visible warning if system audio capture failed at startup.
+  let systemAudioWarning: string | undefined;
+  if (!session.systemCaptured) {
+    systemAudioWarning = "System audio capture is not available. Check that the System Audio Recording permission is granted in System Settings → Privacy & Security.";
+  }
+
   active = {
     session,
     runFolder: folderPath,
@@ -169,6 +178,7 @@ export async function startRecording(
     micPath: session.paths.mic,
     systemPath: session.paths.system,
     systemCaptured: session.systemCaptured,
+    systemAudioWarning,
     processIds: [
       startTrackedProcess({
         id: session.pids[0] ? `ffmpeg:${session.pids[0]}` : undefined,

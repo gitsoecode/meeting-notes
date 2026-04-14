@@ -452,7 +452,7 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
 
     // Navigate to meeting detail for more modals
     await app.navigateRoute({ name: "meeting", runFolder: "/runs/weekly-planning" });
-    await expect(page.locator("header h1")).toContainText("Meeting workspace");
+    await expect(page.locator("header h1")).toContainText("Meeting");
 
     // Reprocess modal
     await page.getByRole("button", { name: "Launch chat" }).locator("..").getByRole("button").last().click();

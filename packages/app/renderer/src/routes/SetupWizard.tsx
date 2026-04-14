@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, CheckCircle2, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { api } from "../ipc-client";
 import type {
   AppConfigDTO,
@@ -646,20 +646,26 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     brewAvailable={brewAvailable}
                     onInstall={() => installDep("ffmpeg")}
                   />
-                  {/* BlackHole removed — system audio captured via AudioTee */}
-                  {deps.systemAudioSupported ? (
-                    <DependencyRow
-                      name="System audio"
-                      ok
-                      value="Supported (macOS 14.2+)"
-                    />
-                  ) : (
-                    <DependencyRow
-                      name="System audio"
-                      ok={false}
-                      value="Requires macOS 14.2+"
-                    />
-                  )}
+                  {/* System audio info row — not a blocker */}
+                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="text-sm font-medium text-[var(--text-primary)]">System audio</div>
+                      {deps.systemAudioSupported ? (
+                        <>
+                          <DependencyStateBadge ok warning={false} />
+                          <span className="text-xs text-[var(--text-secondary)]">Automatic (macOS 14.2+)</span>
+                        </>
+                      ) : (
+                        <>
+                          <Badge variant="secondary" className="gap-1 normal-case tracking-normal">
+                            <Info className="h-3 w-3" />
+                            Optional
+                          </Badge>
+                          <span className="text-xs text-[var(--text-secondary)]">Requires macOS 14.2+ — mic-only recording still works</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                   {asrProvider === "parakeet-mlx" && (
                     <DependencyRow
                       name="Parakeet"
@@ -900,73 +906,6 @@ function DependencyRow({
         {!ok ? (
           <Button variant="secondary" onClick={onInstall} disabled={anyInstalling || brewAvailable === false}>
             {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : installLabel}
-          </Button>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-interface BlackHoleRowProps {
-  status: "missing" | "installed-not-loaded" | "loaded";
-  installing: boolean;
-  anyBusy: boolean;
-  brewAvailable: boolean | null;
-  restarting: boolean;
-  onInstall: () => void;
-  onRestartAudio: () => void;
-  restartError: string | null;
-}
-
-function BlackHoleRow({
-  status,
-  installing,
-  anyBusy,
-  brewAvailable,
-  restarting,
-  onInstall,
-  onRestartAudio,
-  restartError,
-}: BlackHoleRowProps) {
-  const icon =
-    status === "loaded" ? "✓" : status === "installed-not-loaded" ? "⚠" : "✗";
-  const statusText =
-    status === "loaded"
-      ? "loaded"
-      : status === "installed-not-loaded"
-        ? "installed but not loaded by macOS"
-        : "not installed";
-
-  return (
-    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="text-sm font-medium text-[var(--text-primary)]">BlackHole 2ch</div>
-            <DependencyStateBadge ok={status === "loaded"} warning={status === "installed-not-loaded"} />
-            <span className="text-xs text-[var(--text-secondary)]">{statusText}</span>
-            <span className="text-xs text-[var(--text-tertiary)]">{icon}</span>
-          </div>
-          {status === "missing" && brewAvailable !== false ? (
-            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-              macOS will ask you to approve the virtual audio driver. Follow the prompt — no restart needed.
-            </div>
-          ) : null}
-          {status === "installed-not-loaded" ? (
-            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-              The driver is on disk but macOS hasn&apos;t loaded it yet. Restart Audio relaunches coreaudiod. If that doesn&apos;t work, log out and back in.
-            </div>
-          ) : null}
-          {restartError ? <div className="mt-2 text-xs leading-5 text-[var(--error)]">{restartError}</div> : null}
-        </div>
-        {status === "missing" ? (
-          <Button variant="secondary" onClick={onInstall} disabled={anyBusy || brewAvailable === false}>
-            {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : "Install via Homebrew"}
-          </Button>
-        ) : null}
-        {status === "installed-not-loaded" ? (
-          <Button variant="secondary" onClick={onRestartAudio} disabled={anyBusy}>
-            {restarting ? <><Spinner className="h-3.5 w-3.5" /> Restarting…</> : "Restart audio"}
           </Button>
         ) : null}
       </div>

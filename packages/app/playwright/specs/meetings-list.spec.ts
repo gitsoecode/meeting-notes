@@ -112,6 +112,8 @@ test.describe("Meetings List", () => {
   test("status badges show correct values", async ({ meetingsList, page }) => {
     await expect(meetingsList.statusBadge("complete")).toBeVisible();
     await expect(meetingsList.statusBadge("processing")).toBeVisible();
+    await expect(meetingsList.statusBadge("draft")).toBeVisible();
+    await expect(meetingsList.statusBadge("error")).toBeVisible();
 
     await page.screenshot({
       path: "test-results/screenshots/meetings-list-full.png",

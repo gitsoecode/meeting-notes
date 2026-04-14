@@ -14,7 +14,7 @@ Install these before running anything:
 - For the default `parakeet-mlx` ASR provider:
   - **Python 3.12** (or 3.11)
   - **ffmpeg** (`brew install ffmpeg`)
-  - **BlackHole 2ch** virtual audio device, for capturing system audio (`brew install blackhole-2ch`)
+  - **macOS 14.2+** for automatic system audio capture (older macOS records mic-only)
 
 If you pick the `openai` ASR provider instead, you'll also need an OpenAI API key and you can skip the Python/Parakeet steps.
 
@@ -92,7 +92,7 @@ This interactively asks for:
 - Base folder inside the vault (default `Meetings`)
 - ASR provider (`parakeet-mlx` | `openai` | `whisper-local`)
 - Mic device name (default `default`)
-- System audio device (default `BlackHole 2ch`)
+- System audio is captured automatically on macOS 14.2+ (no setup needed)
 - Your Anthropic API key (and OpenAI key if you chose `openai`)
 
 It then:
@@ -197,10 +197,6 @@ meeting-notes test-audio --duration 6000   # 6-second test (default 4s)
 ```
 
 This records a short clip from each configured device, analyzes volume levels, and reports whether each device is found, capturing audio, and not silent.
-
-### Current Limitations
-
-System audio capture currently requires **BlackHole 2ch** as a virtual loopback device, plus a manually configured Multi-Output Device in Audio MIDI Setup. This is a known UX gap — the app should handle audio routing automatically without requiring manual system configuration. This is tracked for a future release using macOS ScreenCaptureKit or programmatic aggregate device creation.
 
 ---
 

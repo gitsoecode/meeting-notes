@@ -9,6 +9,8 @@ export interface RecordingStatus {
   started_at?: string;
   run_folder?: string;
   system_captured?: boolean;
+  /** Set when system audio capture failed or is silent — shown as a visible warning. */
+  system_audio_warning?: string;
 }
 
 export type AppActionEvent =

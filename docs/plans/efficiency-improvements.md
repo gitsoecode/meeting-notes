@@ -30,7 +30,7 @@ These have no dependency on the SQLite work and can land as standalone PRs.
 
 ### 1.2 Audio Device List Caching
 
-**Problem:** `FfmpegRecorder.start()` spawns ffmpeg twice just to enumerate audio devices — once to resolve a default mic name, and once via `isSystemCaptureAvailable()` to check for BlackHole. Each ffmpeg spawn takes ~100-200ms on macOS. This adds 200-400ms of latency to every "start recording" action.
+**Problem:** `FfmpegRecorder.start()` spawns ffmpeg to enumerate audio devices to resolve a default mic name. Each ffmpeg spawn takes ~100-200ms on macOS. This adds latency to every "start recording" action.
 
 **Fix:**
 - Add an `AudioDeviceCache` in main that calls `listAudioDevices()` once at startup and caches the result

@@ -27,22 +27,23 @@ test.describe("Settings", () => {
     await expect(settings.dependenciesCard()).toBeVisible();
   });
 
-  test("audio device selects are shadcn comboboxes", async ({
+  test("audio tab shows mic select and system audio status", async ({
     settings,
     page,
   }) => {
     await settings.openTab("Audio");
-    // Audio device selects are shadcn Select components (combobox role)
+    // Mic device is a shadcn Select component (combobox role)
     await expect(settings.micDeviceSelect()).toBeVisible();
-    await expect(settings.systemDeviceSelect()).toBeVisible();
 
     // Click mic select to verify it opens and shows options
     await settings.micDeviceSelect().click();
     await expect(page.getByRole("option", { name: "Built-in Mic" })).toBeVisible();
-    // Close by pressing Escape
     await page.keyboard.press("Escape");
 
-    // System audio is now automatic (AudioTee) — no device selector
+    // System audio shows capability status (no device selector)
+    await expect(settings.systemAudioStatus()).toBeVisible();
+    // Permission hint is visible
+    await expect(page.getByText(/permission will be requested|Mic-only recording/)).toBeVisible();
   });
 
   test("ASR provider switch to OpenAI shows warning", async ({
