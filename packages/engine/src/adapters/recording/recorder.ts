@@ -22,10 +22,23 @@ export interface RecordingStopResult {
   durationMs: number;
 }
 
+/**
+ * Wall-clock timestamps captured just before each capture pipeline hands off
+ * to its underlying producer (ffmpeg for the mic, AudioTee for system audio).
+ * Used by the engine's AEC step as a coarse offset hint so cross-correlation
+ * doesn't have to search the full acceptable range.
+ */
+export interface CaptureMeta {
+  micStartedAtMs?: number;
+  systemStartedAtMs?: number;
+}
+
 export interface RecordingSession {
   pids: number[];
   paths: { mic?: string; system?: string };
   systemCaptured: boolean;
+  /** Optional metadata about when each capture stream started, for downstream AEC. */
+  captureMeta?: CaptureMeta;
   stop(): Promise<RecordingStopResult>;
 }
 

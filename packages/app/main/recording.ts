@@ -16,7 +16,6 @@ import {
   createRunLogger,
   createAppLogger,
   checkAudioSilence,
-  mergeAudioFiles,
   type RecordingSession,
   type AppConfig,
   type Logger,
@@ -370,11 +369,27 @@ export async function stopRecording(
     }).catch(() => {});
   }
 
-  // Best-effort: create combined.wav for full-conversation playback.
-  // This merges mic + system from all segments in the run.
-  if (state.micPath && state.systemCaptured && state.systemPath) {
-    void createCombinedAudio(state.runFolder, state.logger).catch(() => {});
+  // Write a small sidecar with per-stream start wall-clock timestamps.
+  // The engine's AEC preprocessing step reads this to seed its
+  // cross-correlation search so the alignment converges quickly.
+  if (state.session.captureMeta) {
+    try {
+      const audioDir = path.join(state.runFolder, "audio");
+      fs.mkdirSync(audioDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(audioDir, "capture-meta.json"),
+        JSON.stringify(state.session.captureMeta, null, 2)
+      );
+    } catch (err) {
+      state.logger.warn("Failed to write capture-meta.json", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
+
+  // Note: combined.wav generation has moved into the processing job
+  // (see packages/engine/src/core/process-run.ts) so it can use the
+  // AEC-cleaned mic track. We no longer kick it off fire-and-forget here.
 
   const endedAt = new Date().toISOString();
 
@@ -654,53 +669,3 @@ export async function continueRecording(
 
 // Imported lazily so the module is usable standalone for tests.
 void createRunLogger;
-
-/**
- * Walk all segment directories in a run and merge mic + system audio
- * into a single `combined.wav` at `audio/combined.wav`. Handles both
- * flat layout (audio/mic.wav) and segmented layout (audio/<seg>/mic.wav).
- */
-async function createCombinedAudio(runFolder: string, logger: Logger): Promise<void> {
-  const audioDir = path.join(runFolder, "audio");
-  if (!fs.existsSync(audioDir)) return;
-
-  // Collect all mic + system pairs from all segments
-  const micPaths: string[] = [];
-  const systemPaths: string[] = [];
-
-  // Check flat layout first
-  const flatMic = path.join(audioDir, "mic.wav");
-  const flatSystem = path.join(audioDir, "system.wav");
-  if (fs.existsSync(flatMic)) {
-    micPaths.push(flatMic);
-    if (fs.existsSync(flatSystem)) systemPaths.push(flatSystem);
-  } else {
-    // Walk segment subdirectories
-    const entries = fs.readdirSync(audioDir, { withFileTypes: true });
-    const segDirs = entries
-      .filter((e) => e.isDirectory())
-      .sort((a, b) => a.name.localeCompare(b.name));
-
-    for (const seg of segDirs) {
-      const segMic = path.join(audioDir, seg.name, "mic.wav");
-      const segSystem = path.join(audioDir, seg.name, "system.wav");
-      if (fs.existsSync(segMic)) micPaths.push(segMic);
-      if (fs.existsSync(segSystem)) systemPaths.push(segSystem);
-    }
-  }
-
-  // Need at least mic + system to create a meaningful combined file
-  if (micPaths.length === 0 || systemPaths.length === 0) return;
-
-  const allInputs = [...micPaths, ...systemPaths];
-  const combinedPath = path.join(audioDir, "combined.wav");
-
-  try {
-    await mergeAudioFiles(allInputs, combinedPath);
-    logger.info("Combined audio created", { path: combinedPath, inputs: allInputs.length });
-  } catch (err) {
-    logger.warn("Failed to create combined audio", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}

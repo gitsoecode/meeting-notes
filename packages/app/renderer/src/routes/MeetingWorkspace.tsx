@@ -37,7 +37,7 @@ import {
   PRIMARY_PROMPT_ID,
   type MeetingAnalysisPromptItem,
 } from "../../../shared/meeting-prompts";
-import { AudioMeter } from "../components/AudioMeter";
+import { LiveChannelMeters } from "../components/LiveChannelMeters";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DisclosurePanel } from "../components/DisclosurePanel";
 import {
@@ -994,8 +994,7 @@ export function MeetingWorkspace({
           {/* Compact capture health + pipeline */}
           <div className="shrink-0 space-y-2">
             <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
-              <AudioMeter label="Mic" active={isRecording} />
-              <span>·</span>
+              <LiveChannelMeters isRecording={isRecording} systemCapturing={recording.system_captured === true} />
               <span className={recording.system_captured ? "" : "text-[var(--warning-text)]"}>
                 {recording.system_captured ? "System audio capturing" : "System audio not available"}
               </span>
@@ -1266,8 +1265,7 @@ export function MeetingWorkspace({
           {isLive ? (
             <div className="space-y-4">
               <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
-                <AudioMeter label="Mic" active={isRecording} />
-                <span>·</span>
+                <LiveChannelMeters isRecording={isRecording} systemCapturing={recording.system_captured === true} />
                 <span className={recording.system_captured ? "" : "text-[var(--warning-text)]"}>
                   {recording.system_captured ? "System audio capturing" : "System audio not available"}
                 </span>

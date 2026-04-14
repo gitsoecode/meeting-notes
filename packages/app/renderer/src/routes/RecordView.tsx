@@ -19,7 +19,7 @@ import type {
   RunSummary,
 } from "../../../shared/ipc";
 import { PRIMARY_PROMPT_ID } from "../../../shared/meeting-prompts";
-import { AudioMeter } from "../components/AudioMeter";
+import { LiveChannelMeters } from "../components/LiveChannelMeters";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DateTimePicker } from "../components/DateTimePicker";
 import { DisclosurePanel } from "../components/DisclosurePanel";
@@ -784,8 +784,7 @@ export function RecordView({
 
           {/* Compact capture health */}
           <div className="flex items-center gap-4 text-sm text-[var(--text-secondary)]">
-            <AudioMeter label="Mic" active={isRecording} />
-            <span>·</span>
+            <LiveChannelMeters isRecording={isRecording} systemCapturing={recording.system_captured === true} />
             <span className={recording.system_captured ? "" : "text-[var(--warning-text)]"}>
               {recording.system_captured ? "System audio capturing" : "System audio not available"}
             </span>

@@ -38,8 +38,21 @@ import { classifyModel } from "../adapters/llm/resolve.js";
 import { normalizeLocalModelId } from "./setup-llm.js";
 import type { LlmProvider } from "../adapters/llm/provider.js";
 import type { AsrProvider, TranscriptResult } from "../adapters/asr/provider.js";
-import { normalizeAudio, asrAudioExtension, type AsrAudioFormat } from "./audio.js";
-import { formatTranscriptMarkdown, buildTranscriptForLlm, buildSpeakerExcerpts } from "./transcript.js";
+import {
+  normalizeAudio,
+  asrAudioExtension,
+  estimateMicSystemOffsetMs,
+  cancelSystemFromMic,
+  writeAecSidecar,
+  mergeAudioFiles,
+  type AsrAudioFormat,
+} from "./audio.js";
+import {
+  formatTranscriptMarkdown,
+  buildTranscriptForLlm,
+  buildSpeakerExcerpts,
+  dedupOverlappingSpeakers,
+} from "./transcript.js";
 import { writeMarkdownFile } from "./markdown.js";
 import type { Logger } from "../logging/logger.js";
 import { throwIfAborted } from "./abort.js";
@@ -115,6 +128,135 @@ export async function transcribeAudio(opts: TranscribeAudioOptions): Promise<Tra
   });
 
   return result;
+}
+
+/**
+ * Load `audio/capture-meta.json` (written by the app's recording flow)
+ * and return the hint offset (mic-start minus system-start, in ms) that
+ * seeds cross-correlation during alignment. Returns 0 when the file is
+ * missing or malformed — the alignment will still work, just with a
+ * wider search.
+ */
+function readCaptureHintOffsetMs(audioDir: string): number {
+  const metaPath = path.join(audioDir, "capture-meta.json");
+  if (!fs.existsSync(metaPath)) return 0;
+  try {
+    const raw = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    const mic = typeof raw.micStartedAtMs === "number" ? raw.micStartedAtMs : null;
+    const sys = typeof raw.systemStartedAtMs === "number" ? raw.systemStartedAtMs : null;
+    if (mic == null || sys == null) return 0;
+    // Offset convention: positive means the system track lags the mic.
+    return sys - mic;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * For each `me` entry in `audioFiles` that has a sibling `system.wav` in
+ * the same directory, run alignment + AEC to produce a `mic.clean.wav`
+ * and rewrite the entry's `path` to the cleaned file. Failures are
+ * logged but never throw: the raw mic track remains the transcript input
+ * in that case.
+ */
+async function preprocessMicForAec(
+  audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[],
+  runFolder: string,
+  logger: Logger,
+  signal?: AbortSignal
+): Promise<void> {
+  for (const af of audioFiles) {
+    if (af.speaker !== "me") continue;
+    throwIfAborted(signal);
+
+    const micPath = af.path;
+    const dir = path.dirname(micPath);
+    const systemPath = path.join(dir, "system.wav");
+    if (!fs.existsSync(systemPath)) continue;
+
+    const cleanedPath = path.join(dir, "mic.clean.wav");
+    const sidecarPath = path.join(dir, "aec.json");
+
+    try {
+      // Hint offset from capture-meta.json lives at runFolder/audio (flat)
+      // or a level above for segmented layout — check both.
+      const audioRoot = path.join(runFolder, "audio");
+      let hintMs = readCaptureHintOffsetMs(audioRoot);
+      if (hintMs === 0 && dir !== audioRoot) {
+        // Segmented layout: capture-meta.json still sits at audio/, but
+        // segments may have been started later; the hint is approximate
+        // either way, so 0 is a safe default.
+        hintMs = readCaptureHintOffsetMs(dir);
+      }
+
+      const { offsetMs, confidence } = await estimateMicSystemOffsetMs(
+        micPath,
+        systemPath,
+        { hintOffsetMs: hintMs, logger }
+      );
+
+      if (confidence <= 0) {
+        logger.info("AEC: alignment unreliable; keeping raw mic", {
+          dir,
+          hintMs: Math.round(hintMs),
+        });
+        writeAecSidecar(sidecarPath, {
+          offsetMs: 0,
+          confidence: 0,
+          source: "skipped",
+          micPath,
+          systemPath,
+          writtenAt: new Date().toISOString(),
+        });
+        continue;
+      }
+
+      await cancelSystemFromMic(micPath, systemPath, cleanedPath, offsetMs, logger);
+      if (fs.existsSync(cleanedPath)) {
+        writeAecSidecar(sidecarPath, {
+          offsetMs,
+          confidence,
+          source: "xcorr",
+          micPath,
+          systemPath,
+          cleanedMicPath: cleanedPath,
+          writtenAt: new Date().toISOString(),
+        });
+        af.path = cleanedPath;
+        logger.info("AEC: mic cleaned", {
+          dir,
+          offsetMs: Math.round(offsetMs),
+          confidence,
+        });
+      }
+    } catch (err) {
+      logger.warn("AEC: preprocessing failed; keeping raw mic", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
+/**
+ * Best-effort combined playback file covering the cleaned mic + system
+ * across all audio files. Non-blocking / non-fatal.
+ */
+async function writeCombinedPlayback(
+  audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[],
+  runFolder: string,
+  logger: Logger
+): Promise<void> {
+  const inputs = audioFiles.map((a) => a.path).filter((p) => fs.existsSync(p));
+  if (inputs.length < 2) return;
+  const combinedPath = path.join(runFolder, "audio", "combined.wav");
+  try {
+    await mergeAudioFiles(inputs, combinedPath);
+    logger.info("Combined audio created", { path: combinedPath, inputs: inputs.length });
+  } catch (err) {
+    logger.warn("Failed to create combined audio", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export function mergeTranscripts(results: TranscriptResult[]): TranscriptResult {
@@ -206,6 +348,17 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     filename: transcriptStep.filename,
   });
 
+  // --- AEC preprocessing: remove re-captured system audio from the mic ---
+  //
+  // When the user has speakers on, the mic re-captures the remote
+  // participants' voices, and ASR ends up attributing those segments to
+  // `me`. We produce a cleaned mic track aligned with the system track
+  // and route it through ASR instead of the raw mic. Best-effort: if any
+  // step fails, we fall back to the raw mic.
+  if (config.recording.aec_enabled !== false) {
+    await preprocessMicForAec(audioFiles, runFolder, logger, signal);
+  }
+
   // --- Transcription (in parallel for multiple sources) ---
   let transcriptResult: TranscriptResult;
   const transcriptStartedAt = Date.now();
@@ -225,6 +378,16 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       );
     }
     transcriptResult = transcripts.length === 1 ? transcripts[0] : mergeTranscripts(transcripts);
+    if (config.recording.dedup_me_against_others !== false) {
+      const before = transcriptResult.segments.length;
+      transcriptResult = dedupOverlappingSpeakers(transcriptResult);
+      const dropped = before - transcriptResult.segments.length;
+      if (dropped > 0) {
+        logger.info("Transcript dedup: dropped me-segments overlapping others", {
+          dropped,
+        });
+      }
+    }
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       throw err;
@@ -268,6 +431,18 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     filename: transcriptStep.filename,
     latencyMs: Date.now() - transcriptStartedAt,
   });
+
+  // Build the combined.wav playback file from the (possibly AEC-cleaned)
+  // per-channel audio. We await it here rather than fire-and-forget so any
+  // ffmpeg failure is logged via the run logger, but we never let a merge
+  // failure abort the processing job.
+  try {
+    await writeCombinedPlayback(audioFiles, runFolder, logger);
+  } catch (err) {
+    logger.warn("writeCombinedPlayback failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // --- LLM Pipeline ---
   // Build a provider factory that dispatches per-call based on the model id.

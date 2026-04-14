@@ -8,6 +8,8 @@ import type {
 } from "../../../shared/ipc";
 import { Button } from "./ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Meter } from "./ui/meter";
+import { dbToPct, hasAudibleSignal } from "../lib/audio-meter";
 
 const SYSTEM_DEFAULT_VALUE = "__system_default__";
 
@@ -20,13 +22,17 @@ export interface AppIdentity {
 }
 
 /**
- * Zoom-style live audio level meters with an inline mic source dropdown.
+ * Live audio level meters with an inline mic source dropdown.
  *
  * Shows two channels (mic + system audio) with real-time peak/RMS meters
  * driven by the main-process audio-monitor module. The mic dropdown
  * switches the monitored source live, and permission errors surface
  * actionable remediation (Open System Settings, with the exact name the
  * user needs to look for).
+ *
+ * Uses the shared `Meter` primitive — same component as the live recording
+ * view — so the visual language stays consistent between Settings and the
+ * live capture indicator.
  */
 export function AudioLevelMeters({
   active,
@@ -99,14 +105,12 @@ export function AudioLevelMeters({
   const micSelectValue = micDevice === "" || micDevice === "default" ? SYSTEM_DEFAULT_VALUE : micDevice;
 
   return (
-    <div className="space-y-5">
-      {/* ---- Mic row with inline source dropdown ---- */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
-          <Mic className="h-4 w-4 text-[var(--text-secondary)]" />
-          Microphone
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-center">
+    <div className="space-y-6">
+      {/* ---- Mic row ---- */}
+      <ChannelRow
+        icon={<Mic className="h-3.5 w-3.5" />}
+        label="Microphone"
+        left={
           <Select value={micSelectValue} onValueChange={(v) => onMicDeviceChange(v === SYSTEM_DEFAULT_VALUE ? "" : v)}>
             <SelectTrigger>
               <SelectValue placeholder="Select microphone" />
@@ -120,32 +124,32 @@ export function AudioLevelMeters({
               ))}
             </SelectContent>
           </Select>
-          <LevelBar level={snapshot?.mic} active={active} />
-        </div>
-        <ChannelStatus level={snapshot?.mic} active={active} appIdentity={appIdentity} channel="mic" />
-      </div>
+        }
+        meter={<MeterWithOverlay level={snapshot?.mic} active={active} size="default" />}
+        status={<ChannelStatus level={snapshot?.mic} active={active} appIdentity={appIdentity} channel="mic" />}
+      />
 
-      {/* ---- System audio row (no source to choose — AudioTee captures the whole output) ---- */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-primary)]">
-          <Monitor className="h-4 w-4 text-[var(--text-secondary)]" />
-          System audio
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-3 items-center">
+      {/* ---- System audio row ---- */}
+      <ChannelRow
+        icon={<Monitor className="h-3.5 w-3.5" />}
+        label="System audio"
+        left={
           <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-secondary)]">
             {systemAudioSupported ? "Automatic (AudioTee / macOS 14.2+)" : "Not available (requires macOS 14.2+)"}
           </div>
-          <LevelBar level={snapshot?.system} active={active && systemAudioSupported} />
-        </div>
-        <ChannelStatus
-          level={snapshot?.system}
-          active={active && systemAudioSupported}
-          appIdentity={appIdentity}
-          channel="system"
-        />
-      </div>
+        }
+        meter={<MeterWithOverlay level={snapshot?.system} active={active && systemAudioSupported} size="default" />}
+        status={
+          <ChannelStatus
+            level={snapshot?.system}
+            active={active && systemAudioSupported}
+            appIdentity={appIdentity}
+            channel="system"
+          />
+        }
+      />
 
-      {/* ---- Footer: refresh + guidance ---- */}
+      {/* ---- Footer ---- */}
       <div className="flex items-center justify-between gap-3 pt-1">
         <p className="text-xs text-[var(--text-tertiary)] flex-1">
           Speak into your mic and play a sound (e.g., a YouTube video) to verify both channels.
@@ -157,6 +161,76 @@ export function AudioLevelMeters({
         </Button>
       </div>
     </div>
+  );
+}
+
+function ChannelRow({
+  icon,
+  label,
+  left,
+  meter,
+  status,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  left: React.ReactNode;
+  meter: React.ReactNode;
+  status: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+        <span className="text-[var(--text-tertiary)]">{icon}</span>
+        {label}
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,220px)_minmax(0,1fr)] gap-3 items-center">
+        {left}
+        {meter}
+      </div>
+      {status}
+    </div>
+  );
+}
+
+function MeterWithOverlay({
+  level,
+  active,
+  size,
+}: {
+  level?: AudioMonitorLevel;
+  active: boolean;
+  size: "default" | "lg";
+}) {
+  const hasError = Boolean(level?.error);
+  const signal = hasAudibleSignal(level?.peakDb);
+  const showListening = active && !hasError && !signal;
+  const showError = active && hasError;
+  const showPaused = !active;
+
+  return (
+    <Meter
+      size={size}
+      value={dbToPct(level?.rmsDb)}
+      peak={dbToPct(level?.peakDb)}
+      active={active && !hasError}
+    >
+      {showPaused ? <CaptionText>Paused</CaptionText> : null}
+      {showError ? <CaptionText tone="warning">No signal</CaptionText> : null}
+      {showListening ? <CaptionText>Listening…</CaptionText> : null}
+    </Meter>
+  );
+}
+
+function CaptionText({ children, tone }: { children: React.ReactNode; tone?: "warning" }) {
+  return (
+    <span
+      className={
+        "text-[10px] uppercase tracking-wide " +
+        (tone === "warning" ? "text-[var(--warning)]" : "text-[var(--text-tertiary)]")
+      }
+    >
+      {children}
+    </span>
   );
 }
 
@@ -181,10 +255,10 @@ function ChannelStatus({
     return <PermissionRemediation error={error} appIdentity={appIdentity} channel={channel} />;
   }
   if (level?.active) {
-    const hasSignal = typeof level.peakDb === "number" && level.peakDb > -55;
+    const hasSignal = hasAudibleSignal(level?.peakDb);
     return (
       <div className="flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
-        {hasSignal ? (
+        {hasSignal && typeof level.peakDb === "number" ? (
           <>
             <CheckCircle2 className="h-3.5 w-3.5 text-[var(--success)]" />
             <span>Receiving audio — peak {level.peakDb.toFixed(1)} dB</span>
@@ -309,70 +383,4 @@ function PermissionRemediation({
       ) : null}
     </div>
   );
-}
-
-// ---- Level bar ----
-
-function LevelBar({ level, active }: { level?: AudioMonitorLevel; active: boolean }) {
-  const peakPct = dbToPct(level?.peakDb);
-  const rmsPct = dbToPct(level?.rmsDb);
-  const hasSignal = active && level?.active && typeof level.peakDb === "number" && level.peakDb > -55;
-  const hasError = Boolean(level?.error);
-
-  return (
-    <div className="relative h-8 w-full rounded-md bg-[var(--bg-tertiary)] overflow-hidden border border-[var(--border-subtle)]">
-      <div
-        className="absolute inset-y-0 left-0 transition-[width] duration-75 ease-out"
-        style={{
-          width: `${rmsPct}%`,
-          backgroundColor: active && !hasError ? levelColor(level?.rmsDb) : "var(--border-subtle)",
-        }}
-      />
-      {active && peakPct > 0 ? (
-        <div
-          className="absolute inset-y-0 w-[2px] bg-[var(--text-primary)] opacity-70 transition-[left] duration-75 ease-out"
-          style={{ left: `calc(${peakPct}% - 1px)` }}
-        />
-      ) : null}
-      {/* Tick marks every 10 dB for visual calibration */}
-      <div className="absolute inset-0 pointer-events-none flex">
-        {[0, 1, 2, 3, 4, 5].map((i) => (
-          <div
-            key={i}
-            className="flex-1 border-l border-[var(--border-subtle)]/40 first:border-l-0"
-          />
-        ))}
-      </div>
-      {!hasSignal && active && !hasError ? (
-        <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
-          Listening…
-        </div>
-      ) : null}
-      {!active ? (
-        <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
-          Paused
-        </div>
-      ) : null}
-      {hasError && active ? (
-        <div className="absolute inset-0 flex items-center justify-center text-[10px] uppercase tracking-wide text-[var(--warning)]">
-          No signal
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function dbToPct(db?: number): number {
-  if (typeof db !== "number" || !Number.isFinite(db)) return 0;
-  const FLOOR = -60;
-  const CEIL = 0;
-  const clamped = Math.min(CEIL, Math.max(FLOOR, db));
-  return Math.round(((clamped - FLOOR) / (CEIL - FLOOR)) * 100);
-}
-
-function levelColor(db?: number): string {
-  if (typeof db !== "number") return "var(--border-subtle)";
-  if (db > -6) return "var(--danger, #ef4444)";
-  if (db > -18) return "var(--warning, #f59e0b)";
-  return "var(--success, #10b981)";
 }

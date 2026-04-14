@@ -152,13 +152,21 @@ app.whenReady().then(async () => {
   registerIpcHandlers();
   appLogger.info("App ready");
 
-  // Initialize SQLite database — seed from filesystem on first run.
+  // Initialize SQLite database. The seed is idempotent (INSERT OR IGNORE),
+  // so we run it unconditionally on every startup. This turns the
+  // filesystem into the source of truth and auto-heals the DB whenever
+  // any run folder exists on disk but is missing from SQLite — e.g., after
+  // a draft insert transaction rolled back, the user copied in runs from
+  // another machine, or a cloud-sync race briefly hid a folder.
   try {
     const db = getDb();
-    if (isEmptyDatabase(db)) {
-      const config = loadConfig();
-      const { resolveRunsPath } = await import("@meeting-notes/engine");
-      seedDbFromFilesystem(db, resolveRunsPath(config));
+    const config = loadConfig();
+    const { resolveRunsPath } = await import("@meeting-notes/engine");
+    const result = seedDbFromFilesystem(db, resolveRunsPath(config));
+    if (result.imported > 0) {
+      appLogger.info("Database healed from filesystem", {
+        detail: `imported ${result.imported} run(s) (${result.skipped} already present, ${result.errors.length} errors)`,
+      });
     }
   } catch (err) {
     // Non-fatal — the app works without existing data on first run.

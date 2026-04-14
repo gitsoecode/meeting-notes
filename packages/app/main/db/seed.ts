@@ -50,22 +50,47 @@ export function seedDbFromFilesystem(
   const insertAttachment = db.prepare("INSERT OR IGNORE INTO attachments (run_id, filename) VALUES (?, ?)");
   const insertSegment = db.prepare("INSERT OR IGNORE INTO recording_segments (run_id, segment_name, sort_order) VALUES (?, ?, ?)");
 
-  const seedAll = db.transaction(() => {
-    for (const folder of folders) {
-      let manifest: RunManifest;
-      try {
-        manifest = loadRunManifest(folder);
-      } catch (err) {
-        const msg = `Failed to parse ${folder}: ${err instanceof Error ? err.message : String(err)}`;
-        errors.push(msg);
-        continue;
-      }
+  // Coerce a manifest field to something better-sqlite3 can bind. The YAML
+  // parser used by gray-matter autoconverts ISO date strings into JS Date
+  // objects, which SQLite refuses ("can only bind numbers, strings,
+  // bigints, buffers, and null"). Convert Dates back to ISO strings, and
+  // map undefined → null defensively.
+  const bindable = (v: unknown): string | number | bigint | Buffer | null => {
+    if (v == null) return null;
+    if (v instanceof Date) return v.toISOString();
+    if (typeof v === "string" || typeof v === "number" || typeof v === "bigint") return v;
+    if (Buffer.isBuffer(v)) return v;
+    if (typeof v === "boolean") return v ? 1 : 0;
+    // Anything else (object, array) — stringify so we never throw inside the
+    // transaction. Better to round-trip imperfectly than to lose the row.
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return null;
+    }
+  };
 
+  // Insert each run independently rather than as a single big transaction,
+  // so one malformed manifest can't roll back the entire seed. Each row
+  // still uses INSERT OR IGNORE so re-runs are idempotent.
+  for (const folder of folders) {
+    let manifest: RunManifest;
+    try {
+      manifest = loadRunManifest(folder);
+    } catch (err) {
+      const msg = `Failed to parse ${folder}: ${err instanceof Error ? err.message : String(err)}`;
+      errors.push(msg);
+      continue;
+    }
+
+    try {
       const result = insertRun.run(
-        manifest.run_id, folder, manifest.title, manifest.description,
-        manifest.date, manifest.started, manifest.ended, manifest.status,
-        manifest.source_mode, manifest.duration_minutes, manifest.asr_provider,
-        manifest.llm_provider, manifest.scheduled_time,
+        bindable(manifest.run_id), bindable(folder), bindable(manifest.title),
+        bindable(manifest.description), bindable(manifest.date),
+        bindable(manifest.started), bindable(manifest.ended),
+        bindable(manifest.status), bindable(manifest.source_mode),
+        bindable(manifest.duration_minutes), bindable(manifest.asr_provider),
+        bindable(manifest.llm_provider), bindable(manifest.scheduled_time),
         manifest.selected_prompts ? JSON.stringify(manifest.selected_prompts) : null
       );
 
@@ -76,25 +101,27 @@ export function seedDbFromFilesystem(
 
       imported++;
 
-      // Prompt outputs (supports both old `sections` key and new `prompt_outputs`)
       for (const [id, state] of Object.entries(manifest.prompt_outputs)) {
         insertOutput.run(
-          manifest.run_id, id, state.status, state.filename,
-          state.label ?? null, state.builtin ? 1 : 0, state.error ?? null,
-          state.latency_ms ?? null, state.tokens_used ?? null, state.completed_at ?? null,
-          state.model ?? null
+          bindable(manifest.run_id), bindable(id), bindable(state.status),
+          bindable(state.filename), bindable(state.label),
+          state.builtin ? 1 : 0, bindable(state.error),
+          bindable(state.latency_ms), bindable(state.tokens_used),
+          bindable(state.completed_at), bindable(state.model)
         );
       }
 
-      for (const tag of manifest.tags) insertTag.run(manifest.run_id, tag);
-      for (const a of manifest.attachments) insertAttachment.run(manifest.run_id, a);
+      for (const tag of manifest.tags) insertTag.run(bindable(manifest.run_id), bindable(tag));
+      for (const a of manifest.attachments) insertAttachment.run(bindable(manifest.run_id), bindable(a));
       for (let i = 0; i < manifest.recording_segments.length; i++) {
-        insertSegment.run(manifest.run_id, manifest.recording_segments[i], i);
+        insertSegment.run(bindable(manifest.run_id), bindable(manifest.recording_segments[i]), i);
       }
+    } catch (err) {
+      const msg = `Failed to insert ${folder}: ${err instanceof Error ? err.message : String(err)}`;
+      errors.push(msg);
+      appLogger.warn("Seed: skipping bad manifest", { detail: msg });
     }
-  });
-
-  seedAll();
+  }
 
   const durationMs = Date.now() - start;
   appLogger.info("Database seed completed", {

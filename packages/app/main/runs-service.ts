@@ -202,12 +202,24 @@ function collectRunAudioFiles(runFolder: string, sourceMode: string) {
 
   const audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[] = [];
 
-  // Check for legacy flat layout first (mic.wav / system.wav directly in audio/)
-  const micPath = path.join(audioDir, "mic.wav");
-  const systemPath = path.join(audioDir, "system.wav");
-  if (fs.existsSync(micPath) || fs.existsSync(systemPath)) {
-    if (fs.existsSync(micPath)) audioFiles.push({ path: micPath, speaker: "me" });
-    if (fs.existsSync(systemPath)) audioFiles.push({ path: systemPath, speaker: "others" });
+  // Prefer the AEC-cleaned mic over the raw mic when it exists. The engine's
+  // processing job writes `mic.clean.wav` alongside `mic.wav` after removing
+  // re-captured system audio; reprocessing should read the cleaned file so
+  // speaker attribution stays consistent with the first run.
+  const preferredMic = (dir: string): string | null => {
+    const cleaned = path.join(dir, "mic.clean.wav");
+    if (fs.existsSync(cleaned)) return cleaned;
+    const raw = path.join(dir, "mic.wav");
+    if (fs.existsSync(raw)) return raw;
+    return null;
+  };
+
+  // Check for legacy flat layout first (mic[.clean].wav / system.wav in audio/)
+  const flatMic = preferredMic(audioDir);
+  const flatSystem = path.join(audioDir, "system.wav");
+  if (flatMic || fs.existsSync(flatSystem)) {
+    if (flatMic) audioFiles.push({ path: flatMic, speaker: "me" });
+    if (fs.existsSync(flatSystem)) audioFiles.push({ path: flatSystem, speaker: "others" });
     return audioFiles;
   }
 
@@ -219,9 +231,9 @@ function collectRunAudioFiles(runFolder: string, sourceMode: string) {
 
   for (const segDir of segmentDirs) {
     const segPath = path.join(audioDir, segDir.name);
-    const segMic = path.join(segPath, "mic.wav");
+    const segMic = preferredMic(segPath);
     const segSystem = path.join(segPath, "system.wav");
-    if (fs.existsSync(segMic)) audioFiles.push({ path: segMic, speaker: "me" });
+    if (segMic) audioFiles.push({ path: segMic, speaker: "me" });
     if (fs.existsSync(segSystem)) audioFiles.push({ path: segSystem, speaker: "others" });
   }
   if (audioFiles.length > 0) return audioFiles;

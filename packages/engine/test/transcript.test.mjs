@@ -4,6 +4,7 @@ import {
   formatTranscriptMarkdown,
   buildSpeakerExcerpts,
   buildTranscriptForLlm,
+  dedupOverlappingSpeakers,
 } from "../dist/core/transcript.js";
 
 // ---- formatTranscriptMarkdown ----
@@ -143,4 +144,80 @@ test("buildTranscriptForLlm: falls back to fullText when no segments", () => {
     durationMs: 5000,
   };
   assert.equal(buildTranscriptForLlm(result), "Raw fallback for LLM");
+});
+
+// ---- dedupOverlappingSpeakers ----
+
+test("dedupOverlappingSpeakers: drops me-segment that near-matches a concurrent others segment", () => {
+  const result = {
+    segments: [
+      { start_ms: 1000, end_ms: 4000, text: "We should ship the feature next week.", speaker: "others" },
+      // Mic re-captured the speaker almost verbatim, slightly offset.
+      { start_ms: 1100, end_ms: 4100, text: "we should ship the feature next week", speaker: "me" },
+      { start_ms: 5000, end_ms: 7000, text: "Sounds good to me.", speaker: "me" },
+    ],
+    fullText: "",
+    provider: "test",
+    durationMs: 7000,
+  };
+  const deduped = dedupOverlappingSpeakers(result);
+  const meTexts = deduped.segments.filter((s) => s.speaker === "me").map((s) => s.text);
+  assert.deepEqual(meTexts, ["Sounds good to me."], "bled me-segment should be dropped");
+  assert.equal(deduped.segments.length, 2);
+});
+
+test("dedupOverlappingSpeakers: keeps me-segment when texts differ despite overlap", () => {
+  const result = {
+    segments: [
+      { start_ms: 1000, end_ms: 4000, text: "We should ship the feature next week.", speaker: "others" },
+      { start_ms: 1500, end_ms: 3500, text: "I disagree, that seems too fast.", speaker: "me" },
+    ],
+    fullText: "",
+    provider: "test",
+    durationMs: 4000,
+  };
+  const deduped = dedupOverlappingSpeakers(result);
+  assert.equal(deduped.segments.length, 2, "different text at same time should not be dropped");
+});
+
+test("dedupOverlappingSpeakers: keeps non-overlapping identical text", () => {
+  const result = {
+    segments: [
+      { start_ms: 0, end_ms: 2000, text: "Let's get started on the plan.", speaker: "others" },
+      // Identical phrase but >> tolerance later; speakers happened to echo.
+      { start_ms: 30000, end_ms: 32000, text: "Let's get started on the plan.", speaker: "me" },
+    ],
+    fullText: "",
+    provider: "test",
+    durationMs: 32000,
+  };
+  const deduped = dedupOverlappingSpeakers(result);
+  assert.equal(deduped.segments.length, 2, "non-overlapping duplicates should be preserved");
+});
+
+test("dedupOverlappingSpeakers: keeps short fillers even when overlapping", () => {
+  const result = {
+    segments: [
+      { start_ms: 1000, end_ms: 1500, text: "yeah", speaker: "others" },
+      { start_ms: 1100, end_ms: 1600, text: "yeah", speaker: "me" },
+    ],
+    fullText: "",
+    provider: "test",
+    durationMs: 2000,
+  };
+  const deduped = dedupOverlappingSpeakers(result);
+  assert.equal(deduped.segments.length, 2, "short fillers below min-length should not be dedup'd");
+});
+
+test("dedupOverlappingSpeakers: no-op when no others segments", () => {
+  const result = {
+    segments: [
+      { start_ms: 0, end_ms: 3000, text: "Solo thinking aloud here.", speaker: "me" },
+    ],
+    fullText: "Solo thinking aloud here.",
+    provider: "test",
+    durationMs: 3000,
+  };
+  const deduped = dedupOverlappingSpeakers(result);
+  assert.equal(deduped, result, "should return the same object when nothing to compare against");
 });

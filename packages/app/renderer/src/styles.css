@@ -214,33 +214,6 @@ button.ui-switch[data-state="checked"] > .ui-switch-thumb {
   transform: translateX(16px);
 }
 
-.audio-meter {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.audio-meter-track {
-  flex: 1;
-  height: 6px;
-  background: var(--bg-tertiary);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.audio-meter-fill {
-  height: 100%;
-  background: var(--success);
-  transition: width 60ms linear;
-}
-
-.audio-meter-label {
-  min-width: 80px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  text-align: right;
-}
-
 .loading-splash {
   display: grid;
   place-items: center;

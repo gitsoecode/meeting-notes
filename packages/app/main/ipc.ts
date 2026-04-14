@@ -41,6 +41,8 @@ import {
   type PipelineProgressEvent,
   type RunManifest,
 } from "@meeting-notes/engine";
+
+const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { startAudioMonitor, stopAudioMonitor } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
@@ -153,7 +155,14 @@ function dtoToConfig(dto: AppConfigDTO): AppConfig {
     claude: dto.claude,
     openai: dto.openai,
     ollama: dto.ollama,
-    recording: dto.recording,
+    // The renderer DTO only surfaces user-visible recording fields; fill in
+    // engine-internal defaults for AEC + dedup (both on by default).
+    recording: {
+      mic_device: dto.recording.mic_device,
+      system_device: dto.recording.system_device,
+      aec_enabled: true,
+      dedup_me_against_others: true,
+    },
     shortcuts: dto.shortcuts,
     chat_launcher: dto.chat_launcher,
     audio_retention_days: dto.audio_retention_days,
@@ -401,7 +410,12 @@ export function registerIpcHandlers(): void {
         base_url: "http://127.0.0.1:11434",
         model: req.ollama_model ?? "qwen3.5:9b",
       },
-      recording: { mic_device: micDevice, system_device: systemDevice },
+      recording: {
+        mic_device: micDevice,
+        system_device: systemDevice,
+        aec_enabled: true,
+        dedup_me_against_others: true,
+      },
       shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },
       audio_retention_days: req.audio_retention_days ?? null,
     };
@@ -989,7 +1003,25 @@ export function registerIpcHandlers(): void {
       req.description ?? null,
       { scheduledTime: req.scheduledTime ?? null, quiet: true }
     );
-    getStore().insertRun(context.manifest, context.folderPath);
+    try {
+      getStore().insertRun(context.manifest, context.folderPath);
+    } catch (err) {
+      // Insert failure is the documented "drafts appear then vanish" path.
+      // Log the error so future occurrences are visible instead of silent,
+      // and surface it to the renderer so the UI can react rather than
+      // showing a ghost card.
+      const detail = err instanceof Error ? err.message : String(err);
+      appLogger.error("runs:create-draft insertRun failed", {
+        runId: context.manifest.run_id,
+        runFolder: context.folderPath,
+        detail,
+      });
+      throw err;
+    }
+    appLogger.info("Draft created", {
+      runId: context.manifest.run_id,
+      runFolder: context.folderPath,
+    });
     return { run_folder: context.folderPath, run_id: context.manifest.run_id };
   });
 

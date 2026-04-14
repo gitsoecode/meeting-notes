@@ -6,6 +6,20 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 export interface RecordingConfig {
   mic_device: string;
   system_device: string;
+  /**
+   * When true (default), the processing pipeline runs an ffmpeg sidechain-based
+   * suppression pass over the mic track using the aligned system-audio track
+   * as the reference signal, producing `audio/mic.clean.wav`. The cleaned mic
+   * then drives ASR and the combined playback file. Disable to keep the raw
+   * mic behaviour (useful while tuning the filter graph).
+   */
+  aec_enabled: boolean;
+  /**
+   * When true (default), transcript segments attributed to `me` that
+   * near-textually match a concurrent `others` segment are dropped. This
+   * catches residual system-audio bleed that survives AEC.
+   */
+  dedup_me_against_others: boolean;
 }
 
 export interface WhisperLocalConfig {
@@ -119,6 +133,8 @@ const DEFAULT_CONFIG: AppConfig = {
   recording: {
     mic_device: "default",
     system_device: "", // Deprecated: system audio is now captured automatically via AudioTee
+    aec_enabled: true,
+    dedup_me_against_others: true,
   },
   shortcuts: {
     toggle_recording: "CommandOrControl+Shift+M",

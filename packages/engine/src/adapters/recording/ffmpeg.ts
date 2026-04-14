@@ -79,6 +79,7 @@ export class FfmpegRecorder implements Recorder {
 
     // Start mic recording via ffmpeg
     const micPath = path.join(audioDir, "mic.wav");
+    const micStartedAtMs = Date.now();
     const micChild = spawnFfmpegRecord(micDevice, micPath, this.logger);
 
     // Start system audio capture via AudioTee (macOS 14.2+, no BlackHole needed)
@@ -116,6 +117,10 @@ export class FfmpegRecorder implements Recorder {
         system: systemPath,
       },
       systemCaptured,
+      captureMeta: {
+        micStartedAtMs,
+        systemStartedAtMs: audioTeeSession?.startedAtMs,
+      },
       stop: async () => {
         // Stop mic (ffmpeg) via SIGINT
         if (micChild.pid && !micChild.killed) {

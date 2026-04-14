@@ -32,6 +32,12 @@ export interface AudioTeeSession {
   started: boolean;
   /** Path to the final system.wav (written on stop). */
   systemPath: string;
+  /**
+   * Wall-clock ms when the AudioTee capture call returned — used as a coarse
+   * start-time hint for cross-correlation alignment between the mic and
+   * system tracks. Only set when `started` is true.
+   */
+  startedAtMs?: number;
   /** Stop recording and finalize the WAV file. */
   stop(): Promise<void>;
 }
@@ -56,6 +62,7 @@ export async function startAudioTeeCapture(
   let totalBytes = 0;
   let started = false;
   let stopped = false;
+  let startedAtMs: number | undefined;
 
   try {
     tee = new AudioTee({ sampleRate, binaryPath: opts.binaryPath });
@@ -74,6 +81,7 @@ export async function startAudioTeeCapture(
 
     await tee.start();
     started = true;
+    startedAtMs = Date.now();
   } catch (err) {
     // Permission denied, binary not found, macOS too old, etc.
     opts.onError?.(err instanceof Error ? err : new Error(String(err)));
@@ -87,6 +95,7 @@ export async function startAudioTeeCapture(
   return {
     started,
     systemPath,
+    startedAtMs,
     stop: async () => {
       if (stopped) return;
       stopped = true;

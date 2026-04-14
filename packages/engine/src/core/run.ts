@@ -66,8 +66,17 @@ function formatRunFolderName(date: Date, title: string): string {
   const d = String(date.getDate()).padStart(2, "0");
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
-  const safeTitle = title.replace(/[/\\:*?"<>|]/g, "-").trim();
-  return `${y}-${m}-${d}_${hh}-${mm} ${safeTitle}`;
+  // macOS silently strips trailing dots and spaces from folder names when the
+  // directory is created, so a manifest path ending in `.` ends up pointing
+  // at a folder without that dot. Strip both here so the path we persist
+  // matches what lands on disk. Also normalize runs of whitespace.
+  const safeTitle = title
+    .replace(/[/\\:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.\s]+$/, "");
+  const base = `${y}-${m}-${d}_${hh}-${mm}`;
+  return safeTitle ? `${base} ${safeTitle}` : base;
 }
 
 function getNotesTemplate(config: AppConfig): string {
