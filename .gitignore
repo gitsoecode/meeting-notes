@@ -3,6 +3,7 @@ dist/
 *.tsbuildinfo
 .DS_Store
 .claude/settings.local.json
+docs/private_plans/
 
 # Build & test artifacts
 packages/app/build/
