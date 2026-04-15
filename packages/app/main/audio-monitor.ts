@@ -63,6 +63,13 @@ interface ChannelState {
 
 interface MonitorSession {
   stop: () => Promise<void>;
+  /**
+   * Swap the mic source without tearing down the AudioTee capture. Avoids
+   * a full monitor restart (which briefly surfaces the system-audio channel
+   * as "no signal" while AudioTee respawns) when the only thing the user
+   * changed is the mic dropdown.
+   */
+  switchMic: (micDevice: string) => Promise<void>;
 }
 
 let activeSession: MonitorSession | null = null;
@@ -109,32 +116,17 @@ function accumulateS16LE(buf: Buffer, state: ChannelState): void {
   }
 }
 
-/**
- * Decide whether a channel is "stuck at zero" — i.e., we've received enough
- * data that if the permission were granted we'd have seen at least some
- * natural noise floor. A real mic/system-audio tap is ~never 100% exact
- * zeros for several seconds (even ambient room tone has jitter).
- */
-function hasPermissionIssue(state: ChannelState): boolean {
-  const elapsedMs = Date.now() - state.startedAt;
-  // Wait at least 1.5s before declaring; some taps take a moment to start.
-  if (elapsedMs < 1500) return false;
-  // Need a meaningful sample population.
-  if (state.totalSamples < 8000) return false;
-  // All bytes so far literally zero → permission missing / muted source.
-  return state.zeroSampleCount === state.totalSamples;
-}
-
 function drainChannel(state: ChannelState): AudioMonitorLevel {
   if (!state.active) {
     return silenceLevel(state.source, state.error);
   }
-  // Promote silent-zeros to a real error so the UI can surface a fix.
-  if (!state.permissionIssue && hasPermissionIssue(state)) {
-    state.permissionIssue = "system-audio-tcc";
-    state.error =
-      'No audio detected. Grant "System Audio Recording" permission in System Settings → Privacy & Security → Screen & System Audio Recording.';
-  }
+  // We intentionally no longer infer a permission issue from the
+  // all-zero-samples signal here. Bluetooth route changes and output-device
+  // switches briefly produce runs of exact zeros that used to trip the
+  // heuristic and surface a false "System Audio Recording permission needed"
+  // banner. Authoritative permission status comes from the OS probe exposed
+  // via `system:get-audio-permissions`, and a user-initiated "Diagnose audio"
+  // dialog re-uses `recording:test-audio` for a deliberate signal check.
   const { peakDb, rmsDb } = computeDb(state.peakSq, state.sumSq, state.sampleCount);
   state.peakSq = 0;
   state.sumSq = 0;
@@ -208,16 +200,19 @@ export async function startAudioMonitor(options: {
   };
 
   // ---- Mic capture via ffmpeg → stdout raw PCM ----
-  let micChild: ChildProcess | null = null;
-  if (micDevice) {
+  // `micChildRef.current` lets us swap the ffmpeg child without rebuilding
+  // the whole session, so switching mic dropdowns doesn't blip the system
+  // audio meter through an AudioTee restart.
+  const micChildRef: { current: ChildProcess | null } = { current: null };
+  const spawnMicChild = (device: string): void => {
     try {
-      micChild = spawn(
+      const child = spawn(
         "ffmpeg",
         [
           "-hide_banner",
           "-loglevel", "error",
           "-f", "avfoundation",
-          "-i", `:${micDevice}`,
+          "-i", `:${device}`,
           "-ac", "1",
           "-ar", "16000",
           "-f", "s16le",
@@ -227,31 +222,67 @@ export async function startAudioMonitor(options: {
       );
 
       let stderrTail = "";
-      micChild.stderr?.on("data", (chunk: Buffer) => {
+      child.stderr?.on("data", (chunk: Buffer) => {
         stderrTail = (stderrTail + chunk.toString()).slice(-500);
       });
 
-      micChild.stdout?.on("data", (chunk: Buffer) => {
+      child.stdout?.on("data", (chunk: Buffer) => {
         accumulateS16LE(chunk, micState);
       });
 
-      micChild.on("exit", (code, signal) => {
+      child.on("exit", (code, signal) => {
         if (code !== 0 && code !== null && signal !== "SIGINT" && signal !== "SIGTERM") {
-          micState.active = false;
-          micState.error = `ffmpeg exited with code ${code}: ${stderrTail.trim()}`;
+          if (micChildRef.current === child) {
+            micState.active = false;
+            micState.error = `ffmpeg exited with code ${code}: ${stderrTail.trim()}`;
+          }
         }
       });
 
-      micChild.on("error", (err) => {
-        micState.active = false;
-        micState.error = err.message;
+      child.on("error", (err) => {
+        if (micChildRef.current === child) {
+          micState.active = false;
+          micState.error = err.message;
+        }
       });
 
+      micChildRef.current = child;
       micState.active = true;
+      micState.error = undefined;
+      micState.source = device;
     } catch (err) {
       micState.active = false;
       micState.error = err instanceof Error ? err.message : String(err);
     }
+  };
+  const killMicChild = async (): Promise<void> => {
+    const child = micChildRef.current;
+    micChildRef.current = null;
+    if (!child || !child.pid || child.killed) return;
+    try {
+      process.kill(child.pid, "SIGINT");
+    } catch {
+      // already gone
+    }
+    await new Promise<void>((resolve) => {
+      const timeout = setTimeout(() => {
+        if (child.pid && !child.killed) {
+          try {
+            process.kill(child.pid, "SIGKILL");
+          } catch {
+            // ignore
+          }
+        }
+        resolve();
+      }, 1000);
+      child.once("exit", () => {
+        clearTimeout(timeout);
+        resolve();
+      });
+    });
+  };
+  if (micDevice) {
+    spawnMicChild(micDevice);
   } else {
     micState.error = "No microphone available";
   }
@@ -299,30 +330,7 @@ export async function startAudioMonitor(options: {
     stop: async () => {
       clearInterval(emitTimer);
 
-      if (micChild && micChild.pid && !micChild.killed) {
-        try {
-          process.kill(micChild.pid, "SIGINT");
-        } catch {
-          // already gone
-        }
-        // Give it a moment to clean up, then SIGKILL if needed.
-        await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => {
-            if (micChild && micChild.pid && !micChild.killed) {
-              try {
-                process.kill(micChild.pid, "SIGKILL");
-              } catch {
-                // ignore
-              }
-            }
-            resolve();
-          }, 1000);
-          micChild!.once("exit", () => {
-            clearTimeout(timeout);
-            resolve();
-          });
-        });
-      }
+      await killMicChild();
 
       if (tee) {
         try {
@@ -338,7 +346,45 @@ export async function startAudioMonitor(options: {
         system: silenceLevel(systemState.source),
       } satisfies AudioMonitorSnapshot);
     },
+    switchMic: async (nextDevice: string) => {
+      // Resolve "default" the same way the initial start did.
+      let resolved = nextDevice;
+      if (!resolved || resolved.trim() === "" || resolved === "default") {
+        resolved = pickPhysicalMic(options.availableDevices);
+      }
+      if (resolved === micState.source && micChildRef.current && !micChildRef.current.killed) {
+        return;
+      }
+      await killMicChild();
+      // Reset per-channel accumulators so stale counts from the previous
+      // device don't bleed into the new one.
+      micState.peakSq = 0;
+      micState.sumSq = 0;
+      micState.sampleCount = 0;
+      micState.totalBytes = 0;
+      micState.zeroSampleCount = 0;
+      micState.totalSamples = 0;
+      micState.startedAt = Date.now();
+      if (resolved) {
+        spawnMicChild(resolved);
+      } else {
+        micState.active = false;
+        micState.error = "No microphone available";
+        micState.source = "(no microphone)";
+      }
+    },
   };
+}
+
+/**
+ * Swap the mic source on the active monitor without tearing down AudioTee.
+ * Returns `true` if a live session handled the swap, `false` if there was no
+ * active monitor (caller should fall back to a fresh start).
+ */
+export async function switchMonitorMic(micDevice: string): Promise<boolean> {
+  if (!activeSession) return false;
+  await activeSession.switchMic(micDevice);
+  return true;
 }
 
 export async function stopAudioMonitor(): Promise<void> {

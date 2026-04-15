@@ -85,6 +85,12 @@ export async function reprocessRun(
       baseUrl: config.ollama.base_url,
     });
   }
+
+  // Flip to "processing" once all preflight checks have passed. The terminal
+  // status (complete/error) is written again at end-of-run below, so the list
+  // chip reflects in-flight state instead of the prior error/complete label.
+  updateRunStatus(runFolder, "processing", {}, store);
+
   const transcriptPath = resolveRunDocumentPath(runFolder, RUN_TRANSCRIPT_FILE, config);
   const notesPath = resolveRunDocumentPath(runFolder, RUN_NOTES_FILE, config);
   const transcript = fs.existsSync(transcriptPath)
@@ -130,32 +136,41 @@ export async function reprocessRun(
     })),
   });
 
-  const results = await runPipeline(
-    config,
-    runFolder,
-    {
-      transcript,
-      manualNotes: notes,
-      title: manifest.title,
-      date: manifest.date,
-      meExcerpts: "",
-      othersExcerpts: "",
-      prepNotes,
-      attachmentContext,
-    },
-    llmCall,
-    logger,
-    {
-      onlyIds: req.onlyIds,
-      onlyFailed: req.onlyFailed,
-      skipComplete: req.skipComplete,
-      autoOnly: req.autoOnly,
-      onProgress,
-      signal,
-      plannedPrompts,
-      store,
-    }
-  );
+  let results;
+  try {
+    results = await runPipeline(
+      config,
+      runFolder,
+      {
+        transcript,
+        manualNotes: notes,
+        title: manifest.title,
+        date: manifest.date,
+        meExcerpts: "",
+        othersExcerpts: "",
+        prepNotes,
+        attachmentContext,
+      },
+      llmCall,
+      logger,
+      {
+        onlyIds: req.onlyIds,
+        onlyFailed: req.onlyFailed,
+        skipComplete: req.skipComplete,
+        autoOnly: req.autoOnly,
+        onProgress,
+        signal,
+        plannedPrompts,
+        store,
+      }
+    );
+  } catch (err) {
+    // Pipeline threw before completing — we set status to "processing" at
+    // kickoff so we must flip it back to "error" to avoid a permanent
+    // phantom-processing row.
+    updateRunStatus(runFolder, "error", { ended: new Date().toISOString() }, store);
+    throw err;
+  }
 
   // Free Ollama model memory now that all prompts are done.
   if (config.llm_provider === "ollama") {

@@ -222,24 +222,26 @@ button.ui-switch[data-state="checked"] > .ui-switch-thumb {
 
 /* Milkdown Crepe Editor Overrides */
 .markdown-editor {
+  display: flex;
+  flex-direction: column;
   height: 100%;
   width: 100%;
-  overflow-y: auto;
+  min-height: 0;
 }
 
 .markdown-editor .milkdown {
-  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
   border: none !important;
   box-shadow: none !important;
   background: transparent !important;
-  overflow: hidden;
+  overflow-y: auto;
 }
 
 .markdown-editor .milkdown .editor {
   padding: 1.25rem 1.5rem !important;
   max-width: 100% !important;
-  min-height: 100%;
 }
 
 .markdown-editor .milkdown .editor p {

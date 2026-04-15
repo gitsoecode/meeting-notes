@@ -34,6 +34,11 @@ export function MarkdownEditor({
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   const lastEmittedRef = useRef<string>(value);
+  // Tracks whether a destroy→recreate cycle is pending so a second value
+  // change mid-cycle can't spawn a parallel recreate (which caused the
+  // Milkdown "context not found" throws we were seeing in the logs).
+  const pendingReseedRef = useRef<string | null>(null);
+  const unmountedRef = useRef(false);
 
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
@@ -43,6 +48,8 @@ export function MarkdownEditor({
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
+
+    unmountedRef.current = false;
 
     const crepe = new Crepe({ root, defaultValue: value });
     crepe.on((api) => {
@@ -59,8 +66,12 @@ export function MarkdownEditor({
     void crepe.create();
 
     return () => {
-      void crepe.destroy();
+      unmountedRef.current = true;
+      const toDestroy = crepeRef.current;
       crepeRef.current = null;
+      // Milkdown can throw "context not found" when a ctx.get is in-flight as
+      // the editor tears down. That's benign during unmount — swallow it.
+      void toDestroy?.destroy().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -73,11 +84,24 @@ export function MarkdownEditor({
     if (!rootRef.current) return;
     if (value === lastEmittedRef.current) return;
 
+    // If a reseed is already in flight, just record the latest target value
+    // and let that cycle pick it up when it finishes destroying.
+    if (pendingReseedRef.current !== null) {
+      pendingReseedRef.current = value;
+      return;
+    }
+
+    pendingReseedRef.current = value;
+
     const oldCrepe = crepeRef.current;
     const root = rootRef.current;
-    const seedValue = value;
 
     const recreate = () => {
+      const seedValue = pendingReseedRef.current ?? value;
+      pendingReseedRef.current = null;
+      if (unmountedRef.current) return;
+      if (!rootRef.current || rootRef.current !== root) return;
+
       const next = new Crepe({ root, defaultValue: seedValue });
       next.on((api) => {
         api.markdownUpdated((_ctx, markdown) => {
@@ -95,7 +119,9 @@ export function MarkdownEditor({
     };
 
     if (oldCrepe) {
-      void oldCrepe.destroy().then(recreate);
+      crepeRef.current = null;
+      // Swallow ctx-not-found thrown during teardown; it's benign here.
+      void oldCrepe.destroy().catch(() => {}).then(recreate);
     } else {
       recreate();
     }

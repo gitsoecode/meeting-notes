@@ -44,7 +44,7 @@ import {
 
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
-import { startAudioMonitor, stopAudioMonitor } from "./audio-monitor.js";
+import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware, isSystemAudioSupported } from "./system.js";
@@ -540,6 +540,27 @@ export function registerIpcHandlers(): void {
     await stopAudioMonitor();
   });
 
+  ipcMain.handle(
+    "audio-monitor:switch-mic",
+    async (_e, req: { micDevice: string }) => {
+      // Light path used when the user just picked a different mic in the
+      // dropdown — avoids the AudioTee restart that surfaces as a flicker
+      // on the system-audio meter/banner.
+      const handled = await switchMonitorMic(req.micDevice);
+      if (!handled) {
+        const config = loadConfig();
+        invalidateDeviceCache();
+        const devices = await getCachedAudioDevices();
+        await startAudioMonitor({
+          micDevice: req.micDevice || config.recording.mic_device,
+          availableDevices: devices,
+        });
+        return devices.map((name) => ({ name }));
+      }
+      return null;
+    }
+  );
+
   ipcMain.handle("system:open-audio-permission-pane", async () => {
     // Deep-link into System Settings → Privacy & Security → Screen & System
     // Audio Recording. This is where the "System Audio Recording Only" list
@@ -622,6 +643,21 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("system:get-microphone-permission", async () => {
     if (process.platform !== "darwin") return { status: "granted" as const };
     return { status: systemPreferences.getMediaAccessStatus("microphone") };
+  });
+
+  ipcMain.handle("system:get-audio-permissions", async () => {
+    // Fast, authoritative read of the OS-level permission statuses. Does not
+    // spawn AudioTee or ffmpeg — safe to call on every mount / route change.
+    // macOS 14.2+ treats the "System Audio Recording Only" TCC as part of the
+    // Screen Recording family, which is what `getMediaAccessStatus('screen')`
+    // reports, so we use it as the system-audio proxy.
+    if (process.platform !== "darwin") {
+      return { microphone: "granted" as const, systemAudio: "granted" as const };
+    }
+    return {
+      microphone: systemPreferences.getMediaAccessStatus("microphone"),
+      systemAudio: systemPreferences.getMediaAccessStatus("screen"),
+    };
   });
 
   ipcMain.handle("system:probe-system-audio-permission", async () => {

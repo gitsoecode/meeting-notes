@@ -49,9 +49,12 @@ const api: MeetingNotesApi = {
     continueRecording: (req: ContinueRecordingRequest) =>
       ipcRenderer.invoke("recording:continue", req),
     listAudioDevices: () => ipcRenderer.invoke("recording:list-audio-devices"),
+    testAudio: () => ipcRenderer.invoke("recording:test-audio"),
     startAudioMonitor: (req?: { micDevice?: string }) =>
       ipcRenderer.invoke("audio-monitor:start", req),
     stopAudioMonitor: () => ipcRenderer.invoke("audio-monitor:stop"),
+    switchAudioMonitorMic: (micDevice: string) =>
+      ipcRenderer.invoke("audio-monitor:switch-mic", { micDevice }),
   },
   runs: {
     list: () => ipcRenderer.invoke("runs:list"),
@@ -151,6 +154,8 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("system:get-microphone-permission"),
     probeSystemAudioPermission: () =>
       ipcRenderer.invoke("system:probe-system-audio-permission"),
+    getAudioPermissions: () =>
+      ipcRenderer.invoke("system:get-audio-permissions"),
   },
   logs: {
     tailApp: (lines) => ipcRenderer.invoke("logs:tail-app", lines),

@@ -328,6 +328,28 @@ export interface AudioMonitorSnapshot {
   system: AudioMonitorLevel;
 }
 
+/** One channel of {@link AudioTestReport}. */
+export interface AudioTestChannelResult {
+  deviceName: string;
+  role: "mic" | "system";
+  found: boolean;
+  recorded: boolean;
+  fileSizeBytes: number;
+  durationSeconds: number;
+  meanVolumeDb: number;
+  maxVolumeDb: number;
+  isSilent: boolean;
+  error?: string;
+}
+
+/** Return value of `api.recording.testAudio()`. */
+export interface AudioTestReport {
+  devices: string[];
+  micDevice: string;
+  systemDevice: string;
+  results: AudioTestChannelResult[];
+}
+
 /** @deprecated BlackHole is no longer required — system audio is captured via AudioTee. */
 export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 
@@ -503,6 +525,13 @@ export interface MeetingNotesApi {
     continueRecording: (req: ContinueRecordingRequest) => Promise<{ run_folder: string; run_id: string }>;
     listAudioDevices: () => Promise<AudioDevice[]>;
     /**
+     * Run the engine's `testAudioCapture` helper: records ~4 s on mic and
+     * AudioTee, returns per-channel volume stats so the UI can tell the
+     * user whether each channel actually heard something. Used by the
+     * "Diagnose audio" action in Settings → Audio.
+     */
+    testAudio: () => Promise<AudioTestReport>;
+    /**
      * Start the live audio-level monitor (Settings → Audio meter).
      * Accepts an optional `micDevice` override so the meter can follow
      * the dropdown selection without requiring a config save first.
@@ -511,6 +540,13 @@ export interface MeetingNotesApi {
     startAudioMonitor: (req?: { micDevice?: string }) => Promise<AudioDevice[]>;
     /** Stop the live audio-level monitor. */
     stopAudioMonitor: () => Promise<void>;
+    /**
+     * Swap the mic source on the active monitor without restarting AudioTee.
+     * Returns the refreshed device list when no monitor was running and the
+     * call had to start one from scratch; returns `null` when the live
+     * session handled the swap in place.
+     */
+    switchAudioMonitorMic: (micDevice: string) => Promise<AudioDevice[] | null>;
   };
   // Runs
   runs: {
@@ -636,6 +672,16 @@ export interface MeetingNotesApi {
       | { status: "unsupported" }
       | { status: "failed"; error: string }
     >;
+    /**
+     * Fast OS-level read of mic + system-audio permission. Does not spawn
+     * any capture processes. macOS 14.2+ "System Audio Recording Only" TCC
+     * is part of the Screen Recording family, which is what `screen`
+     * reports on.
+     */
+    getAudioPermissions: () => Promise<{
+      microphone: "granted" | "denied" | "not-determined" | "restricted" | "unknown";
+      systemAudio: "granted" | "denied" | "not-determined" | "restricted" | "unknown";
+    }>;
   };
   // Logs
   logs: {

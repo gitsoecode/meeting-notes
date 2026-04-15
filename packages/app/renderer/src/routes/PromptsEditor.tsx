@@ -518,8 +518,8 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
                 </AccordionItem>
               </Accordion>
 
-              <div className="flex-1 bg-white p-6">
-                <div className="h-full overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-white shadow-sm focus-within:ring-1 focus-within:ring-[var(--accent)]/30">
+              <div className="flex min-h-0 flex-1 bg-white p-6">
+                <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--border-subtle)] bg-white shadow-sm focus-within:ring-1 focus-within:ring-[var(--accent)]/30">
                   <MarkdownEditor value={draftBody} onChange={setDraftBody} className="h-full" />
                 </div>
               </div>
