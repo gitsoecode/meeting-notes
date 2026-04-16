@@ -80,6 +80,7 @@ import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Spinner } from "../components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { getDefaultPromptModel, getPromptModelSummary } from "../lib/prompt-metadata";
+import { stripFrontmatter } from "../lib/utils";
 import { findModelEntry } from "../../../shared/llm-catalog";
 
 // ---------------------------------------------------------------------------
@@ -929,6 +930,29 @@ export function MeetingWorkspace({
         actions={headerActions}
       />
 
+      {detail.status === "error" && !showPipelineStatus && (() => {
+        const failedOutputs = Object.entries(detail.manifest?.prompt_outputs ?? {})
+          .filter(([, output]) => output?.status === "failed" && output.error)
+          .map(([id, output]) => ({ id, label: output.label ?? id, error: output.error! }));
+        if (failedOutputs.length === 0) return null;
+        return (
+          <div className="flex items-start gap-3 rounded-lg border border-[color:rgba(185,28,28,0.18)] bg-[rgba(185,28,28,0.06)] px-4 py-3 text-sm text-[var(--error)]">
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-1">
+              {failedOutputs.map(({ id, label, error }) => (
+                <div key={id}>
+                  <span className="font-medium">{label}</span>{" "}
+                  failed: {error}
+                </div>
+              ))}
+              <div className="mt-2 text-xs text-[var(--text-secondary)]">
+                Use Reprocess to retry the failed step(s).
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ---- Focused recording view — side-by-side prep + notes ---- */}
       {isLive && focusedRecording ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
@@ -1141,17 +1165,24 @@ export function MeetingWorkspace({
           {(isDraft || isLive) ? (
             <EmptyTabContent message="Summary will be generated after recording." />
           ) : isProcessing ? (
-            <div className="min-h-0 space-y-4">{pipelineStatusContent}<EmptyTabContent message="Summary is being generated…" /></div>
-          ) : (
-            <div className="min-h-0 space-y-4">
+            <div className="space-y-4">{pipelineStatusContent}<EmptyTabContent message="Summary is being generated…" /></div>
+          ) : hasSummaryContent ? (
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
               {pipelineStatusContent}
-              {hasSummaryContent ? (
-                <div className="flex-1 min-h-0 rounded-md border border-[var(--border-default)] bg-white">
-                  <MarkdownEditor value={summaryContent} onChange={() => {}} readOnly />
+              <div className="relative flex min-h-0 flex-1 flex-col rounded-md border border-[var(--border-default)] bg-white">
+                <div className="flex-1 min-h-0">
+                  <MarkdownEditor
+                    value={stripFrontmatter(summaryContent)}
+                    onChange={() => {}}
+                    readOnly
+                  />
                 </div>
-              ) : (
-                <EmptyTabContent message="No summary has been generated yet." />
-              )}
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {pipelineStatusContent}
+              <EmptyTabContent message="No summary has been generated yet." />
             </div>
           )}
         </TabsContent>

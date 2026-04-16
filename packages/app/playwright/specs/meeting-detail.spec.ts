@@ -28,6 +28,9 @@ test.describe("Meeting Workspace", () => {
 
     await meetingDetail.tab("Summary").click();
     await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
+    await expect(page.getByText("Highlights")).toBeVisible();
+    // Frontmatter must not leak into the rendered editor
+    await expect(page.getByText("source: mock")).toHaveCount(0);
 
     await meetingDetail.tab("Analysis").click();
     await expect(meetingDetail.promptSidebarItem("Decision Log")).toBeVisible();
