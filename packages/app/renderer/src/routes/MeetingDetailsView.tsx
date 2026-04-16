@@ -190,23 +190,28 @@ function PrepOrNotesPreview({
   onEdit: () => void;
 }) {
   if (!source.trim()) return null;
+  const wordCount = source.trim().split(/\s+/).length;
+  
   return (
     <div className="space-y-2">
-      <div className="flex items-baseline justify-between gap-4">
-        <span className="text-sm font-medium text-[var(--text-primary)]">{label}</span>
+      <span className="text-sm font-medium text-[var(--text-primary)]">{label}</span>
+      <div className="flex items-center justify-between rounded-md border border-[var(--border-subtle)] bg-white px-4 py-3 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[var(--bg-secondary)] border border-[var(--border-subtle)]">
+            <span className="text-xs font-semibold text-[var(--text-secondary)]">{wordCount > 999 ? "1k+" : wordCount}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-[var(--text-primary)]">{wordCount === 1 ? "1 word" : `${wordCount} words`}</span>
+            <span className="text-xs text-[var(--text-secondary)]">Saved in workspace</span>
+          </div>
+        </div>
         <button
           type="button"
           onClick={onEdit}
-          className="shrink-0 text-xs text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+          className="shrink-0 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] shadow-sm transition-colors hover:bg-[var(--border-subtle)]"
         >
-          Edit in Workspace →
+          Edit in Workspace
         </button>
-      </div>
-      <div className="relative max-h-[4.5rem] overflow-hidden rounded-md border border-[var(--border-subtle)] bg-white px-4 py-2">
-        <div className="prose prose-sm max-w-none text-[var(--text-primary)] [&_p]:my-0 [&_ul]:my-0 [&_ol]:my-0 [&_h1]:text-base [&_h1]:my-0 [&_h2]:text-sm [&_h2]:my-0 [&_h3]:text-sm [&_h3]:my-0">
-          <MarkdownView source={source} />
-        </div>
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-b from-transparent to-white" />
       </div>
     </div>
   );

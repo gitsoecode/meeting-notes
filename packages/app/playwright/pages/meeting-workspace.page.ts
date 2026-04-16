@@ -12,7 +12,9 @@ export class MeetingWorkspacePage {
   }
 
   backButton() {
-    return this.main.getByRole("button", { name: "Back to meetings" });
+    // After the header refactor, the back control lives in the global site
+    // header (ArrowLeft with aria-label "Go back"), not in the meeting shell.
+    return this.page.locator("header").getByRole("button", { name: "Go back" });
   }
 
   meetingTitle() {
@@ -209,7 +211,9 @@ export class MeetingWorkspacePage {
    */
   async waitForReady(opts: { view?: "workspace" | "details" } = {}) {
     await this.page.locator("header h1").filter({ hasText: "Meeting" }).waitFor();
-    await this.backButton().waitFor();
+    // Meeting-specific signal: the Workspace|Details toggle is only rendered
+    // on the meeting route.
+    await this.viewToggle("Workspace").waitFor();
     const view = opts.view ?? "details";
     if (view === "details") {
       await this.page.getByRole("tablist").waitFor();

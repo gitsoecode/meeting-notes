@@ -94,13 +94,13 @@ export class RecordViewPage {
   }
 
   recordingLiveBadge() {
-    return this.main.getByText(/Recording · \d+:\d{2}:\d{2}/).first();
+    // Recording indicator now lives in the global site header pill, which
+    // persists across routes so users can jump back to the active meeting.
+    return this.page.locator("header").getByText(/Recording · \d+:\d{2}:\d{2}/).first();
   }
 
   elapsedTimer() {
-    // Scope to the live-recording badge so we don't also match the meeting
-    // timestamp (which contains a HH:MM:SS clock component).
-    return this.main.getByText(/Recording · \d+:\d{2}:\d{2}/).first();
+    return this.page.locator("header").getByText(/Recording · \d+:\d{2}:\d{2}/).first();
   }
 
   newRecordingBadge() {

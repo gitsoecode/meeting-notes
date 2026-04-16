@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
-  ArrowLeft,
   CirclePlay,
   ExternalLink,
   MoreHorizontal,
@@ -64,7 +63,6 @@ import {
   ToggleGroup,
   ToggleGroupItem,
 } from "../components/ui/toggle-group";
-import { useElapsedLabel } from "../hooks/useElapsedLabel";
 import { getDefaultPromptModel, getPromptModelSummary } from "../lib/prompt-metadata";
 import { MeetingDetailsView, type DetailsTabKind } from "./MeetingDetailsView";
 import { MeetingWorkspaceView } from "./MeetingWorkspaceView";
@@ -441,8 +439,8 @@ export function MeetingShell({
     return () => clearInterval(id);
   }, [detail?.status, runFolder]);
 
-  // ---- Elapsed timer ----
-  const elapsedLabel = useElapsedLabel(recording, isRecording);
+  // Elapsed-timer display lives in the global SiteHeader pill so it persists
+  // across routes; the meeting header no longer re-renders it.
 
   // Reset recording-dialog state + refresh detail when the recording ends
   const prevRecordingRef = useRef(isRecordingThis);
@@ -929,45 +927,37 @@ export function MeetingShell({
   const recordingControls = (() => {
     if (isRecording || isPaused) {
       return (
-        <>
-          {isRecording && (
-            <Badge
-              variant="destructive"
-              className="flex items-center gap-1.5 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider"
-            >
-              <span className="relative inline-flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-300 opacity-75" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-white" />
-              </span>
-              Recording · {elapsedLabel}
-            </Badge>
-          )}
+        <div className="flex items-center gap-2">
           {isPaused && !isRecording && (
             <Badge variant="warning" className="px-2 py-1 text-[11px] font-semibold uppercase tracking-wider">
               Paused
             </Badge>
           )}
-          {isPaused ? (
-            <Button variant="secondary" size="sm" onClick={onResume}>
-              <Play className="h-3.5 w-3.5" /> Resume
+          <div className="flex items-center rounded-md border border-[var(--border-subtle)] bg-white shadow-sm overflow-hidden">
+            {isPaused ? (
+              <Button variant="ghost" size="sm" onClick={onResume} className="h-8 rounded-none border-r border-[var(--border-subtle)] px-3 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" title="Resume recording">
+                <Play className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button variant="ghost" size="sm" onClick={onPause} className="h-8 rounded-none border-r border-[var(--border-subtle)] px-3 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" title="Pause recording">
+                <Pause className="h-4 w-4" />
+              </Button>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                resetEndMeetingState();
+                setEndDialogOpen(true);
+              }}
+              disabled={stopping}
+              className="h-8 rounded-none px-3 text-[var(--error)] hover:bg-[var(--error-muted)] hover:text-[var(--error)]"
+              title="End meeting"
+            >
+              <Square className="h-4 w-4" />
             </Button>
-          ) : (
-            <Button variant="secondary" size="sm" onClick={onPause}>
-              <Pause className="h-3.5 w-3.5" /> Pause
-            </Button>
-          )}
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => {
-              resetEndMeetingState();
-              setEndDialogOpen(true);
-            }}
-            disabled={stopping}
-          >
-            <Square className="h-3.5 w-3.5" /> End meeting
-          </Button>
-        </>
+          </div>
+        </div>
       );
     }
     if (isDraft) {
@@ -1068,35 +1058,30 @@ export function MeetingShell({
     <div className="flex h-[calc(100vh-var(--header-height))] flex-col overflow-hidden">
       {/* Three-column shell header */}
       <header className="flex shrink-0 flex-col gap-2 border-b border-[var(--border-subtle)] bg-white px-4 py-3 md:px-6">
-        <div className="flex items-center gap-4">
-          {/* Left: back + title + status */}
-          <div className="flex min-w-0 flex-1 items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="shrink-0 px-2"
-              onClick={() => requestNotesDiscard(onBack)}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" /> Back to meetings
-            </Button>
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              {isProcessing ? (
-                <h2 className="truncate text-2xl font-semibold text-[var(--text-primary)]">{detail.title}</h2>
-              ) : (
-                <EditableTitle value={detail.title} onSave={onTitleSave} />
-              )}
-              {/* Status chip on the left for non-live states. Live states
-                  (recording / paused) surface the elapsed timer on the right
-                  alongside the Stop control; double-rendering it here would
-                  make test selectors for "Recording · HH:MM:SS" ambiguous. */}
-              {!isLive && (
-                <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
-              )}
-            </div>
+        {/*
+          Header is a three-zone layout (title | toggle | controls).
+          At narrow viewports the right-side control cluster can exceed a
+          third of the row and would overlap a strictly-centered toggle, so
+          we fall back to a wrap-capable flex layout and send the toggle to
+          its own row (still centered). The grid treatment kicks in at md+
+          where the row has enough width to host all three zones side-by-side.
+        */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 md:grid md:grid-cols-3">
+          {/* Left: title + status */}
+          <div className="flex min-w-0 flex-1 items-center gap-3 md:flex-initial md:justify-self-start">
+            {isProcessing ? (
+              <h2 className="truncate text-2xl font-semibold text-[var(--text-primary)]">{detail.title}</h2>
+            ) : (
+              <EditableTitle value={detail.title} onSave={onTitleSave} />
+            )}
+            {/* Status chip on the left for non-live states. */}
+            {!isLive && (
+              <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
+            )}
           </div>
 
-          {/* Center: Workspace | Details toggle */}
-          <div className="shrink-0">
+          {/* Center: Workspace | Details toggle. Wraps to its own row on narrow. */}
+          <div className="order-last flex w-full shrink-0 justify-center md:order-none md:w-auto md:justify-self-center">
             <ToggleGroup
               type="single"
               value={view}
@@ -1104,14 +1089,15 @@ export function MeetingShell({
                 if (v === "workspace" || v === "details") setViewSafely(v);
               }}
               aria-label="Meeting view"
+              className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1"
             >
-              <ToggleGroupItem value="workspace">Workspace</ToggleGroupItem>
-              <ToggleGroupItem value="details">Details</ToggleGroupItem>
+              <ToggleGroupItem value="workspace" className="rounded-full px-4 text-sm transition-all data-[state=on]:bg-white data-[state=on]:shadow-sm">Workspace</ToggleGroupItem>
+              <ToggleGroupItem value="details" className="rounded-full px-4 text-sm transition-all data-[state=on]:bg-white data-[state=on]:shadow-sm">Details</ToggleGroupItem>
             </ToggleGroup>
           </div>
 
           {/* Right: recording controls + ⋯ */}
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2 md:justify-self-end">
             {recordingControls}
             {overflowMenu}
           </div>

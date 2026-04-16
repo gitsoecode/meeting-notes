@@ -35,7 +35,7 @@ export interface MeetingWorkspaceViewProps {
 const PREP_SIZE_KEY = "meeting-workspace.prep-size";
 const PREP_MIN_PCT = 25;
 const PREP_MAX_PCT = 75;
-const DEFAULT_PREP_PCT = 50;
+const DEFAULT_PREP_PCT = 40;
 
 function readInitialPrepSize(): number {
   if (typeof window === "undefined") return DEFAULT_PREP_PCT;
@@ -130,7 +130,7 @@ export function MeetingWorkspaceView({
           onResize={handlePrepResize}
         >
           <div className="flex h-full flex-col">
-            <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
+            <div className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
               <span className="text-sm font-medium text-[var(--text-primary)]">Prep</span>
             </div>
             <div className="flex-1 min-h-0">
@@ -143,7 +143,7 @@ export function MeetingWorkspaceView({
 
         <ResizablePanel id="notes-panel" order={2} defaultSize={100 - prepSizePct} minSize={PREP_MIN_PCT}>
           <div className="flex h-full flex-col">
-            <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
+            <div className="flex h-11 shrink-0 items-center justify-between border-b border-[var(--border-subtle)] px-3 py-2">
               <span className="text-sm font-medium text-[var(--text-primary)]">
                 {isLive ? "Live notes" : "Notes"}
               </span>

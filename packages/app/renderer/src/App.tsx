@@ -84,12 +84,25 @@ function routeFromHash(hash: string): Route | null {
   }
 }
 
+type NavState = {
+  stack: Route[];
+  cursor: number;
+};
+
+type PendingNav = { state: NavState } | null;
+
 export function App() {
   const [config, setConfig] = useState<AppConfigDTO | null | undefined>(undefined);
   const [recording, setRecording] = useState<RecordingStatus>({ active: false });
-  const [route, setRoute] = useState<Route>(() => routeFromHash(window.location.hash) ?? { name: "record" });
+  const [nav, setNav] = useState<NavState>(() => {
+    const initial = routeFromHash(window.location.hash) ?? { name: "record" };
+    return { stack: [initial], cursor: 0 };
+  });
+  const route = nav.stack[nav.cursor];
+  const canGoBack = nav.cursor > 0;
+  const canGoForward = nav.cursor < nav.stack.length - 1;
   const [isDirty, setIsDirty] = useState(false);
-  const [pendingRoute, setPendingRoute] = useState<Route | null>(null);
+  const [pendingNav, setPendingNav] = useState<PendingNav>(null);
   const [quickStarting, setQuickStarting] = useState(false);
 
   const isDirtyRef = useRef(false);
@@ -97,14 +110,53 @@ export function App() {
     isDirtyRef.current = isDirty;
   }, [isDirty]);
 
-  const navigate = useCallback((nextRoute: Route) => {
-    if (isDirtyRef.current) {
-      setPendingRoute(nextRoute);
-      return;
-    }
-    setRoute(nextRoute);
+  const applyNav = useCallback((next: NavState) => {
+    setNav(next);
     setIsDirty(false);
   }, []);
+
+  const requestNav = useCallback(
+    (next: NavState) => {
+      if (isDirtyRef.current) {
+        setPendingNav({ state: next });
+        return;
+      }
+      applyNav(next);
+    },
+    [applyNav],
+  );
+
+  const navigate = useCallback(
+    (nextRoute: Route) => {
+      setNav((current) => {
+        const currentRoute = current.stack[current.cursor];
+        if (routeToHash(currentRoute) === routeToHash(nextRoute)) {
+          // No-op: same route, skip stack push.
+          return current;
+        }
+        const truncated = current.stack.slice(0, current.cursor + 1);
+        const nextStack = [...truncated, nextRoute];
+        const nextState: NavState = { stack: nextStack, cursor: nextStack.length - 1 };
+        if (isDirtyRef.current) {
+          setPendingNav({ state: nextState });
+          return current;
+        }
+        setIsDirty(false);
+        return nextState;
+      });
+    },
+    [],
+  );
+
+  const goBack = useCallback(() => {
+    if (nav.cursor === 0) return;
+    requestNav({ stack: nav.stack, cursor: nav.cursor - 1 });
+  }, [nav, requestNav]);
+
+  const goForward = useCallback(() => {
+    if (nav.cursor >= nav.stack.length - 1) return;
+    requestNav({ stack: nav.stack, cursor: nav.cursor + 1 });
+  }, [nav, requestNav]);
 
   useEffect(() => {
     const nextHash = routeToHash(route);
@@ -114,15 +166,14 @@ export function App() {
   }, [route]);
 
   const confirmNavigation = () => {
-    if (pendingRoute) {
-      setRoute(pendingRoute);
-      setPendingRoute(null);
-      setIsDirty(false);
+    if (pendingNav) {
+      applyNav(pendingNav.state);
+      setPendingNav(null);
     }
   };
 
   const cancelNavigation = () => {
-    setPendingRoute(null);
+    setPendingNav(null);
   };
 
   useEffect(() => {
@@ -309,6 +360,14 @@ export function App() {
             title={route.name === "meeting" ? "Meeting" : routeLabel}
             subtitle={routeSubtitle}
             isDirty={isDirty}
+            recording={recording}
+            onJumpToRecording={(runFolder) =>
+              navigate({ name: "meeting", runFolder, view: "workspace" })
+            }
+            onGoBack={goBack}
+            onGoForward={goForward}
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
           />
           <main className="flex min-h-0 flex-1 flex-col">
             {route.name === "record" && (
@@ -362,7 +421,7 @@ export function App() {
       </SidebarMain>
 
       <ConfirmDialog
-        open={!!pendingRoute}
+        open={!!pendingNav}
         onOpenChange={(open) => {
           if (!open) cancelNavigation();
         }}

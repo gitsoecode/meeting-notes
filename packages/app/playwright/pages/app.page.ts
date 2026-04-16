@@ -34,9 +34,10 @@ export class AppPage {
   }
 
   recordingBadge() {
-    // The recording status is rendered by MeetingShell's right-column
-    // destructive badge (includes the elapsed timer, e.g. "Recording · 3:42").
-    return this.page.locator("main").getByText(/Recording · \d/).first();
+    // The global site-header pill renders the recording indicator with elapsed
+    // time (e.g. "Recording · 3:42"); it persists across every route so the
+    // user can jump back to the active meeting.
+    return this.page.locator("header").getByText(/Recording · \d/).first();
   }
 
   sidebarRecordingDot() {

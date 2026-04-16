@@ -80,7 +80,9 @@ test.describe("Home & Recording", () => {
     // the meeting shell; end-meeting → delete calls the shell's `onBack` which
     // navigates to the Meetings list (not Home).
     await expect(page.locator("header h1")).toContainText("Meetings");
-    await expect(page.getByText("Back to meetings")).not.toBeVisible();
+    // Meeting-shell controls (Workspace/Details toggle) should not be present
+    // on the Meetings list route.
+    await expect(page.getByRole("radio", { name: "Workspace" })).not.toBeVisible();
   });
 
   test("import via file picker navigates to imported meeting", async ({
@@ -88,8 +90,10 @@ test.describe("Home & Recording", () => {
     page,
   }) => {
     await recordView.importButton().click();
-    // Mock returns picked file "mock-meeting.mp4" → title "mock meeting"
-    await expect(page.getByText("Back to meetings")).toBeVisible();
+    // Mock returns picked file "mock-meeting.mp4" → title "mock meeting".
+    // The meeting route is the only place the Workspace|Details toggle
+    // renders, so use it as the "on a meeting page" signal.
+    await expect(page.getByRole("radio", { name: "Workspace" })).toBeVisible();
   });
 
   test("prepare for later opens a draft in the Workspace split pane", async ({
