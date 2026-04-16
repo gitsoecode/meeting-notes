@@ -52,8 +52,18 @@ export function MarkdownEditor({
     unmountedRef.current = false;
 
     const crepe = new Crepe({ root, defaultValue: value });
+    let initialized = false;
     crepe.on((api) => {
       api.markdownUpdated((_ctx, markdown) => {
+        // Crepe fires markdownUpdated on creation when it parses and
+        // re-serializes the initial markdown. Skip this first emission
+        // so the parent's dirty-detection isn't tripped by Crepe's
+        // normalization (e.g., whitespace, list marker style).
+        if (!initialized) {
+          initialized = true;
+          lastEmittedRef.current = markdown;
+          return;
+        }
         lastEmittedRef.current = markdown;
         onChangeRef.current(markdown);
       });
@@ -103,8 +113,14 @@ export function MarkdownEditor({
       if (!rootRef.current || rootRef.current !== root) return;
 
       const next = new Crepe({ root, defaultValue: seedValue });
+      let seeded = false;
       next.on((api) => {
         api.markdownUpdated((_ctx, markdown) => {
+          if (!seeded) {
+            seeded = true;
+            lastEmittedRef.current = markdown;
+            return;
+          }
           lastEmittedRef.current = markdown;
           onChangeRef.current(markdown);
         });

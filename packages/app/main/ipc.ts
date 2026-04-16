@@ -1189,6 +1189,7 @@ export function registerIpcHandlers(): void {
       auto: p.auto,
       builtin: p.builtin,
       model: p.model,
+      temperature: p.temperature,
       source_path: p.sourcePath,
       body: p.prompt,
     }));
@@ -1233,6 +1234,13 @@ export function registerIpcHandlers(): void {
           mergedFrontmatter.model = nextModel;
         } else {
           delete mergedFrontmatter.model;
+        }
+      }
+      if ("temperature" in patch) {
+        if (patch.temperature != null) {
+          mergedFrontmatter.temperature = patch.temperature;
+        } else {
+          delete mergedFrontmatter.temperature;
         }
       }
       const rewritten = matter.stringify(`\n${body.trim()}\n`, mergedFrontmatter);
@@ -1711,6 +1719,7 @@ export function registerIpcHandlers(): void {
     try {
       const state = getOllamaState() ?? await ensureOllamaDaemon();
       const models = await listRunningOllamaModels(state.baseUrl);
+      const ollamaVramBytes = models.reduce((sum, m) => sum + (m.size_vram ?? 0), 0);
       return {
         available: true,
         source: state.source,
@@ -1729,12 +1738,22 @@ export function registerIpcHandlers(): void {
               }
             : undefined,
         })),
+        systemMemory: {
+          totalBytes: os.totalmem(),
+          freeBytes: os.freemem(),
+          ollamaVramBytes,
+        },
       };
     } catch (err) {
       return {
         available: false,
         models: [],
         error: err instanceof Error ? err.message : String(err),
+        systemMemory: {
+          totalBytes: os.totalmem(),
+          freeBytes: os.freemem(),
+          ollamaVramBytes: 0,
+        },
       };
     }
   });

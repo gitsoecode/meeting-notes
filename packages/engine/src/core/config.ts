@@ -43,6 +43,7 @@ export interface OpenAIConfig {
 export interface OllamaConfig {
   base_url: string;
   model: string;
+  num_ctx?: number;
 }
 
 /**

@@ -23,6 +23,7 @@ export class OpenAIProvider implements LlmProvider {
     const response = await this.client.chat.completions.create(
       {
         model,
+        temperature: options?.temperature ?? undefined,
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userMessage },
@@ -41,6 +42,8 @@ export class OpenAIProvider implements LlmProvider {
     return {
       content,
       tokensUsed,
+      promptTokens: response.usage?.prompt_tokens,
+      completionTokens: response.usage?.completion_tokens,
       model,
     };
   }

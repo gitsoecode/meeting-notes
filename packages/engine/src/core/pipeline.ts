@@ -37,14 +37,30 @@ export type PipelineProgressEvent =
       filename: string;
       error: string;
       latencyMs: number;
+    }
+  | {
+      type: "output-progress";
+      promptOutputId: string;
+      tokensGenerated: number;
+      charsGenerated: number;
     };
 
 export type LlmCallFn = (
   systemPrompt: string,
   userMessage: string,
   model?: string,
-  signal?: AbortSignal
-) => Promise<{ content: string; tokensUsed?: number }>;
+  signal?: AbortSignal,
+  temperature?: number,
+  onTokenProgress?: (tokensGenerated: number, charsGenerated: number) => void,
+) => Promise<{
+  content: string;
+  tokensUsed?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  loadDurationMs?: number;
+  promptEvalTokensPerSec?: number;
+  evalTokensPerSec?: number;
+}>;
 
 export interface PipelineInput {
   transcript: string;
@@ -119,6 +135,8 @@ export interface ResolvedPrompt {
   builtin: boolean;
   /** Optional per-prompt model override; null falls back to config.claude.model. */
   model: string | null;
+  /** Optional per-prompt temperature override; null falls back to provider default. */
+  temperature: number | null;
   /** Absolute path to the source .md file */
   sourcePath: string;
 }
@@ -167,6 +185,7 @@ interface PromptFrontmatter {
   auto?: unknown;
   builtin?: unknown;
   model?: unknown;
+  temperature?: unknown;
 }
 
 function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | null {
@@ -233,6 +252,10 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
     auto,
     builtin,
     model: typeof fm.model === "string" && fm.model.trim() ? fm.model.trim() : null,
+    temperature:
+      typeof fm.temperature === "number" && Number.isFinite(fm.temperature)
+        ? fm.temperature
+        : null,
     sourcePath: filePath,
   };
 }
@@ -472,14 +495,25 @@ async function callWithRetry(
   logger: Logger,
   promptOutputId: string,
   model?: string,
-  signal?: AbortSignal
-): Promise<{ content: string; tokensUsed?: number; attempts: number }> {
+  signal?: AbortSignal,
+  temperature?: number,
+  onTokenProgress?: (tokensGenerated: number, charsGenerated: number) => void,
+): Promise<{
+  content: string;
+  tokensUsed?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  attempts: number;
+  loadDurationMs?: number;
+  promptEvalTokensPerSec?: number;
+  evalTokensPerSec?: number;
+}> {
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       throwIfAborted(signal);
-      const response = await llmCall(systemPrompt, userMessage, model, signal);
+      const response = await llmCall(systemPrompt, userMessage, model, signal, temperature, onTokenProgress);
       return { ...response, attempts: attempt };
     } catch (err) {
       lastError = err;
@@ -566,8 +600,25 @@ export async function runPipeline(
     });
 
     const start = Date.now();
-    logger.info(`Starting prompt output: ${prompt.id}`, { label: prompt.label });
     const renderedPrompt = renderPromptTemplate(prompt.prompt, input);
+    const inputChars = renderedPrompt.length + userMessage.length;
+    logger.info(`Starting prompt output: ${prompt.id}`, {
+      label: prompt.label,
+      inputChars,
+      estimatedInputTokens: Math.ceil(inputChars / 3.5),
+    });
+
+    // Build a progress callback that forwards streaming token counts to the UI.
+    const tokenProgressCb = onProgress
+      ? (tokensGenerated: number, charsGenerated: number) => {
+          onProgress({
+            type: "output-progress",
+            promptOutputId: prompt.id,
+            tokensGenerated,
+            charsGenerated,
+          });
+        }
+      : undefined;
 
     try {
       const response = await callWithRetry(
@@ -578,7 +629,9 @@ export async function runPipeline(
         logger,
         prompt.id,
         prompt.model ?? undefined,
-        signal
+        signal,
+        prompt.temperature ?? undefined,
+        tokenProgressCb
       );
       throwIfAborted(signal);
       const latencyMs = Date.now() - start;
@@ -610,8 +663,13 @@ export async function runPipeline(
 
       logger.info(`Completed prompt output: ${prompt.id}`, {
         latencyMs,
+        promptTokens: response.promptTokens ?? null,
+        completionTokens: response.completionTokens ?? null,
         tokensUsed: response.tokensUsed,
         attempts: response.attempts,
+        loadDurationMs: response.loadDurationMs ?? null,
+        promptEvalTokensPerSec: response.promptEvalTokensPerSec ?? null,
+        evalTokensPerSec: response.evalTokensPerSec ?? null,
       });
 
       onProgress?.({

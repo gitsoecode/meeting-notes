@@ -108,6 +108,7 @@ export type {
 } from "./adapters/recording/recorder.js";
 
 export { ClaudeProvider } from "./adapters/llm/claude.js";
+export { OpenAIProvider } from "./adapters/llm/openai.js";
 export {
   OllamaProvider,
   pingOllama,

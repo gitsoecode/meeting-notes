@@ -11,6 +11,7 @@ import {
   runPipeline,
   getSecret,
   ClaudeProvider,
+  OpenAIProvider,
   OllamaProvider,
   unloadOllamaModels,
   classifyModel,
@@ -31,6 +32,43 @@ import { resolveRunDocumentPath, resolveRunFolderPath, RUN_NOTES_FILE, RUN_TRANS
 import { validatePromptModelSelection } from "./model-validation.js";
 import { getStore } from "./store.js";
 
+/**
+ * Parse speaker excerpts from a saved transcript.md body. The markdown
+ * format uses `### Me` / `### Others` headers with timestamped lines below.
+ * Returns the text lines under each header, stripped of timestamps.
+ */
+function parseSpeakerExcerptsFromMarkdown(body: string): {
+  meExcerpts: string;
+  othersExcerpts: string;
+} {
+  const meLines: string[] = [];
+  const othersLines: string[] = [];
+  let currentSpeaker: "me" | "others" | null = null;
+
+  for (const line of body.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "### Me") {
+      currentSpeaker = "me";
+      continue;
+    }
+    if (trimmed === "### Others") {
+      currentSpeaker = "others";
+      continue;
+    }
+    if (!trimmed || !currentSpeaker) continue;
+    // Strip the leading timestamp (e.g. `00:42`) if present.
+    const text = trimmed.replace(/^`\d{2,}:\d{2}`\s*/, "");
+    if (!text) continue;
+    if (currentSpeaker === "me") meLines.push(text);
+    else othersLines.push(text);
+  }
+
+  return {
+    meExcerpts: meLines.join("\n"),
+    othersExcerpts: othersLines.join("\n"),
+  };
+}
+
 function normalizeModelId(id: string | null | undefined): string | null {
   if (!id) return null;
   const trimmed = id.trim();
@@ -50,27 +88,41 @@ export async function reprocessRun(
   const store = getStore();
   const manifest = store.loadManifest(runFolder);
   const defaultModel =
-    config.llm_provider === "ollama" ? config.ollama.model : config.claude.model;
-  const apiKey = await getSecret("claude");
+    config.llm_provider === "ollama" ? config.ollama.model : (config.llm_provider === "openai" ? config.openai.model : config.claude.model);
+  const claudeKey = await getSecret("claude");
+  const openaiKey = await getSecret("openai");
 
-  if (config.llm_provider === "claude" && !apiKey) {
+  if (config.llm_provider === "claude" && !claudeKey) {
     throw new Error("No Anthropic API key in Keychain — set one in Settings.");
+  }
+  if (config.llm_provider === "openai" && !openaiKey) {
+    throw new Error("No OpenAI API key in Keychain — set one in Settings.");
   }
 
   const claudeCache: Record<string, ClaudeProvider> = {};
+  const openaiCache: Record<string, OpenAIProvider> = {};
   const ollamaCache: Record<string, OllamaProvider> = {};
   const llmFactory = (model?: string): LlmProvider => {
     const id = model && model.trim() ? model : defaultModel;
-    if (classifyModel(id) === "claude") {
-      if (!apiKey) {
+    const kind = classifyModel(id);
+    if (kind === "claude") {
+      if (!claudeKey) {
         throw new Error(
           `Prompt requested Claude model "${id}" but no Anthropic API key is set in Settings.`
         );
       }
-      return (claudeCache[id] ??= new ClaudeProvider(apiKey, id));
+      return (claudeCache[id] ??= new ClaudeProvider(claudeKey, id));
+    }
+    if (kind === "openai") {
+      if (!openaiKey) {
+        throw new Error(
+          `Prompt requested OpenAI model "${id}" but no OpenAI API key is set in Settings.`
+        );
+      }
+      return (openaiCache[id] ??= new OpenAIProvider(openaiKey, id));
     }
     const normalizedId = normalizeModelId(id) || id;
-    return (ollamaCache[normalizedId] ??= new OllamaProvider(config.ollama.base_url, normalizedId));
+    return (ollamaCache[normalizedId] ??= new OllamaProvider(config.ollama.base_url, normalizedId, config.ollama.num_ctx));
   };
 
   const logger = createRunLogger(path.join(runFolder, "run.log"), Boolean(process.env.VITE_DEV_SERVER_URL));
@@ -98,6 +150,9 @@ export async function reprocessRun(
     : "";
   const notes = fs.existsSync(notesPath) ? fs.readFileSync(notesPath, "utf-8") : "";
 
+  // Rebuild speaker excerpts from the saved transcript markdown.
+  const { meExcerpts, othersExcerpts } = parseSpeakerExcerptsFromMarkdown(transcript);
+
   // Read prep notes and attachments for pipeline context
   const prepPath = path.join(runFolder, "prep.md");
   const prepNotes = fs.existsSync(prepPath) ? fs.readFileSync(prepPath, "utf-8") : "";
@@ -116,8 +171,10 @@ export async function reprocessRun(
     systemPrompt: string,
     userMessage: string,
     model?: string,
-    callSignal?: AbortSignal
-  ) => llmFactory(model).call(systemPrompt, userMessage, model, { signal: callSignal });
+    callSignal?: AbortSignal,
+    temperature?: number,
+    onTokenProgress?: (tokensGenerated: number, charsGenerated: number) => void,
+  ) => llmFactory(model).call(systemPrompt, userMessage, model, { signal: callSignal, temperature, onTokenProgress });
   const plannedPrompts = await planPipelineSteps(config, runFolder, logger, {
     onlyIds: req.onlyIds,
     onlyFailed: req.onlyFailed,
@@ -146,8 +203,8 @@ export async function reprocessRun(
         manualNotes: notes,
         title: manifest.title,
         date: manifest.date,
-        meExcerpts: "",
-        othersExcerpts: "",
+        meExcerpts,
+        othersExcerpts,
         prepNotes,
         attachmentContext,
       },

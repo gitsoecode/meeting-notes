@@ -106,6 +106,8 @@ export interface PromptRow {
   builtin: boolean;
   /** Per-prompt model override; null falls back to config.claude.model. */
   model: string | null;
+  /** Per-prompt temperature override; null falls back to provider default (0.3). */
+  temperature: number | null;
   source_path: string;
   body: string;
 }
@@ -230,6 +232,13 @@ export type PipelineProgressEvent =
       latencyMs: number;
     }
   | {
+      type: "output-progress";
+      runFolder: string;
+      promptOutputId: string;
+      tokensGenerated: number;
+      charsGenerated: number;
+    }
+  | {
       type: "run-complete";
       runFolder: string;
       succeeded: string[];
@@ -254,6 +263,7 @@ export type JobStepState = "queued" | "running" | "complete" | "failed";
 export interface JobProgressStep extends PipelinePlannedStep {
   state: JobStepState;
   latencyMs?: number;
+  tokensGenerated?: number;
   error?: string;
   startedAt?: number;
 }
@@ -304,6 +314,11 @@ export interface OllamaRuntimeDTO {
   source?: "system-running" | "system-spawned" | "bundled-spawned";
   models: OllamaRuntimeModelDTO[];
   error?: string;
+  systemMemory?: {
+    totalBytes: number;
+    freeBytes: number;
+    ollamaVramBytes: number;
+  };
 }
 
 export interface AudioDevice {

@@ -19,6 +19,7 @@ import { Badge } from "../components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Switch } from "../components/ui/switch";
+import { StackedMeter } from "../components/ui/meter";
 import { cn } from "../lib/utils";
 
 type LogSource = { kind: "app" } | { kind: "job"; jobId: string };
@@ -358,6 +359,7 @@ export function ActivityView() {
                   </div>
                 ))
               )}
+              {runtime?.systemMemory ? <MemoryMeter memory={runtime.systemMemory} /> : null}
             </CardContent>
           </Card>
         </div>
@@ -608,4 +610,36 @@ function formatTime(value: string): string {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return value;
   return new Date(time).toLocaleTimeString();
+}
+
+function MemoryMeter({ memory }: { memory: { totalBytes: number; freeBytes: number; ollamaVramBytes: number } }) {
+  const totalGb = memory.totalBytes / (1024 ** 3);
+  const usedGb = (memory.totalBytes - memory.freeBytes) / (1024 ** 3);
+  const ollamaGb = memory.ollamaVramBytes / (1024 ** 3);
+  const otherGb = Math.max(0, usedGb - ollamaGb);
+  const usedPct = totalGb > 0 ? (usedGb / totalGb) * 100 : 0;
+  const variant: "default" | "warning" | "danger" =
+    usedPct > 90 ? "danger" : usedPct > 75 ? "warning" : "default";
+  const ollamaColor =
+    variant === "danger"
+      ? "var(--error, #ef4444)"
+      : variant === "warning"
+        ? "var(--warning, #f59e0b)"
+        : "var(--accent, #2d6b3f)";
+
+  const segments = [];
+  if (ollamaGb > 0) {
+    segments.push({ value: ollamaGb, color: ollamaColor, label: `Ollama ${ollamaGb.toFixed(1)} GB` });
+  }
+  segments.push({ value: otherGb, color: "#3b82f6", label: `Other ${otherGb.toFixed(1)} GB` });
+
+  return (
+    <StackedMeter
+      size="sm"
+      max={totalGb}
+      label="Memory"
+      valueLabel={`${usedGb.toFixed(1)} / ${totalGb.toFixed(0)} GB used`}
+      segments={segments}
+    />
+  );
 }

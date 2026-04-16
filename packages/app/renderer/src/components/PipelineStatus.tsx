@@ -31,6 +31,7 @@ export interface PromptOutputStatus {
   error?: string;
   startedAt?: number;
   model?: string;
+  tokensGenerated?: number;
 }
 
 interface PipelineStatusProps {
@@ -187,6 +188,9 @@ function StepRow({ section }: { section: PromptOutputStatus }) {
           {section.state === "running" && elapsedSec != null ? (
             <span>{elapsedSec}s elapsed</span>
           ) : null}
+          {section.state === "running" ? (
+            <span>{section.tokensGenerated ?? 0} output tokens</span>
+          ) : null}
           {section.state === "canceled" ? <span>Canceled</span> : null}
           {section.state === "complete" && section.latencyMs != null ? (
             <span>{(section.latencyMs / 1000).toFixed(1)}s</span>
@@ -310,6 +314,7 @@ export function outputsFromJobSteps(steps?: JobProgressStep[]): PromptOutputStat
     error: step.error,
     startedAt: step.startedAt,
     model: step.model,
+    tokensGenerated: step.tokensGenerated,
   }));
 }
 
@@ -397,6 +402,12 @@ export function applyProgress(
               error: event.error,
             },
           ];
+    case "output-progress":
+      return prev.map((entry) =>
+        entry.id === event.promptOutputId
+          ? { ...entry, tokensGenerated: event.tokensGenerated }
+          : entry
+      );
     default:
       return prev;
   }

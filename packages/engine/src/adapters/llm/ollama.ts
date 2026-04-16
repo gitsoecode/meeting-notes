@@ -10,6 +10,9 @@ interface OllamaChatResponse {
   message?: { role: string; content: string };
   eval_count?: number;
   prompt_eval_count?: number;
+  load_duration?: number;
+  prompt_eval_duration?: number;
+  eval_duration?: number;
   done: boolean;
 }
 
@@ -38,6 +41,8 @@ interface OllamaPullChunk {
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_MODEL = "qwen2.5:7b";
+const DEFAULT_NUM_CTX = 32768;
+const DEFAULT_TEMPERATURE = 0.3;
 
 /**
  * LlmProvider implementation backed by an Ollama HTTP daemon. The daemon
@@ -47,10 +52,12 @@ const DEFAULT_MODEL = "qwen2.5:7b";
 export class OllamaProvider implements LlmProvider {
   private readonly baseUrl: string;
   private readonly model: string;
+  private readonly numCtx: number;
 
-  constructor(baseUrl: string = DEFAULT_BASE_URL, model: string = DEFAULT_MODEL) {
+  constructor(baseUrl: string = DEFAULT_BASE_URL, model: string = DEFAULT_MODEL, numCtx?: number) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model;
+    this.numCtx = numCtx ?? DEFAULT_NUM_CTX;
   }
 
   async call(
@@ -61,16 +68,28 @@ export class OllamaProvider implements LlmProvider {
   ): Promise<LlmResponse> {
     const model = modelOverride && modelOverride.trim() ? modelOverride : this.model;
     const url = `${this.baseUrl}/api/chat`;
+    const temperature = options?.temperature ?? DEFAULT_TEMPERATURE;
+    const inputChars = systemPrompt.length + userMessage.length;
+    const estimatedTokens = Math.ceil(inputChars / 3.5);
+
+    // Combine caller abort signal with a 60-minute safety timeout.
+    const timeoutMs = 60 * 60_000;
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signal = options?.signal
+      ? AbortSignal.any([options.signal, timeout])
+      : timeout;
+
     let res: Response;
     try {
       res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        signal: options?.signal,
+        signal,
         body: JSON.stringify({
           model,
-          stream: false,
-          keep_alive: "5s",
+          stream: true,
+          keep_alive: "30s",
+          options: { num_ctx: this.numCtx, temperature },
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
@@ -81,6 +100,10 @@ export class OllamaProvider implements LlmProvider {
       // Enrich the generic "fetch failed" with diagnostic context.
       const original = err instanceof Error ? err.message : String(err);
       let detail = `Ollama request to ${url} failed (model: ${model}). `;
+      detail += `Input size: ~${estimatedTokens} tokens (${inputChars} chars). `;
+      if (estimatedTokens > 30000) {
+        detail += "The input may exceed the model's effective context window. ";
+      }
       try {
         const alive = await pingOllama(this.baseUrl);
         detail += alive
@@ -95,11 +118,80 @@ export class OllamaProvider implements LlmProvider {
       const text = await res.text().catch(() => "");
       throw new Error(`Ollama /api/chat ${res.status}: ${text || res.statusText}`);
     }
-    const data = (await res.json()) as OllamaChatResponse;
-    const content = data.message?.content ?? "";
-    const tokensUsed =
-      (data.eval_count ?? 0) + (data.prompt_eval_count ?? 0) || undefined;
-    return { content, tokensUsed, model };
+
+    // Stream NDJSON chunks to keep the TCP connection alive during inference.
+    if (!res.body) {
+      throw new Error("Ollama /api/chat returned no response body");
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    let content = "";
+    let evalCount = 0;
+    let promptEvalCount = 0;
+    let loadDuration = 0;
+    let promptEvalDuration = 0;
+    let evalDuration = 0;
+    let chunkCount = 0;
+    let lastProgressAt = 0;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (!line) continue;
+        let chunk: OllamaChatResponse;
+        try {
+          chunk = JSON.parse(line) as OllamaChatResponse;
+        } catch {
+          continue;
+        }
+        if (chunk.message?.content) {
+          content += chunk.message.content;
+          chunkCount++;
+          // Throttle progress callbacks to ~2/sec to avoid flooding IPC.
+          const now = Date.now();
+          if (options?.onTokenProgress && now - lastProgressAt >= 500) {
+            lastProgressAt = now;
+            options.onTokenProgress(chunkCount, content.length);
+          }
+        }
+        if (chunk.done) {
+          evalCount = chunk.eval_count ?? 0;
+          promptEvalCount = chunk.prompt_eval_count ?? 0;
+          loadDuration = chunk.load_duration ?? 0;
+          promptEvalDuration = chunk.prompt_eval_duration ?? 0;
+          evalDuration = chunk.eval_duration ?? 0;
+        }
+      }
+    }
+
+    // Final progress callback so the UI shows the total.
+    if (options?.onTokenProgress && chunkCount > 0) {
+      options.onTokenProgress(chunkCount, content.length);
+    }
+
+    const tokensUsed = (evalCount + promptEvalCount) || undefined;
+    return {
+      content,
+      tokensUsed,
+      promptTokens: promptEvalCount || undefined,
+      completionTokens: evalCount || undefined,
+      model,
+      loadDurationMs: loadDuration > 0 ? Math.round(loadDuration / 1e6) : undefined,
+      promptEvalTokensPerSec:
+        promptEvalDuration > 0 && promptEvalCount > 0
+          ? Math.round((promptEvalCount / (promptEvalDuration / 1e9)) * 10) / 10
+          : undefined,
+      evalTokensPerSec:
+        evalDuration > 0 && evalCount > 0
+          ? Math.round((evalCount / (evalDuration / 1e9)) * 10) / 10
+          : undefined,
+    };
   }
 }
 

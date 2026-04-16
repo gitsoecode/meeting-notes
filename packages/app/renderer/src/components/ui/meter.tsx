@@ -89,3 +89,64 @@ export const Meter = React.forwardRef<HTMLDivElement, MeterProps>(
   }
 );
 Meter.displayName = "Meter";
+
+export interface StackedMeterSegment {
+  value: number;
+  color: string;
+  label?: string;
+}
+
+export interface StackedMeterProps
+  extends Omit<React.HTMLAttributes<HTMLDivElement>, "children">,
+    VariantProps<typeof meterVariants> {
+  segments: StackedMeterSegment[];
+  max: number;
+  label?: string;
+  valueLabel?: string;
+}
+
+export const StackedMeter = React.forwardRef<HTMLDivElement, StackedMeterProps>(
+  ({ className, segments, max, label, valueLabel, size, ...props }, ref) => {
+    return (
+      <div className="space-y-1.5">
+        {(label || valueLabel) && (
+          <div className="flex items-center justify-between text-xs text-[var(--text-secondary)]">
+            {label && <span>{label}</span>}
+            {valueLabel && <span>{valueLabel}</span>}
+          </div>
+        )}
+        <div
+          ref={ref}
+          className={cn(meterVariants({ size, className }))}
+          {...props}
+        >
+          {segments.map((seg, i) => {
+            const pct = max > 0 ? Math.min(100, Math.max(0, (seg.value / max) * 100)) : 0;
+            return (
+              <div
+                key={i}
+                className="absolute inset-y-0 transition-[width,left] duration-150 ease-out"
+                style={{
+                  width: `${pct}%`,
+                  left: `${segments.slice(0, i).reduce((acc, s) => acc + Math.min(100, Math.max(0, (s.value / max) * 100)), 0)}%`,
+                  backgroundColor: seg.color,
+                }}
+              />
+            );
+          })}
+        </div>
+        {segments.some((s) => s.label) && (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-tertiary)]">
+            {segments.filter((s) => s.label).map((seg, i) => (
+              <span key={i} className="flex items-center gap-1">
+                <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: seg.color }} />
+                {seg.label}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+);
+StackedMeter.displayName = "StackedMeter";

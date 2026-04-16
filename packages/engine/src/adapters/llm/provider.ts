@@ -1,11 +1,23 @@
 export interface LlmResponse {
   content: string;
   tokensUsed?: number;
+  /** Input/prompt tokens processed. */
+  promptTokens?: number;
+  /** Output/completion tokens generated. */
+  completionTokens?: number;
   model?: string;
+  /** Ollama: time to load the model into VRAM (ms). >0 means cold start. */
+  loadDurationMs?: number;
+  /** Ollama: prompt processing speed (tokens/sec). */
+  promptEvalTokensPerSec?: number;
+  /** Ollama: generation speed (tokens/sec). */
+  evalTokensPerSec?: number;
 }
 
 export interface LlmCallOptions {
   signal?: AbortSignal;
+  temperature?: number;
+  onTokenProgress?: (tokensGenerated: number, charsGenerated: number) => void;
 }
 
 export interface LlmProvider {

@@ -1114,7 +1114,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       return (openaiCache[id] ??= new OpenAIProvider(openaiKey, id));
     }
     const normalizedId = normalizeLocalModelId(id) || id;
-    return (ollamaCache[normalizedId] ??= new OllamaProvider(config.ollama.base_url, normalizedId));
+    return (ollamaCache[normalizedId] ??= new OllamaProvider(config.ollama.base_url, normalizedId, config.ollama.num_ctx));
   };
 
   // If the *default* provider is Claude/OpenAI and no key exists, skip the whole
@@ -1181,8 +1181,10 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     systemPrompt: string,
     userMessage: string,
     model?: string,
-    pipelineSignal?: AbortSignal
-  ) => llmFactory(model).call(systemPrompt, userMessage, model, { signal: pipelineSignal });
+    pipelineSignal?: AbortSignal,
+    temperature?: number,
+    onTokenProgress?: (tokensGenerated: number, charsGenerated: number) => void,
+  ) => llmFactory(model).call(systemPrompt, userMessage, model, { signal: pipelineSignal, temperature, onTokenProgress });
 
   if (plannedPrompts.length === 0) {
     const endedIso = new Date().toISOString();

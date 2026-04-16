@@ -86,6 +86,7 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
   const [draftFilename, setDraftFilename] = useState("");
   const [draftDescription, setDraftDescription] = useState("");
   const [draftModelOverride, setDraftModelOverride] = useState<string | null>(null);
+  const [draftTemperature, setDraftTemperature] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [runAgainstOpen, setRunAgainstOpen] = useState(false);
@@ -130,6 +131,7 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
         setDraftFilename(target.filename);
         setDraftDescription(target.description ?? "");
         setDraftModelOverride(target.model);
+        setDraftTemperature(target.temperature);
       }
       setError(null);
     } catch (err) {
@@ -171,14 +173,15 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
     [filteredPrompts]
   );
 
-  const hasUnsavedChanges = useMemo(() => 
+  const hasUnsavedChanges = useMemo(() =>
     active != null && (
       draftBody !== active.body ||
       draftLabel !== active.label ||
       draftFilename !== active.filename ||
       draftDescription !== (active.description ?? "") ||
-      draftModelOverride !== active.model
-    ), [active, draftBody, draftLabel, draftFilename, draftDescription, draftModelOverride]);
+      draftModelOverride !== active.model ||
+      (draftTemperature ?? 0.3) !== (active.temperature ?? 0.3)
+    ), [active, draftBody, draftLabel, draftFilename, draftDescription, draftModelOverride, draftTemperature]);
 
   const resolvedDraftModel = draftModelOverride ?? defaultModel ?? "";
 
@@ -217,6 +220,7 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
       setDraftFilename(prompt.filename);
       setDraftDescription(prompt.description ?? "");
       setDraftModelOverride(prompt.model);
+      setDraftTemperature(prompt.temperature);
     };
 
     if (!hasUnsavedChanges) {
@@ -242,6 +246,7 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
         filename: draftFilename,
         description: draftDescription.trim() || null,
         model: draftModelOverride,
+        temperature: draftTemperature,
       });
       await refresh(active.id);
     } catch (err) {
@@ -456,6 +461,23 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
                     allowCustom={false}
                     localMode="installed-only"
                     className="w-40 md:w-48"
+                  />
+                </div>
+                <Separator orientation="vertical" className="hidden h-4 md:block" />
+                <div className="flex items-center gap-3">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">Temp</span>
+                  <Input
+                    id="prompt-temperature"
+                    type="number"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={draftTemperature ?? 0.3}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      setDraftTemperature(Number.isFinite(val) ? Math.round(val * 10) / 10 : null);
+                    }}
+                    className="h-8 w-[4.5rem] bg-white text-xs"
                   />
                 </div>
                 <Separator orientation="vertical" className="hidden h-4 md:block" />

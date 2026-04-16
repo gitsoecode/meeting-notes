@@ -316,6 +316,15 @@ export function updateJobProgress(jobId: string, event: PipelineProgressEvent): 
         latencyMs: event.latencyMs,
       })
     );
+  } else if (event.type === "output-progress") {
+    job.progress.steps = updateStep(
+      job.progress.steps,
+      event.promptOutputId,
+      (step) => ({
+        ...step,
+        tokensGenerated: event.tokensGenerated,
+      })
+    );
   } else if (event.type === "output-failed") {
     job.seenOutputs.add(event.promptOutputId);
     job.progress.failedOutputs += 1;
