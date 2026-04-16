@@ -1,4 +1,49 @@
+import { Agent, fetch as undiciFetch } from "undici";
 import type { LlmProvider, LlmResponse, LlmCallOptions } from "./provider.js";
+
+/**
+ * Module-scoped dispatcher for streaming chat calls. We disable undici's
+ * default `headersTimeout` (300s) and `bodyTimeout` (300s) because Ollama
+ * holds the connection open while loading the model and evaluating the
+ * prompt before it sends the first response byte — a large prompt can
+ * easily blow past 5 minutes. The real upper bound is the caller's
+ * AbortSignal (plus our own 60-minute safety timeout below), not the
+ * transport layer.
+ */
+const ollamaDispatcher = new Agent({
+  headersTimeout: 0,
+  bodyTimeout: 0,
+  keepAliveTimeout: 60_000,
+});
+
+/**
+ * Pull the useful diagnostic bits out of a fetch/undici error and render
+ * them as a " [name=... code=... cause=...]" suffix. undici attaches the
+ * real failure reason (e.g. `UND_ERR_HEADERS_TIMEOUT`, `ECONNREFUSED`)
+ * on `err.code` or nested under `err.cause`, and the plain `err.message`
+ * is typically just "fetch failed".
+ */
+function describeFetchError(err: unknown): string {
+  if (!(err instanceof Error)) return "";
+  const parts: string[] = [];
+  if (err.name && err.name !== "Error") parts.push(`name=${err.name}`);
+  const code = (err as { code?: unknown }).code;
+  if (typeof code === "string" && code) parts.push(`code=${code}`);
+  const cause = err.cause;
+  if (cause) {
+    const causeParts: string[] = [];
+    if (cause instanceof Error) {
+      if (cause.name && cause.name !== "Error") causeParts.push(`name=${cause.name}`);
+      const causeCode = (cause as { code?: unknown }).code;
+      if (typeof causeCode === "string" && causeCode) causeParts.push(`code=${causeCode}`);
+      if (cause.message) causeParts.push(`message=${cause.message}`);
+    } else {
+      causeParts.push(String(cause));
+    }
+    if (causeParts.length > 0) parts.push(`cause={${causeParts.join(" ")}}`);
+  }
+  return parts.length > 0 ? ` [${parts.join(" ")}]` : "";
+}
 
 export interface OllamaTag {
   name: string;
@@ -41,7 +86,6 @@ interface OllamaPullChunk {
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const DEFAULT_MODEL = "qwen2.5:7b";
-const DEFAULT_NUM_CTX = 32768;
 const DEFAULT_TEMPERATURE = 0.3;
 
 /**
@@ -52,12 +96,12 @@ const DEFAULT_TEMPERATURE = 0.3;
 export class OllamaProvider implements LlmProvider {
   private readonly baseUrl: string;
   private readonly model: string;
-  private readonly numCtx: number;
+  private readonly numCtx: number | undefined;
 
   constructor(baseUrl: string = DEFAULT_BASE_URL, model: string = DEFAULT_MODEL, numCtx?: number) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
     this.model = model;
-    this.numCtx = numCtx ?? DEFAULT_NUM_CTX;
+    this.numCtx = numCtx;
   }
 
   async call(
@@ -79,17 +123,27 @@ export class OllamaProvider implements LlmProvider {
       ? AbortSignal.any([options.signal, timeout])
       : timeout;
 
-    let res: Response;
+    // Only forward num_ctx when the user explicitly configured one. Modern
+    // Ollama auto-sizes the context window per request; passing a fixed
+    // num_ctx forces a KV-cache pre-allocation that can slow prompt
+    // processing (and was a plausible contributor to past timeouts).
+    const ollamaOptions: Record<string, unknown> = { temperature };
+    if (this.numCtx != null) {
+      ollamaOptions.num_ctx = this.numCtx;
+    }
+
+    let res: Awaited<ReturnType<typeof undiciFetch>>;
     try {
-      res = await fetch(url, {
+      res = await undiciFetch(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
         signal,
+        dispatcher: ollamaDispatcher,
         body: JSON.stringify({
           model,
           stream: true,
           keep_alive: "30s",
-          options: { num_ctx: this.numCtx, temperature },
+          options: ollamaOptions,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userMessage },
@@ -99,6 +153,7 @@ export class OllamaProvider implements LlmProvider {
     } catch (err) {
       // Enrich the generic "fetch failed" with diagnostic context.
       const original = err instanceof Error ? err.message : String(err);
+      const errorBreadcrumb = describeFetchError(err);
       let detail = `Ollama request to ${url} failed (model: ${model}). `;
       detail += `Input size: ~${estimatedTokens} tokens (${inputChars} chars). `;
       if (estimatedTokens > 30000) {
@@ -112,7 +167,7 @@ export class OllamaProvider implements LlmProvider {
       } catch {
         detail += "Could not determine if Ollama is still running.";
       }
-      throw new Error(`${detail} Original error: ${original}`);
+      throw new Error(`${detail} Original error: ${original}${errorBreadcrumb}`);
     }
     if (!res.ok) {
       const text = await res.text().catch(() => "");
