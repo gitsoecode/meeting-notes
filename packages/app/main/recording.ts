@@ -9,6 +9,7 @@ import {
   updateRunStatus,
   loadRunManifest,
   formatAudioSegmentName,
+  migrateFlatLayoutToSegment,
   saveActiveRecording,
   loadActiveRecording,
   clearActiveRecording,
@@ -40,6 +41,7 @@ import { stopAudioMonitor } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { resolveMicCaptureBinary } from "./mic-capture-binary.js";
 import { getStore } from "./store.js";
+import { collectRunAudioFiles } from "./runs-service.js";
 
 export interface ActiveRecordingState {
   session: RecordingSession;
@@ -68,6 +70,31 @@ function currentState(): RecordingModuleState {
 
 function isAbortLikeError(err: unknown): boolean {
   return err instanceof OperationAbortedError || (err instanceof Error && err.name === "AbortError");
+}
+
+/**
+ * Persist the just-stopped session's capture metadata next to its audio
+ * files in `audio/<segment>/capture-meta.json`. With pause/resume producing
+ * multiple segments per run, a single root-level sidecar would only
+ * describe the last session — downstream drift correction and AEC alignment
+ * would silently use wrong offsets for every earlier segment.
+ */
+function writeSegmentCaptureMeta(state: ActiveRecordingState): void {
+  if (!state.session.captureMeta) return;
+  const segmentDir = state.micPath ? path.dirname(state.micPath) : null;
+  if (!segmentDir) return;
+  try {
+    fs.mkdirSync(segmentDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(segmentDir, "capture-meta.json"),
+      JSON.stringify(state.session.captureMeta, null, 2)
+    );
+  } catch (err) {
+    state.logger.warn("Failed to write capture-meta.json", {
+      segmentDir,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 export function isRecording(): boolean {
@@ -142,9 +169,6 @@ export async function startRecording(
   description: string | null = null
 ): Promise<{ run_folder: string; run_id: string }> {
   validateStartRecording(currentState());
-  // Release the audio-level monitor (if the user left it running in Settings)
-  // before we grab the mic/system devices for the real recording.
-  await stopAudioMonitor();
   const config = loadConfig();
   const runContext = createRun(config, title, { sourceMode: "both", quiet: true }, description);
   const { folderPath, manifest, logger } = runContext;
@@ -156,84 +180,26 @@ export async function startRecording(
     throw err;
   }
 
-  const recorder = new FfmpegRecorder(logger);
-  const audioDir = path.join(folderPath, "audio");
-  const devices = await getCachedAudioDevices();
-  const session = await recorder.start({
-    micDevice: config.recording.mic_device,
-    systemDevice: config.recording.system_device,
-    outputDir: audioDir,
-    devices,
-    audioTeeBinaryPath: resolveAudioTeeBinary(),
-    micCaptureBinaryPath: resolveMicCaptureBinary(),
-  });
-
-  // Set a visible warning if system audio capture failed at startup.
-  let systemAudioWarning: string | undefined;
-  if (!session.systemCaptured) {
-    systemAudioWarning = "System audio capture is not available. Check that the System Audio Recording permission is granted in System Settings → Privacy & Security.";
+  try {
+    active = await startCaptureIntoSegment(
+      config,
+      folderPath,
+      manifest.run_id,
+      title,
+      manifest.started,
+      logger
+    );
+  } catch (err) {
+    fs.rmSync(folderPath, { recursive: true, force: true });
+    getStore().deleteRun(folderPath);
+    throw err;
   }
 
-  active = {
-    session,
-    runFolder: folderPath,
-    runId: manifest.run_id,
-    title,
-    startedAt: manifest.started,
-    logger,
-    config,
-    micPath: session.paths.mic,
-    systemPath: session.paths.system,
-    systemCaptured: session.systemCaptured,
-    systemAudioWarning,
-    processIds: [
-      startTrackedProcess({
-        id: session.pids[0] ? `ffmpeg:${session.pids[0]}` : undefined,
-        type: "ffmpeg",
-        label: "Microphone capture",
-        pid: session.pids[0],
-        command: "ffmpeg avfoundation recording",
-        runFolder: folderPath,
-        status: "running",
-      }),
-      ...(session.systemCaptured && session.pids[1]
-        ? [
-            startTrackedProcess({
-              id: `ffmpeg:${session.pids[1]}`,
-              type: "ffmpeg",
-              label: "System audio capture",
-              pid: session.pids[1],
-              command: "ffmpeg avfoundation recording",
-              runFolder: folderPath,
-              status: "running",
-            }),
-          ]
-        : []),
-    ],
-  };
-
-  // Mirror the CLI's active-recording.json so `meeting-notes stop` can see it.
-  saveActiveRecording({
-    run_id: manifest.run_id,
-    run_folder: folderPath,
-    title,
-    started_at: manifest.started,
-    pids: session.pids,
-    mic_path: session.paths.mic,
-    system_path: session.paths.system,
-    system_captured: session.systemCaptured,
-  });
-
-  logger.info("Recording started (via app)", {
-    run_id: manifest.run_id,
-    mic: session.paths.mic,
-    system: session.paths.system ?? "(none)",
-  });
   appLogger.info("Recording started", {
     runId: manifest.run_id,
     runFolder: folderPath,
     processType: "ffmpeg",
-    detail: session.systemCaptured ? "mic+system" : "mic-only",
+    detail: active.systemCaptured ? "mic+system" : "mic-only",
   });
 
   // Try to open notes.md in Obsidian if the integration is on.
@@ -339,11 +305,12 @@ export async function stopRecording(
     return { deleted: true };
   }
 
-  const audioFiles: { path: string; speaker: "me" | "others" | "unknown" }[] = [];
-  if (state.micPath) audioFiles.push({ path: state.micPath, speaker: "me" });
-  if (state.systemCaptured && state.systemPath) {
-    audioFiles.push({ path: state.systemPath, speaker: "others" });
-  }
+  // Persist this segment's capture metadata into its own directory so
+  // per-segment drift/AEC/offset alignment works after pause+resume.
+  writeSegmentCaptureMeta(state);
+
+  const manifestAfterStop = loadRunManifest(state.runFolder);
+  const audioFiles = collectRunAudioFiles(state.runFolder, manifestAfterStop.source_mode);
 
   if (audioFiles.length === 0) {
     state.logger.error("No audio files captured, marking run as error");
@@ -369,24 +336,6 @@ export async function stopRecording(
         });
       }
     }).catch(() => {});
-  }
-
-  // Write a small sidecar with per-stream start wall-clock timestamps.
-  // The engine's AEC preprocessing step reads this to seed its
-  // cross-correlation search so the alignment converges quickly.
-  if (state.session.captureMeta) {
-    try {
-      const audioDir = path.join(state.runFolder, "audio");
-      fs.mkdirSync(audioDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(audioDir, "capture-meta.json"),
-        JSON.stringify(state.session.captureMeta, null, 2)
-      );
-    } catch (err) {
-      state.logger.warn("Failed to write capture-meta.json", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
   }
 
   // Note: combined.wav generation has moved into the processing job
@@ -465,6 +414,7 @@ export async function stopActiveRecording(_reason: string): Promise<void> {
   } catch {
     // Best effort.
   }
+  writeSegmentCaptureMeta(state);
   for (const processId of state.processIds) {
     finishTrackedProcess(processId, { status: "failed", error: "Recording interrupted during app quit" });
   }
@@ -497,6 +447,26 @@ async function startCaptureIntoSegment(
   // Release the live audio meter, if it was running, so the real recording
   // gets exclusive use of the mic/system taps.
   await stopAudioMonitor();
+
+  // Before creating this segment, rescue any pre-fix flat-layout audio
+  // (`audio/mic.wav` / `audio/system.wav`) into a back-dated segment
+  // directory so the run ends up fully segmented instead of mixed.
+  const store = getStore();
+  const preMigrationManifest = store.loadManifest(runFolder);
+  if (preMigrationManifest.recording_segments.length === 0) {
+    const migratedSegment = migrateFlatLayoutToSegment(runFolder, preMigrationManifest.started);
+    if (migratedSegment) {
+      preMigrationManifest.recording_segments.push(migratedSegment);
+      updateRunStatus(runFolder, preMigrationManifest.status, {
+        recording_segments: preMigrationManifest.recording_segments,
+      }, store);
+      logger.info("Migrated legacy flat audio layout into segment", {
+        run_folder: runFolder,
+        segment: migratedSegment,
+      });
+    }
+  }
+
   const now = new Date();
   const segmentName = formatAudioSegmentName(now);
   const segmentDir = path.join(runFolder, "audio", segmentName);
@@ -514,12 +484,15 @@ async function startCaptureIntoSegment(
   });
 
   // Update manifest to add this segment
-  const store = getStore();
   const manifest = store.loadManifest(runFolder);
   manifest.recording_segments.push(segmentName);
   updateRunStatus(runFolder, "recording", {
     recording_segments: manifest.recording_segments,
   }, store);
+
+  const systemAudioWarning = session.systemCaptured
+    ? undefined
+    : "System audio capture is not available. Check that the System Audio Recording permission is granted in System Settings → Privacy & Security.";
 
   const state: ActiveRecordingState = {
     session,
@@ -532,6 +505,7 @@ async function startCaptureIntoSegment(
     micPath: session.paths.mic,
     systemPath: session.paths.system,
     systemCaptured: session.systemCaptured,
+    systemAudioWarning,
     processIds: [
       startTrackedProcess({
         id: session.pids[0] ? `ffmpeg:${session.pids[0]}` : undefined,
@@ -628,6 +602,7 @@ export async function pauseRecording(): Promise<void> {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  writeSegmentCaptureMeta(state);
   for (const processId of state.processIds) {
     finishTrackedProcess(processId, { status: "exited" });
   }

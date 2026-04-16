@@ -868,3 +868,52 @@ export async function mergeTimedAudioFiles(
     );
   }
 }
+
+/**
+ * Concatenate WAV files end-to-end into `outputPath`. Inputs must share
+ * sample rate, channel layout, and codec (the mix output of
+ * `mergeTimedAudioFiles` is always 48 kHz mono pcm_s16le, so segment clips
+ * from there concatenate cleanly).
+ */
+export async function concatWavFiles(
+  inputPaths: string[],
+  outputPath: string
+): Promise<void> {
+  if (inputPaths.length === 0) return;
+  if (inputPaths.length === 1) {
+    fs.copyFileSync(inputPaths[0], outputPath);
+    return;
+  }
+
+  const dir = path.dirname(outputPath);
+  fs.mkdirSync(dir, { recursive: true });
+
+  // Re-encode to a uniform format so concat can't fail on any subtle
+  // header differences between per-segment mixes. pcm_s16le mono 48 kHz
+  // matches the mix output, so this is cheap.
+  const inputArgs = inputPaths.flatMap((p) => ["-i", p]);
+  const filter =
+    inputPaths
+      .map((_, i) => `[${i}:a]aresample=48000,aformat=sample_fmts=s16:channel_layouts=mono[a${i}]`)
+      .join(";") +
+    ";" +
+    inputPaths.map((_, i) => `[a${i}]`).join("") +
+    `concat=n=${inputPaths.length}:v=0:a=1[out]`;
+
+  try {
+    await execFileAsync("ffmpeg", [
+      ...inputArgs,
+      "-filter_complex", filter,
+      "-map", "[out]",
+      "-ar", "48000",
+      "-ac", "1",
+      "-c:a", "pcm_s16le",
+      "-y",
+      outputPath,
+    ]);
+  } catch (err) {
+    throw new Error(
+      `Failed to concatenate audio files: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}

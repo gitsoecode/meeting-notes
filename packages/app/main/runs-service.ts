@@ -268,7 +268,7 @@ export async function reprocessRun(
   return { runFolder, succeeded, failed };
 }
 
-function collectRunAudioFiles(runFolder: string, sourceMode: string) {
+export function collectRunAudioFiles(runFolder: string, sourceMode: string) {
   const audioDir = path.join(runFolder, "audio");
   if (!fs.existsSync(audioDir)) return [];
 
@@ -286,16 +286,9 @@ function collectRunAudioFiles(runFolder: string, sourceMode: string) {
     return null;
   };
 
-  // Check for legacy flat layout first (mic[.clean].wav / system.wav in audio/)
-  const flatMic = preferredMic(audioDir);
-  const flatSystem = path.join(audioDir, "system.wav");
-  if (flatMic || fs.existsSync(flatSystem)) {
-    if (flatMic) audioFiles.push({ path: flatMic, speaker: "me" });
-    if (fs.existsSync(flatSystem)) audioFiles.push({ path: flatSystem, speaker: "others" });
-    return audioFiles;
-  }
-
-  // Walk timestamped segment subdirectories (sorted chronologically)
+  // Walk timestamped segment subdirectories first (segment layout is the
+  // default; the flat layout is a legacy fallback). Sorting alphabetically
+  // on the ISO-style names is equivalent to chronological order.
   const segmentDirs = fs
     .readdirSync(audioDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
@@ -310,7 +303,16 @@ function collectRunAudioFiles(runFolder: string, sourceMode: string) {
   }
   if (audioFiles.length > 0) return audioFiles;
 
-  // Fallback: loose files in audio/ (imported recordings, etc.)
+  // Legacy flat layout fallback (mic[.clean].wav / system.wav directly in audio/).
+  const flatMic = preferredMic(audioDir);
+  const flatSystem = path.join(audioDir, "system.wav");
+  if (flatMic || fs.existsSync(flatSystem)) {
+    if (flatMic) audioFiles.push({ path: flatMic, speaker: "me" });
+    if (fs.existsSync(flatSystem)) audioFiles.push({ path: flatSystem, speaker: "others" });
+    return audioFiles;
+  }
+
+  // Final fallback: loose files in audio/ (imported recordings, etc.).
   const audioEntries = fs
     .readdirSync(audioDir, { withFileTypes: true })
     .filter((entry) => entry.isFile())

@@ -46,9 +46,11 @@ import {
   cleanMicForSpeech,
   writeAecSidecar,
   mergeTimedAudioFiles,
+  concatWavFiles,
   analyzeAudioLevels,
   chooseConservativeGainDb,
   correctStreamDrift,
+  getAudioInfo,
   type AsrAudioFormat,
   type AnchorQuality,
   type SpeechCleanupQuality,
@@ -587,12 +589,14 @@ async function preprocessMicForAec(
     const sidecarPath = path.join(dir, "aec.json");
 
     try {
-      // Pull hint + anchor-quality from capture-meta.json. It lives at
-      // runFolder/audio (flat) or one level up for segmented layout.
+      // Pull hint + anchor-quality from capture-meta.json. Prefer the
+      // per-segment sidecar (written alongside the segment's audio on
+      // pause/stop); fall back to the root `audio/capture-meta.json` only
+      // for legacy runs written before per-segment sidecars existed.
       const audioRoot = path.join(runFolder, "audio");
-      let hint = readCaptureHintOffset(audioRoot);
+      let hint = readCaptureHintOffset(dir);
       if (!hint.found && dir !== audioRoot) {
-        hint = readCaptureHintOffset(dir);
+        hint = readCaptureHintOffset(audioRoot);
       }
 
       const anchorQuality: AnchorQuality = hint.quality;
@@ -777,7 +781,13 @@ function collapseAudioArtifacts(
 
 /**
  * Best-effort combined playback file covering the cleaned mic + system
- * across all audio files. Non-blocking / non-fatal.
+ * across every recording segment. Non-blocking / non-fatal.
+ *
+ * With pause/resume, trackContexts span multiple segment directories. We
+ * mix each segment independently (so its per-segment offset still aligns
+ * mic/system within that segment), then concatenate the per-segment
+ * combined clips end-to-end into `audio/combined.wav`. This preserves
+ * timeline continuity with the rebased transcript.
  */
 async function writeCombinedPlayback(
   trackContexts: AudioTrackContext[],
@@ -785,40 +795,87 @@ async function writeCombinedPlayback(
   logger: Logger
 ): Promise<void> {
   const inputs = trackContexts.filter((track) => fs.existsSync(track.path));
-  if (inputs.length < 2) return;
+  if (inputs.length === 0) return;
   const combinedPath = path.join(runFolder, "audio", "combined.wav");
+
+  for (const input of inputs) {
+    logger.info("Combined audio input prepared", {
+      path: input.path,
+      speaker: input.speaker,
+      sourceKind: input.sourceKind,
+      cleanupQuality: input.cleanupQuality ?? null,
+      offsetMs: input.speaker === "others" ? input.offsetMs : 0,
+      offsetSource: input.offsetSource,
+      gainDb: input.gainDb,
+      meanVolumeDb: input.levels?.meanVolumeDb ?? null,
+      maxVolumeDb: input.levels?.maxVolumeDb ?? null,
+    });
+  }
+
+  // Group tracks by segment directory so each segment mixes independently.
+  const groupsByDir = new Map<string, AudioTrackContext[]>();
+  for (const input of inputs) {
+    const dir = path.dirname(input.path);
+    const group = groupsByDir.get(dir);
+    if (group) group.push(input);
+    else groupsByDir.set(dir, [input]);
+  }
+  const orderedDirs = Array.from(groupsByDir.keys()).sort((a, b) =>
+    path.basename(a).localeCompare(path.basename(b))
+  );
+
+  const scratchDir = path.join(runFolder, "audio", ".combined-scratch");
   try {
-    for (const input of inputs) {
-      logger.info("Combined audio input prepared", {
-        path: input.path,
-        speaker: input.speaker,
-        sourceKind: input.sourceKind,
-        cleanupQuality: input.cleanupQuality ?? null,
-        offsetMs: input.speaker === "others" ? input.offsetMs : 0,
-        offsetSource: input.offsetSource,
-        gainDb: input.gainDb,
-        meanVolumeDb: input.levels?.meanVolumeDb ?? null,
-        maxVolumeDb: input.levels?.maxVolumeDb ?? null,
-      });
+    fs.mkdirSync(scratchDir, { recursive: true });
+
+    const perSegmentClips: string[] = [];
+    for (let i = 0; i < orderedDirs.length; i++) {
+      const group = groupsByDir.get(orderedDirs[i])!;
+      const clipPath = path.join(scratchDir, `segment-${String(i).padStart(3, "0")}.wav`);
+      if (group.length === 1) {
+        // Single track in this segment — just resample into the expected
+        // 48 kHz mono pcm_s16le format so the concat step has uniform inputs.
+        await mergeTimedAudioFiles(
+          [{ path: group[0].path, offsetMs: 0, gainDb: group[0].gainDb }],
+          clipPath
+        );
+      } else {
+        await mergeTimedAudioFiles(
+          group.map((input) => ({
+            path: input.path,
+            offsetMs: input.speaker === "others" ? input.offsetMs : 0,
+            gainDb: input.gainDb,
+          })),
+          clipPath
+        );
+      }
+      perSegmentClips.push(clipPath);
     }
-    await mergeTimedAudioFiles(
-      inputs.map((input) => ({
-        path: input.path,
-        offsetMs: input.speaker === "others" ? input.offsetMs : 0,
-        gainDb: input.gainDb,
-      })),
-      combinedPath
-    );
-    logger.info("Combined audio created", { path: combinedPath, inputs: inputs.length });
+
+    await concatWavFiles(perSegmentClips, combinedPath);
+    logger.info("Combined audio created", {
+      path: combinedPath,
+      segments: perSegmentClips.length,
+      inputs: inputs.length,
+    });
   } catch (err) {
     logger.warn("Failed to create combined audio", {
       error: err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    try {
+      fs.rmSync(scratchDir, { recursive: true, force: true });
+    } catch {
+      // Best effort.
+    }
   }
 }
 
 export function mergeTranscripts(results: TranscriptResult[]): TranscriptResult {
-  // Merge segments from multiple sources, sorted by start time
+  // Merge segments from multiple sources, sorted by start time.
+  // Callers are responsible for rebasing per-segment transcripts onto a
+  // unified timeline before calling this; a flat sort by start_ms then
+  // assumes timestamps already share an origin.
   const allSegments = results
     .flatMap((r) => r.segments)
     .sort((a, b) => a.start_ms - b.start_ms);
@@ -827,7 +884,10 @@ export function mergeTranscripts(results: TranscriptResult[]): TranscriptResult 
     segments: allSegments,
     fullText: allSegments.map((s) => s.text).join(" "),
     provider: results.map((r) => r.provider).join("+"),
-    durationMs: Math.max(...results.map((r) => r.durationMs)),
+    // Sum rather than max so logs reflect total ASR wall-clock time across
+    // all per-segment/per-speaker calls; audio duration is derived from the
+    // rebased timestamps, not this field.
+    durationMs: results.reduce((sum, r) => sum + r.durationMs, 0),
   };
 }
 
@@ -955,34 +1015,86 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     cleanupQualityByPath
   );
 
-  // --- Transcription (in parallel for multiple sources) ---
+  // --- Transcription (sequential per segment so we can rebase timestamps) ---
+  //
+  // Each segment's ASR restarts its clock at 0. Without rebasing, segment 2's
+  // "0–30 s" and segment 1's "0–30 s" would collide on the merged timeline,
+  // breaking speaker ordering, transcript timestamps, and total duration.
+  // Group tracks by their containing directory (each segment has its own),
+  // transcribe within a group (mic + system share a timebase), then offset
+  // the whole group by the cumulative prior-segment audio duration.
   let transcriptResult: TranscriptResult;
   const transcriptStartedAt = Date.now();
   let activeTrack: AudioTrackContext | null = null;
   try {
-    const transcripts = [];
+    const groupsByDir = new Map<string, AudioTrackContext[]>();
     for (const track of trackContexts) {
-      throwIfAborted(signal);
-      activeTrack = track;
-      transcripts.push(
-        await transcribeAudio({
-          config,
-          runFolder,
-          audioPath: track.path,
-          speaker: track.speaker,
-          sourceKind: track.sourceKind,
-          gainDb: track.gainDb,
-          offsetMetadata: {
-            source: track.offsetSource,
-            offsetMs: track.offsetMs,
-          },
-          logger,
-          signal,
-        })
-      );
+      const dir = path.dirname(track.path);
+      const group = groupsByDir.get(dir);
+      if (group) group.push(track);
+      else groupsByDir.set(dir, [track]);
+    }
+    const orderedDirs = Array.from(groupsByDir.keys()).sort((a, b) =>
+      path.basename(a).localeCompare(path.basename(b))
+    );
+
+    const rebasedTranscripts: TranscriptResult[] = [];
+    let cumulativeOffsetMs = 0;
+    for (const dir of orderedDirs) {
+      const group = groupsByDir.get(dir)!;
+      const groupTranscripts: TranscriptResult[] = [];
+      for (const track of group) {
+        throwIfAborted(signal);
+        activeTrack = track;
+        groupTranscripts.push(
+          await transcribeAudio({
+            config,
+            runFolder,
+            audioPath: track.path,
+            speaker: track.speaker,
+            sourceKind: track.sourceKind,
+            gainDb: track.gainDb,
+            offsetMetadata: {
+              source: track.offsetSource,
+              offsetMs: track.offsetMs,
+            },
+            logger,
+            signal,
+          })
+        );
+      }
+
+      if (cumulativeOffsetMs > 0) {
+        for (const tr of groupTranscripts) {
+          for (const seg of tr.segments) {
+            seg.start_ms += cumulativeOffsetMs;
+            seg.end_ms += cumulativeOffsetMs;
+          }
+        }
+      }
+      rebasedTranscripts.push(...groupTranscripts);
+
+      // Probe actual audio duration for this segment (max of its tracks)
+      // to advance the cumulative offset. `TranscriptResult.durationMs`
+      // is ASR wall-clock time, not audio duration — don't use it here.
+      let segmentAudioDurationMs = 0;
+      for (const track of group) {
+        try {
+          const info = await getAudioInfo(track.path);
+          if (info.durationMs > segmentAudioDurationMs) {
+            segmentAudioDurationMs = info.durationMs;
+          }
+        } catch {
+          // Best-effort; if one track fails, try the others.
+        }
+      }
+      cumulativeOffsetMs += segmentAudioDurationMs;
     }
     activeTrack = null;
-    transcriptResult = transcripts.length === 1 ? transcripts[0] : mergeTranscripts(transcripts);
+    transcriptResult =
+      rebasedTranscripts.length === 1
+        ? rebasedTranscripts[0]
+        : mergeTranscripts(rebasedTranscripts);
     if (config.recording.dedup_me_against_others !== false) {
       const before = transcriptResult.segments.length;
       transcriptResult = dedupOverlappingSpeakers(transcriptResult);

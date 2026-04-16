@@ -32,6 +32,7 @@ export {
   createRun,
   createDraftRun,
   formatAudioSegmentName,
+  migrateFlatLayoutToSegment,
   updateRunStatus,
   updatePromptOutput,
   loadRunManifest,

@@ -196,6 +196,74 @@ export function createRun(
   return { manifest, folderPath, logger };
 }
 
+/**
+ * If a run has flat-layout audio files (`audio/mic.wav` + `audio/system.wav`)
+ * from before the segmented-layout fix, move them into a back-dated segment
+ * directory so subsequent segments don't produce a mixed on-disk layout.
+ *
+ * The segment name uses the run's `started` timestamp so the pre-fix audio
+ * sorts chronologically before any fresh segment created after the pause.
+ *
+ * Best-effort: if any move fails, the flat files stay in place. Callers
+ * should treat this as a no-op on failure rather than aborting the start.
+ */
+export function migrateFlatLayoutToSegment(runFolder: string, startedIso: string): string | null {
+  const audioDir = path.join(runFolder, "audio");
+  if (!fs.existsSync(audioDir)) return null;
+
+  const flatMic = path.join(audioDir, "mic.wav");
+  const flatSystem = path.join(audioDir, "system.wav");
+  const flatMicClean = path.join(audioDir, "mic.clean.wav");
+  const flatCaptureMeta = path.join(audioDir, "capture-meta.json");
+  const hasFlatMic = fs.existsSync(flatMic);
+  const hasFlatSystem = fs.existsSync(flatSystem);
+  if (!hasFlatMic && !hasFlatSystem) return null;
+
+  const startedDate = new Date(startedIso);
+  const segmentDate = Number.isNaN(startedDate.getTime()) ? new Date() : startedDate;
+  const segmentName = formatAudioSegmentName(segmentDate);
+  const segmentDir = path.join(audioDir, segmentName);
+  if (fs.existsSync(segmentDir)) {
+    // Name collision (extremely unlikely post-fix since ms precision); append
+    // a numeric suffix so we don't clobber a real segment.
+    let suffix = 1;
+    let alt = `${segmentDir}-${suffix}`;
+    while (fs.existsSync(alt)) {
+      suffix++;
+      alt = `${segmentDir}-${suffix}`;
+    }
+    fs.mkdirSync(alt, { recursive: true });
+    return alt;
+  }
+  fs.mkdirSync(segmentDir, { recursive: true });
+
+  const moves: Array<[string, string]> = [];
+  if (hasFlatMic) moves.push([flatMic, path.join(segmentDir, "mic.wav")]);
+  if (hasFlatSystem) moves.push([flatSystem, path.join(segmentDir, "system.wav")]);
+  if (fs.existsSync(flatMicClean)) {
+    moves.push([flatMicClean, path.join(segmentDir, "mic.clean.wav")]);
+  }
+  if (fs.existsSync(flatCaptureMeta)) {
+    moves.push([flatCaptureMeta, path.join(segmentDir, "capture-meta.json")]);
+  }
+
+  for (const [src, dst] of moves) {
+    try {
+      fs.renameSync(src, dst);
+    } catch {
+      try {
+        fs.copyFileSync(src, dst);
+        fs.unlinkSync(src);
+      } catch {
+        // Leave the flat file alone if we can't move it — don't silently
+        // discard captured audio.
+      }
+    }
+  }
+
+  return path.basename(segmentDir);
+}
+
 export function formatAudioSegmentName(date: Date): string {
   const y = date.getFullYear();
   const mo = String(date.getMonth() + 1).padStart(2, "0");
@@ -203,7 +271,11 @@ export function formatAudioSegmentName(date: Date): string {
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
   const ss = String(date.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${d}_${hh}-${mm}-${ss}`;
+  // Millisecond suffix — back-to-back pause/resume within the same wall-clock
+  // second would otherwise collide on the directory name and let two ffmpeg
+  // writers stomp on the same file.
+  const ms = String(date.getMilliseconds()).padStart(3, "0");
+  return `${y}-${mo}-${d}_${hh}-${mm}-${ss}-${ms}`;
 }
 
 function getPrepTemplate(config: AppConfig): string {
