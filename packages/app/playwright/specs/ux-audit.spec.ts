@@ -113,8 +113,16 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     await page.getByRole("button", { name: /End meeting/ }).click();
     await page.getByRole("button", { name: "End meeting" }).last().click();
 
-    // Now on meeting detail
+    // Meeting now open. Flip to Details view if we landed on Workspace (the
+    // mock transitions the run through draft → processing and we may hit
+    // either state first depending on timing).
+    const detailsToggle = page.getByRole("radio", { name: "Details" });
+    await detailsToggle.waitFor();
+    if ((await detailsToggle.getAttribute("aria-checked")) !== "true") {
+      await detailsToggle.click();
+    }
     const analysisTab = page.getByRole("tab", { name: "Analysis" });
+    await analysisTab.waitFor();
     const isAnalysisActive =
       (await analysisTab.getAttribute("data-state")) === "active";
 
@@ -125,7 +133,7 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     const observations: string[] = [
       `Analysis tab auto-selected: ${isAnalysisActive}`,
       `Total buttons visible on meeting detail: ${actionButtonCount}`,
-      `GOOD: Analysis tab is correctly the default — most useful output first`,
+      "OBSERVATION: Default landing is Workspace (split pane) during the brief draft phase, then user clicks Details to see Analysis/Summary/etc.",
       "OBSERVATION: Action bar has 4 buttons (Reprocess, Run prompt, Open folder, Delete) all at equal visual weight — Delete is a destructive action at the same level as Run prompt",
     ];
 
@@ -192,31 +200,34 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     page,
     audit,
   }) => {
-    // Navigate to completed meeting
+    // Navigate to completed meeting — this lands in Details view by default.
     await page.getByText("Weekly planning").first().click();
-    await page.getByRole("tab", { name: "Notes" }).click();
 
-    const editBtn = page.getByRole("button", { name: "Edit" });
-    const notesStateHeading = page.getByText("Editing notes").or(
-      page.getByText("No notes for this meeting.")
-    );
+    // Notes editing now lives in Workspace view. There's a helper link in
+    // Details that flips over, and a segmented control too.
+    const editInWorkspace = page.getByRole("button", {
+      name: /Edit prep and notes in Workspace view/,
+    });
+    const editInWorkspaceVisible = await editInWorkspace.isVisible();
+
+    await editInWorkspace.click();
+
+    // Now in Workspace view — notes editor is inline, no "Edit" button needed.
+    const notesEditor = page.locator(".milkdown").nth(1); // Prep is 0, Notes is 1
+    const notesEditorVisible = await notesEditor.isVisible();
 
     const observations: string[] = [
-      `Edit notes button visible: ${await editBtn.isVisible()}`,
-      `Current notes state heading visible: ${await notesStateHeading.isVisible()}`,
-      'OBSERVATION: Completed meetings now use a simpler "Edit" affordance rather than the older "Edit notes" / "locked" language',
-      'RECOMMENDATION: Keep the lightweight wording — it reads more like an editable workspace and less like a permission boundary',
+      `"Edit prep and notes in Workspace view" link visible in Details: ${editInWorkspaceVisible}`,
+      `Notes editor visible after toggle to Workspace: ${notesEditorVisible}`,
+      'OBSERVATION: Notes editing is now inline in the Workspace split pane — no read/edit toggle, cursor goes straight in',
+      'OBSERVATION: The "Edit in Workspace" link in Details gives a single-click bridge for reviewers who arrive on Details first',
+      'RECOMMENDATION: Keep this inline-editing model; it removes the old lock/unlock ceremony that Flow 6 used to surface',
     ];
 
-    // Click edit and check editor state
-    await editBtn.click();
-    const saveBtn = page.getByRole("button", { name: "Save notes" });
-    observations.push(`Save button visible after edit: ${await saveBtn.isVisible()}`);
-
     await audit({
-      intent: "Open the notes tab and start typing",
+      intent: "Open a completed meeting and start typing in notes",
       expectations:
-        "One click to enter edit mode for completed meetings. Editor should feel comfortable.",
+        "One click to get into an editable notes surface — no mode toggle.",
       observations,
       screenshotName: "ux-flow6-notes-editing",
     });

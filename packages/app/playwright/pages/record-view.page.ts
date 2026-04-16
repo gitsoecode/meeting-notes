@@ -98,7 +98,9 @@ export class RecordViewPage {
   }
 
   elapsedTimer() {
-    return this.main.getByText(/\d+:\d{2}:\d{2}/);
+    // Scope to the live-recording badge so we don't also match the meeting
+    // timestamp (which contains a HH:MM:SS clock component).
+    return this.main.getByText(/Recording · \d+:\d{2}:\d{2}/).first();
   }
 
   newRecordingBadge() {
@@ -110,7 +112,10 @@ export class RecordViewPage {
   }
 
   audioMeterCard() {
-    return this.main.getByText("Mic");
+    // The LiveChannelMeters component renders a meter with aria-label
+    // "Microphone input level"; it's the same icon-only presentation the
+    // meeting workspace uses for the live capture health strip.
+    return this.main.getByLabel("Microphone input level");
   }
 
   pipelineStatusCard() {

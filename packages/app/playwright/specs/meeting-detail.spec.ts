@@ -1,123 +1,142 @@
 import { test, expect } from "../fixtures/base.fixture";
 
 test.describe("Meeting Workspace", () => {
-  test.beforeEach(async ({ app, meetingsList, meetingDetail }) => {
+  test.beforeEach(async ({ app, meetingsList, meetingWorkspace }) => {
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Weekly planning").click();
-    await meetingDetail.waitForReady();
+    // Completed meetings default to the Details view.
+    await meetingWorkspace.waitForReady({ view: "details" });
   });
 
-  test("loads the workspace with the current tab set", async ({ meetingDetail }) => {
-    await expect(meetingDetail.tab("Metadata")).toHaveAttribute("data-state", "active");
-    await expect(meetingDetail.tab("Prep")).toBeVisible();
-    await expect(meetingDetail.tab("Notes")).toBeVisible();
-    await expect(meetingDetail.tab("Summary")).toBeVisible();
-    await expect(meetingDetail.tab("Analysis")).toBeVisible();
-    await expect(meetingDetail.tab("Transcript")).toBeVisible();
-    await expect(meetingDetail.tab("Recording")).toBeVisible();
-    await expect(meetingDetail.tab("Files")).toBeVisible();
+  test("loads the workspace with the current tab set", async ({ meetingWorkspace }) => {
+    await expect(meetingWorkspace.tab("Metadata")).toHaveAttribute("data-state", "active");
+    await expect(meetingWorkspace.tab("Summary")).toBeVisible();
+    await expect(meetingWorkspace.tab("Analysis")).toBeVisible();
+    await expect(meetingWorkspace.tab("Transcript")).toBeVisible();
+    await expect(meetingWorkspace.tab("Recording")).toBeVisible();
+    await expect(meetingWorkspace.tab("Files")).toBeVisible();
+    // Prep and Notes tabs were removed from Details — prep/notes editing lives
+    // in the Workspace view now.
+    await expect(meetingWorkspace.tab("Prep" as never)).toHaveCount(0);
+    await expect(meetingWorkspace.tab("Notes" as never)).toHaveCount(0);
+    // The Workspace/Details segmented toggle is visible above the tabs.
+    await expect(meetingWorkspace.viewToggle("Workspace")).toBeVisible();
+    await expect(meetingWorkspace.viewToggle("Details")).toBeVisible();
   });
 
-  test("all tabs are functional and switch content", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Prep").click();
-    await expect(page.getByText("Review backlog")).toBeVisible();
-
-    await meetingDetail.tab("Notes").click();
-    await expect(page.getByText("These are the notes I found:")).toBeVisible();
-
-    await meetingDetail.tab("Summary").click();
+  test("all tabs are functional and switch content", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Summary").click();
     await expect(page.getByRole("heading", { name: "Summary", exact: true })).toBeVisible();
     await expect(page.getByText("Highlights")).toBeVisible();
     // Frontmatter must not leak into the rendered editor
     await expect(page.getByText("source: mock")).toHaveCount(0);
 
-    await meetingDetail.tab("Analysis").click();
-    await expect(meetingDetail.promptSidebarItem("Decision Log")).toBeVisible();
-    await meetingDetail.promptSidebarItem("Decision Log").click();
+    await meetingWorkspace.tab("Analysis").click();
+    await expect(meetingWorkspace.promptSidebarItem("Decision Log")).toBeVisible();
+    await meetingWorkspace.promptSidebarItem("Decision Log").click();
     await expect(page.getByRole("heading", { name: "Decisions" })).toBeVisible();
 
-    await meetingDetail.tab("Transcript").click();
+    await meetingWorkspace.tab("Transcript").click();
     await expect(page.getByText("Welcome everyone.")).toBeVisible();
 
-    await meetingDetail.tab("Recording").click();
+    await meetingWorkspace.tab("Recording").click();
     await expect(page.getByText("audio/mic.wav")).toBeVisible();
 
-    await meetingDetail.tab("Files").click();
+    await meetingWorkspace.tab("Files").click();
     await expect(page.getByText("Attached files (1)")).toBeVisible();
 
-    await meetingDetail.tab("Metadata").click();
-    await expect(meetingDetail.metadataHeading()).toBeVisible();
+    await meetingWorkspace.tab("Metadata").click();
+    await expect(meetingWorkspace.metadataHeading()).toBeVisible();
   });
 
-  test("summary tab shows output and can refresh", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Summary").click();
+  test("toggling to Workspace view shows the Prep + Notes split pane with loaded content", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.viewToggle("Workspace").click();
+    // Resize panel group renders
+    await expect(meetingWorkspace.workspacePanelGroup()).toBeVisible();
+    // Prep pane content from readPrep is visible (the "# Prep" heading is
+    // unique to the Prep pane for the weekly-planning mock).
+    await expect(page.getByRole("heading", { name: "Prep", level: 1 })).toBeVisible();
+    // Notes pane content from notes.md is visible
+    await expect(page.getByText("These are the notes I found:")).toBeVisible();
+  });
+
+  test('"Edit prep and notes" link in Details flips to Workspace view', async ({ meetingWorkspace }) => {
+    await expect(meetingWorkspace.editInWorkspaceLink()).toBeVisible();
+    await meetingWorkspace.editInWorkspaceLink().click();
+    await expect(meetingWorkspace.workspacePanelGroup()).toBeVisible();
+    // Tablist is gone in Workspace view
+    await expect(meetingWorkspace.tab("Summary")).toHaveCount(0);
+  });
+
+  // TODO(workspace-details-split): the in-place "Refresh" button on the Summary
+  // tab no longer exists — refreshing a summary now goes through the Reprocess
+  // dropdown + modal. Rewrite this test against that flow in a follow-up.
+  test.skip("summary tab shows output and can refresh", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Summary").click();
     await expect(page.getByText("Highlights")).toBeVisible();
-    await meetingDetail.refreshSummaryButton().click();
+    await meetingWorkspace.refreshSummaryButton().click();
     await expect(page.getByText("Clarified pricing next steps.")).toBeVisible();
   });
 
-  test("analysis tab shows existing and missing outputs", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Analysis").click();
-    await meetingDetail.promptSidebarItem("Decision Log").click();
+  test("analysis tab shows existing and missing outputs", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Analysis").click();
+    await meetingWorkspace.promptSidebarItem("Decision Log").click();
     await expect(page.getByRole("heading", { name: "Decisions" })).toBeVisible();
 
-    await meetingDetail.promptSidebarItem("1:1 Follow-up").click();
+    await meetingWorkspace.promptSidebarItem("1:1 Follow-up").click();
     await expect(page.getByText("This prompt has not produced output for this meeting yet.")).toBeVisible();
-    await meetingDetail.runPromptButton().click();
+    await meetingWorkspace.runPromptButton().click();
     await expect(page.getByRole("heading", { name: "Follow-up", exact: true })).toBeVisible();
   });
 
-  test("analysis sidebar shows model name in prompt metadata", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Analysis").click();
+  test("analysis sidebar shows model name in prompt metadata", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Analysis").click();
     // Decision Log has model: "qwen3.5:9b" — shown as the raw Ollama model name
     await expect(page.getByText("qwen3.5:9b").first()).toBeVisible();
   });
 
-  test("processing step rows display model name", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Analysis").click();
-    await meetingDetail.promptSidebarItem("1:1 Follow-up").click();
-    await meetingDetail.runPromptButton().click();
+  test("processing step rows display model name", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Analysis").click();
+    await meetingWorkspace.promptSidebarItem("1:1 Follow-up").click();
+    await meetingWorkspace.runPromptButton().click();
     // The PipelineStatus step rows should show the raw model name
     await expect(page.getByText("qwen3.5:9b").first()).toBeVisible();
   });
 
-  test("notes and transcript tabs render meeting content", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Notes").click();
-    await expect(page.getByText("These are the notes I found:")).toBeVisible();
-
-    await meetingDetail.tab("Transcript").click();
+  test("transcript tab renders meeting content", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Transcript").click();
     await expect(page.getByText("Welcome everyone.")).toBeVisible();
   });
 
   test("metadata description can be edited, cancelled, and saved", async ({
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
-    await meetingDetail.tab("Metadata").click();
-    await meetingDetail.metadataDescriptionText().click();
-    await meetingDetail.metadataDescriptionTextarea().fill("Changed description");
-    await meetingDetail.metadataCancelButton().click();
+    await meetingWorkspace.tab("Metadata").click();
+    await meetingWorkspace.metadataDescriptionText().click();
+    await meetingWorkspace.metadataDescriptionTextarea().fill("Changed description");
+    await meetingWorkspace.metadataCancelButton().click();
     await expect(page.getByText("Changed description")).toHaveCount(0);
 
-    await meetingDetail.metadataDescriptionText().click();
-    await meetingDetail.metadataDescriptionTextarea().fill("Changed description");
-    await meetingDetail.metadataSaveButton().click();
+    await meetingWorkspace.metadataDescriptionText().click();
+    await meetingWorkspace.metadataDescriptionTextarea().fill("Changed description");
+    await meetingWorkspace.metadataSaveButton().click();
     await expect(page.getByText("Changed description").first()).toBeVisible();
   });
 
-  test("recording and files tabs show stored artifacts", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Recording").click();
+  test("recording and files tabs show stored artifacts", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Recording").click();
     await expect(page.getByText("audio/mic.wav")).toBeVisible();
     await expect(page.locator("audio")).toHaveCount(2);
 
-    await meetingDetail.tab("Files").click();
+    await meetingWorkspace.tab("Files").click();
     await expect(page.getByText("Attached files (1)")).toBeVisible();
     await expect(page.getByText("agenda.pdf")).toBeVisible();
   });
 
-  test("audio players load and have playable source", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Recording").click();
+  test("audio players load and have playable source", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Recording").click();
     await expect(page.locator("audio")).toHaveCount(2);
 
     // Each audio element should have a src attribute set (data URL from mock)
@@ -156,18 +175,18 @@ test.describe("Meeting Workspace", () => {
     expect(mediaError).toBeNull();
   });
 
-  test("recording delete dialog cancels cleanly", async ({ meetingDetail, page }) => {
-    await meetingDetail.tab("Recording").click();
-    await meetingDetail.deleteRecordingButton().click();
-    await expect(meetingDetail.deleteRecordingDialogTitle()).toBeVisible();
+  test("recording delete dialog cancels cleanly", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.tab("Recording").click();
+    await meetingWorkspace.deleteRecordingButton().click();
+    await expect(meetingWorkspace.deleteRecordingDialogTitle()).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();
-    await expect(meetingDetail.deleteRecordingDialogTitle()).not.toBeVisible();
+    await expect(meetingWorkspace.deleteRecordingDialogTitle()).not.toBeVisible();
     await expect(page.getByText("audio/mic.wav")).toBeVisible();
   });
 
-  test("open folder action calls the external handler", async ({ app, meetingDetail }) => {
-    await meetingDetail.moreActionsButton().click();
-    await meetingDetail.openFolderButton().click();
+  test("open folder action calls the external handler", async ({ app, meetingWorkspace }) => {
+    await meetingWorkspace.moreActionsButton().click();
+    await meetingWorkspace.openFolderButton().click();
     await expect
       .poll(async () => await app.lastExternalAction())
       .toMatchObject({
@@ -177,58 +196,48 @@ test.describe("Meeting Workspace", () => {
   });
 
   test("can reopen a complete meeting as a draft and continue recording", async ({
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
-    await meetingDetail.moreActionsButton().click();
-    await meetingDetail.editAsDraftItem().click();
+    await meetingWorkspace.moreActionsButton().click();
+    await meetingWorkspace.editAsDraftItem().click();
     await expect(page.getByText("draft").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible();
     await page.getByRole("button", { name: "Start recording" }).click();
     await expect(page.getByRole("button", { name: "End meeting" })).toBeVisible();
   });
 
-  test("processing meeting shows progress on notes and summary tabs instead of empty state", async ({
+  test("processing meeting shows progress on summary tab instead of empty state", async ({
     app,
     meetingsList,
+    meetingWorkspace,
     page,
   }) => {
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Customer call").click();
+    await meetingWorkspace.waitForReady({ view: "details" });
 
-    // Should show processing state, not "No notes for this meeting"
-    const notesTab = page.getByRole("tab", { name: "Notes" });
-    await notesTab.click();
-    await expect(page.getByText("No notes for this meeting.")).toHaveCount(0);
-    await expect(page.getByText(/Notes will appear|Processing/i).first()).toBeVisible();
-
-    // Summary tab should also show processing state
-    const summaryTab = page.getByRole("tab", { name: "Summary" });
-    await summaryTab.click();
+    // Summary tab should show processing state, not "No notes for this meeting"
+    await meetingWorkspace.tab("Summary").click();
     await expect(page.getByText("Summary is being generated")).toBeVisible();
   });
 
-  test("draft meeting shows editor on notes tab and start recording button", async ({
+  test("draft meeting lands in Workspace view with the split pane + start recording", async ({
     app,
     meetingsList,
+    meetingWorkspace,
     page,
   }) => {
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Draft standup").click();
+    // Drafts default to the Workspace view.
+    await meetingWorkspace.waitForReady({ view: "workspace" });
 
-    // Draft should show the notes editor (not read-only)
-    const notesTab = page.getByRole("tab", { name: "Notes" });
-    await notesTab.click();
-    // The draft notes tab renders a CodeMirror editor, not an empty state
-    await expect(page.getByText("No notes for this meeting.")).toHaveCount(0);
-
-    // Prep tab should show the prep notes
-    const prepTab = page.getByRole("tab", { name: "Prep" });
-    await prepTab.click();
+    await expect(meetingWorkspace.workspacePanelGroup()).toBeVisible();
+    // Prep content from mocks is visible in the split pane
     await expect(page.getByText("Check yesterday's blockers")).toBeVisible();
-
     // Start recording button should be available
     await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible();
   });
@@ -236,26 +245,27 @@ test.describe("Meeting Workspace", () => {
   test("error meeting shows failed state and allows reprocessing", async ({
     app,
     meetingsList,
+    meetingWorkspace,
     page,
   }) => {
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Failed import").click();
+    await meetingWorkspace.waitForReady({ view: "details" });
 
     // Analysis tab should show the failure
-    const analysisTab = page.getByRole("tab", { name: "Analysis" });
-    await analysisTab.click();
+    await meetingWorkspace.tab("Analysis").click();
     await expect(page.getByText(/failed/i).first()).toBeVisible();
   });
 
-  test("delete cancels and confirms cleanly", async ({ meetingDetail, page }) => {
-    await meetingDetail.moreActionsButton().click();
-    await meetingDetail.deleteButton().click();
+  test("delete cancels and confirms cleanly", async ({ meetingWorkspace, page }) => {
+    await meetingWorkspace.moreActionsButton().click();
+    await meetingWorkspace.deleteButton().click();
     await page.getByRole("button", { name: "Keep meeting" }).click();
-    await expect(meetingDetail.tab("Metadata")).toBeVisible();
+    await expect(meetingWorkspace.tab("Metadata")).toBeVisible();
 
-    await meetingDetail.moreActionsButton().click();
-    await meetingDetail.deleteButton().click();
+    await meetingWorkspace.moreActionsButton().click();
+    await meetingWorkspace.deleteButton().click();
     await page.getByRole("button", { name: "Delete meeting" }).click();
     await expect(page.locator("header h1")).toContainText("Meetings");
   });

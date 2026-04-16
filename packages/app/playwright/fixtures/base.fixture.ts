@@ -3,7 +3,7 @@ import { installMockApi } from "../mock-api";
 import { AppPage } from "../pages/app.page";
 import { RecordViewPage } from "../pages/record-view.page";
 import { MeetingsListPage } from "../pages/meetings-list.page";
-import { MeetingDetailPage } from "../pages/meeting-detail.page";
+import { MeetingWorkspacePage } from "../pages/meeting-workspace.page";
 import { PromptsEditorPage } from "../pages/prompts-editor.page";
 import { SettingsPage } from "../pages/settings.page";
 import { LogsViewPage } from "../pages/logs-view.page";
@@ -20,7 +20,7 @@ type Fixtures = {
   app: AppPage;
   recordView: RecordViewPage;
   meetingsList: MeetingsListPage;
-  meetingDetail: MeetingDetailPage;
+  meetingWorkspace: MeetingWorkspacePage;
   promptsEditor: PromptsEditorPage;
   settings: SettingsPage;
   logsView: LogsViewPage;
@@ -40,8 +40,8 @@ export const test = base.extend<Fixtures>({
   meetingsList: async ({ app }, use) => {
     await use(new MeetingsListPage(app.page));
   },
-  meetingDetail: async ({ app }, use) => {
-    await use(new MeetingDetailPage(app.page));
+  meetingWorkspace: async ({ app }, use) => {
+    await use(new MeetingWorkspacePage(app.page));
   },
   promptsEditor: async ({ app }, use) => {
     await use(new PromptsEditorPage(app.page));

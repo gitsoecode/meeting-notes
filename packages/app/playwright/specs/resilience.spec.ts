@@ -6,7 +6,7 @@ test.describe("Resilience", () => {
   test("stale meetings are pruned from the list and fail gracefully from detail navigation", async ({
     app,
     meetingsList,
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
     await app.navigateTo("Meetings");
@@ -15,7 +15,7 @@ test.describe("Resilience", () => {
 
     await app.removeRunFolder(WEEKLY_RUN);
     await meetingsList.meetingRow("Weekly planning").click();
-    await expect(meetingDetail.friendlyError()).toBeVisible();
+    await expect(meetingWorkspace.friendlyError()).toBeVisible();
 
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
@@ -25,15 +25,15 @@ test.describe("Resilience", () => {
   test("missing attachments directory renders an empty files state without crashing", async ({
     app,
     meetingsList,
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
     await app.removeAttachmentDirectory(WEEKLY_RUN);
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Weekly planning").click();
-    await meetingDetail.waitForReady();
-    await meetingDetail.tab("Files").click();
+    await meetingWorkspace.waitForReady({ view: "details" });
+    await meetingWorkspace.tab("Files").click();
     await expect(page.getByText("Drop files here or click to browse")).toBeVisible();
     await expect(page.getByText("agenda.pdf")).toHaveCount(0);
   });
@@ -41,33 +41,33 @@ test.describe("Resilience", () => {
   test("missing transcript file keeps the workspace mounted and shows an empty-state message", async ({
     app,
     meetingsList,
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
     await app.removeDocument(WEEKLY_RUN, "transcript.md");
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Weekly planning").click();
-    await meetingDetail.waitForReady();
-    await meetingDetail.tab("Transcript").click();
+    await meetingWorkspace.waitForReady({ view: "details" });
+    await meetingWorkspace.tab("Transcript").click();
     await expect(page.getByText("No transcript available for this meeting.")).toBeVisible();
-    await expect(meetingDetail.tab("Summary")).toBeVisible();
+    await expect(meetingWorkspace.tab("Summary")).toBeVisible();
   });
 
   test("failed prompt outputs surface as failed pipeline state and preserve the workspace", async ({
     app,
     meetingsList,
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
     await app.failPromptOutput(WEEKLY_RUN, "one-on-one-follow-up", "Mock prompt failure");
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Weekly planning").click();
-    await meetingDetail.waitForReady();
-    await meetingDetail.tab("Analysis").click();
-    await meetingDetail.promptSidebarItem("1:1 Follow-up").click();
-    await meetingDetail.runPromptButton().click();
+    await meetingWorkspace.waitForReady({ view: "details" });
+    await meetingWorkspace.tab("Analysis").click();
+    await meetingWorkspace.promptSidebarItem("1:1 Follow-up").click();
+    await meetingWorkspace.runPromptButton().click();
     await expect(page.getByText("1 failed")).toBeVisible();
     await expect(page.getByText("This prompt has not produced output for this meeting yet.")).toBeVisible();
   });

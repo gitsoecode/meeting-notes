@@ -14,7 +14,7 @@ test.describe("Home & Recording", () => {
   test("end meeting dialog can process and navigate to the meeting workspace", async ({
     recordView,
     page,
-    meetingDetail,
+    meetingWorkspace,
   }) => {
     await recordView.startRecording("Test Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
@@ -27,13 +27,18 @@ test.describe("Home & Recording", () => {
     await expect(page.getByText("Uses Sonnet 4.6")).toBeVisible();
     await recordView.confirmEndMeetingButton().click();
 
-    await meetingDetail.waitForReady();
+    // After the save/process roundtrip, the meeting route first sees the run
+    // as a draft (the mock transitions status draft → processing → complete).
+    // The default-view resolver therefore picks Workspace; the meeting page
+    // still loads, which is what this test cares about. A follow-up test
+    // covers the post-completion Details landing.
+    await meetingWorkspace.waitForReady({ view: "workspace" });
   });
 
   test("end meeting dialog can save without processing", async ({
     recordView,
     page,
-    meetingDetail,
+    meetingWorkspace,
   }) => {
     await recordView.startRecording("Saved Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
@@ -43,7 +48,9 @@ test.describe("Home & Recording", () => {
     await expect(page.getByText("Keep the recording for later.")).toBeVisible();
     await recordView.saveMeetingButton().click();
 
-    await meetingDetail.waitForReady();
+    // Save-without-processing leaves the meeting as a draft, which lands on
+    // the Workspace view by default.
+    await meetingWorkspace.waitForReady({ view: "workspace" });
     await expect(page.getByText("draft").first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible();
   });
@@ -69,7 +76,10 @@ test.describe("Home & Recording", () => {
     await recordView.reviewDeleteButton().click();
     await recordView.confirmDeleteButton().click();
 
-    await expect(recordView.newRecordingBadge()).toBeVisible();
+    // After Stage 4, quick-start creates a draft first and lands the user in
+    // the meeting shell; end-meeting → delete calls the shell's `onBack` which
+    // navigates to the Meetings list (not Home).
+    await expect(page.locator("header h1")).toContainText("Meetings");
     await expect(page.getByText("Back to meetings")).not.toBeVisible();
   });
 
@@ -82,22 +92,22 @@ test.describe("Home & Recording", () => {
     await expect(page.getByText("Back to meetings")).toBeVisible();
   });
 
-  test("prepare for later opens a draft with working tabs and files actions", async ({
+  test("prepare for later opens a draft in the Workspace split pane", async ({
     recordView,
+    meetingWorkspace,
     page,
   }) => {
     await recordView.prepareForLaterButton().click();
+    await meetingWorkspace.waitForReady({ view: "workspace" });
     await expect(page.getByText("draft").first()).toBeVisible();
-    await expect(recordView.draftTab("Prep")).toBeVisible();
-
-    await recordView.draftTab("Notes").click();
-    await expect(recordView.draftTab("Notes")).toHaveAttribute("data-state", "active");
-
-    await recordView.draftTab("Analysis").click();
-    await expect(recordView.draftTab("Analysis")).toHaveAttribute("data-state", "active");
-
-    await recordView.draftTab("Files").click();
-    await expect(recordView.draftTab("Files")).toHaveAttribute("data-state", "active");
+    // Draft defaults to Workspace view with the Prep + Notes split pane.
+    await expect(meetingWorkspace.workspacePanelGroup()).toBeVisible();
+    await expect(page.getByRole("button", { name: "Start recording" })).toBeVisible();
+    // Toggling to Details exposes the tab set; Analysis and Files live there.
+    await meetingWorkspace.viewToggle("Details").click();
+    await expect(meetingWorkspace.tab("Analysis")).toBeVisible();
+    await meetingWorkspace.tab("Files").click();
+    await expect(meetingWorkspace.tab("Files")).toHaveAttribute("data-state", "active");
   });
 
   test("end meeting dialog cancel keeps recording active", async ({

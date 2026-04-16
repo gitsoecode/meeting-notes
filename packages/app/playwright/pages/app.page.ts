@@ -34,8 +34,9 @@ export class AppPage {
   }
 
   recordingBadge() {
-    // The recording status chip is rendered by MeetingHeader inside main
-    return this.page.locator("main .text-red-700").getByText("Recording");
+    // The recording status is rendered by MeetingShell's right-column
+    // destructive badge (includes the elapsed timer, e.g. "Recording · 3:42").
+    return this.page.locator("main").getByText(/Recording · \d/).first();
   }
 
   sidebarRecordingDot() {

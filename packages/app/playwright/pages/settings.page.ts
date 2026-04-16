@@ -55,7 +55,10 @@ export class SettingsPage {
   }
 
   systemAudioStatus() {
-    return this.page.getByText(/Automatic \(macOS|Not available/);
+    // AudioLevelMeters renders either "Automatic (AudioTee / macOS 14.2+)"
+    // or "Not available (requires macOS 14.2+)" depending on the macOS
+    // probe result.
+    return this.page.getByText(/Automatic \(AudioTee|Not available/);
   }
 
   // Transcription card (on Models tab)

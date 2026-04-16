@@ -23,23 +23,22 @@ test.describe("Meeting Lifecycle", () => {
   test("complete meeting can be reopened as draft, then processed again", async ({
     app,
     meetingsList,
-    meetingDetail,
+    meetingWorkspace,
     page,
   }) => {
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Weekly planning").click();
-    await meetingDetail.waitForReady();
+    await meetingWorkspace.waitForReady({ view: "details" });
 
-    await meetingDetail.moreActionsButton().click();
-    await meetingDetail.editAsDraftItem().click();
+    await meetingWorkspace.moreActionsButton().click();
+    await meetingWorkspace.editAsDraftItem().click();
     await expect(page.getByText("draft").first()).toBeVisible();
 
     await page.getByRole("button", { name: "Start recording" }).click();
     await page.getByRole("button", { name: "End meeting" }).click();
     await page.getByRole("button", { name: "End meeting" }).last().click();
 
-    await meetingDetail.waitForReady();
     await expect(page.getByText("complete").first()).toBeVisible();
   });
 

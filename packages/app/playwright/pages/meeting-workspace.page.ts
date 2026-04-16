@@ -1,6 +1,8 @@
 import type { Locator, Page } from "@playwright/test";
 
-export class MeetingDetailPage {
+export type MeetingView = "Workspace" | "Details";
+
+export class MeetingWorkspacePage {
   readonly page: Page;
   readonly main: Locator;
 
@@ -21,8 +23,18 @@ export class MeetingDetailPage {
     return this.main.locator("[data-slot='badge']").first();
   }
 
-  // Tabs
-  tab(name: "Metadata" | "Prep" | "Notes" | "Summary" | "Analysis" | "Transcript" | "Recording" | "Files") {
+  // View toggle (Workspace | Details segmented control)
+  viewToggle(which: MeetingView) {
+    return this.main.getByRole("radio", { name: which });
+  }
+
+  // Link in Details view that flips back to Workspace
+  editInWorkspaceLink() {
+    return this.main.getByRole("button", { name: /Edit prep and notes in Workspace view/ });
+  }
+
+  // Tabs (Details view only)
+  tab(name: "Metadata" | "Summary" | "Analysis" | "Transcript" | "Recording" | "Files") {
     return this.main.locator('[role="tab"]:visible').filter({ hasText: name }).first();
   }
 
@@ -59,26 +71,15 @@ export class MeetingDetailPage {
     return this.main.getByText("No analysis prompts yet");
   }
 
-  // Notes tab
-  editNotesButton() {
-    return this.main.getByRole("button", { name: "Edit" });
+  // Workspace split-pane helpers. The panel primitives don't expose a
+  // distinctive attribute by default, so match by the resize handle and the
+  // pane-header labels rendered above each editor.
+  workspacePanelGroup() {
+    return this.main.locator('[data-group]').first();
   }
 
-  saveNotesButton() {
-    return this.main.getByRole("button", { name: "Save notes" });
-  }
-
-  notesCancelButton() {
-    // In notes edit mode, Cancel is alongside Save
-    return this.main.getByRole("button", { name: "Cancel" });
-  }
-
-  notesReadModeHeading() {
-    return this.main.getByText("Editing notes").or(this.main.getByText("No notes for this meeting."));
-  }
-
-  notesEditor() {
-    return this.main.locator(".cm-content, .milkdown");
+  workspacePrepLabel() {
+    return this.main.getByText("Prep", { exact: true });
   }
 
   // Transcript tab
@@ -200,21 +201,20 @@ export class MeetingDetailPage {
     return this.main.getByText("This meeting no longer exists on disk.");
   }
 
-  focusRecordingButton() {
-    return this.main.getByRole("button", { name: /Focus on recording/i });
-  }
-
-  fullWorkspaceButton() {
-    return this.main.getByRole("button", { name: /View full workspace/i });
-  }
-
-  prepLockButton() {
-    return this.main.getByRole("button", { name: /Unlock editing|Lock editing/ }).first();
-  }
-
-  async waitForReady() {
+  /**
+   * Waits for the meeting route to finish its initial data load. Pass the
+   * view you expect to land on: "details" (the default for completed/error
+   * meetings) waits for the tablist, "workspace" (drafts and live) waits for
+   * the resize panel group.
+   */
+  async waitForReady(opts: { view?: "workspace" | "details" } = {}) {
     await this.page.locator("header h1").filter({ hasText: "Meeting" }).waitFor();
     await this.backButton().waitFor();
-    await this.page.getByRole("tablist").waitFor();
+    const view = opts.view ?? "details";
+    if (view === "details") {
+      await this.page.getByRole("tablist").waitFor();
+    } else {
+      await this.workspacePanelGroup().waitFor();
+    }
   }
 }

@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures/base.fixture";
 test("runs through home, recording, meeting workspace, and prompt workflows", async ({
   app,
   recordView,
-  meetingDetail,
+  meetingWorkspace,
   promptsEditor,
   page,
 }) => {
@@ -19,20 +19,23 @@ test("runs through home, recording, meeting workspace, and prompt workflows", as
   await expect(recordView.endMeetingDialogTitle()).toBeVisible();
   await recordView.confirmEndMeetingButton().click();
 
-  await meetingDetail.waitForReady();
-  await meetingDetail.tab("Summary").click();
-  await expect(meetingDetail.tab("Summary")).toHaveAttribute("data-state", "active");
+  // End-recording-from-home landing first resolves to Workspace during the
+  // transient draft state. Flip to Details explicitly.
+  await meetingWorkspace.waitForReady({ view: "workspace" });
+  await meetingWorkspace.viewToggle("Details").click();
+  await meetingWorkspace.tab("Summary").click();
+  await expect(meetingWorkspace.tab("Summary")).toHaveAttribute("data-state", "active");
 
-  await meetingDetail.tab("Transcript").click();
+  await meetingWorkspace.tab("Transcript").click();
   await expect(page.getByText("Welcome everyone.")).toBeVisible();
 
-  await meetingDetail.tab("Analysis").click();
-  await meetingDetail.promptSidebarItem("Decision Log").click();
-  await meetingDetail.runPromptButton().click();
+  await meetingWorkspace.tab("Analysis").click();
+  await meetingWorkspace.promptSidebarItem("Decision Log").click();
+  await meetingWorkspace.runPromptButton().click();
   await expect(page.getByRole("heading", { name: "Decision Log" })).toBeVisible();
 
-  await meetingDetail.tab("Metadata").click();
-  await expect(meetingDetail.metadataHeading()).toBeVisible();
+  await meetingWorkspace.tab("Metadata").click();
+  await expect(meetingWorkspace.metadataHeading()).toBeVisible();
 
   await app.navigateTo("Prompt Library");
   await expect(promptsEditor.titleInput()).toBeVisible();
@@ -55,7 +58,7 @@ test("runs through home, recording, meeting workspace, and prompt workflows", as
 test("covers meetings list, import, bulk actions, and activity states", async ({
   app,
   meetingsList,
-  meetingDetail,
+  meetingWorkspace,
   page,
 }) => {
   await app.navigateTo("Meetings");
@@ -73,7 +76,7 @@ test("covers meetings list, import, bulk actions, and activity states", async ({
   await meetingsList.bulkRunModalDoneButton().click();
 
   await meetingsList.meetingRow("Customer call").click();
-  await meetingDetail.waitForReady();
+  await meetingWorkspace.waitForReady({ view: "details" });
   await expect(page.getByText("Processing").first()).toBeVisible();
 
   await app.navigateTo("Activity");

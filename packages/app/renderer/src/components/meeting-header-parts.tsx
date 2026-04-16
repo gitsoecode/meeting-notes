@@ -1,74 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
-import {
-  ArrowLeft,
-  Calendar as CalendarIcon,
-  ChevronDown,
-  Pencil,
-  X,
-} from "lucide-react";
-import { Button } from "./ui/button";
+import { Calendar as CalendarIcon, Pencil } from "lucide-react";
 import { Calendar } from "./ui/calendar";
 import { Input } from "./ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { Spinner } from "./ui/spinner";
 
 // ---------------------------------------------------------------------------
-// Inline editable title (renders as span so parent can wrap in any heading)
+// Inline editable description — reads the current description, flips into an
+// <Input> on click, saves on Enter/blur, reverts on Escape.
 // ---------------------------------------------------------------------------
-function EditableTitle({
-  value,
-  onSave,
-}: {
-  value: string;
-  onSave: (v: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => { setDraft(value); }, [value]);
-  useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
-
-  if (editing) {
-    return (
-      <div className="flex items-center gap-2">
-        <Input
-          ref={inputRef}
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => { onSave(draft); setEditing(false); }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") { onSave(draft); setEditing(false); }
-            if (e.key === "Escape") { setDraft(value); setEditing(false); }
-          }}
-          className="text-2xl font-semibold h-auto py-1"
-        />
-        <Button variant="ghost" size="sm" onClick={() => { setDraft(value); setEditing(false); }}>
-          <X className="h-4 w-4" />
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-center gap-2 group">
-      <span className="text-2xl font-semibold text-[var(--text-primary)]">{value}</span>
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--bg-secondary)]"
-      >
-        <Pencil className="h-3.5 w-3.5 text-[var(--text-tertiary)]" />
-      </button>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Inline editable description
-// ---------------------------------------------------------------------------
-function EditableDescription({
+export function EditableDescription({
   value,
   onSave,
 }: {
@@ -112,12 +54,12 @@ function EditableDescription({
   }
 
   return (
-    <div className="group flex items-center gap-1.5 min-w-0">
-      <span className="text-sm text-[var(--text-secondary)] truncate max-w-xs" title={value}>{value}</span>
+    <div className="group flex min-w-0 items-center gap-1.5">
+      <span className="truncate text-sm text-[var(--text-secondary)] max-w-xs" title={value}>{value}</span>
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 rounded hover:bg-[var(--bg-secondary)]"
+        className="rounded p-0.5 opacity-0 transition-opacity hover:bg-[var(--bg-secondary)] group-hover:opacity-100"
       >
         <Pencil className="h-3 w-3 text-[var(--text-tertiary)]" />
       </button>
@@ -126,9 +68,9 @@ function EditableDescription({
 }
 
 // ---------------------------------------------------------------------------
-// Inline scheduled time (popover with DateTimePicker calendar + time input)
+// Inline scheduled-time editor — Popover with a calendar + time input.
 // ---------------------------------------------------------------------------
-function InlineScheduledTime({
+export function InlineScheduledTime({
   value,
   onChange,
 }: {
@@ -173,9 +115,8 @@ function InlineScheduledTime({
             className="group inline-flex items-center gap-1.5 text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
           >
             <CalendarIcon className="h-3 w-3" />
-            {format(parseISO(value), "MMM d, yyyy")} at{" "}
-            {format(parseISO(value), "h:mm a")}
-            <Pencil className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-[var(--text-tertiary)]" />
+            {format(parseISO(value), "MMM d, yyyy")} at {format(parseISO(value), "h:mm a")}
+            <Pencil className="h-3 w-3 text-[var(--text-tertiary)] opacity-0 transition-opacity group-hover:opacity-100" />
           </button>
         ) : (
           <button
@@ -210,9 +151,10 @@ function InlineScheduledTime({
 }
 
 // ---------------------------------------------------------------------------
-// Status line rendering
+// Status chip — renders the lifecycle badge ("Draft", "Recording · 3:42",
+// "Paused", "Processing…", "Complete · 30.0m", "Error").
 // ---------------------------------------------------------------------------
-function StatusLine({
+export function StatusLine({
   status,
   elapsed,
   duration,
@@ -222,13 +164,11 @@ function StatusLine({
   duration?: number | null;
 }) {
   const durationLabel = duration != null ? `${duration.toFixed(1)}m` : null;
-
   const chipBase = "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium";
 
   switch (status) {
     case "draft":
       return <span className={`${chipBase} bg-[var(--bg-secondary)] text-[var(--text-secondary)]`}>Draft</span>;
-
     case "recording":
       return (
         <span className={`${chipBase} bg-red-50 text-red-700`}>
@@ -239,7 +179,6 @@ function StatusLine({
           Recording{elapsed ? ` · ${elapsed}` : ""}
         </span>
       );
-
     case "paused":
       return (
         <span className={`${chipBase} bg-amber-50 text-amber-700`}>
@@ -247,29 +186,24 @@ function StatusLine({
           Paused
         </span>
       );
-
     case "processing":
       return (
         <span className={`${chipBase} bg-blue-50 text-blue-700`}>
-          <Spinner className="h-3 w-3" />
-          Processing…
+          <Spinner className="h-3 w-3" /> Processing…
         </span>
       );
-
     case "complete":
       return (
         <span className={`${chipBase} bg-emerald-50 text-emerald-700`}>
           Complete{durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       );
-
     case "error":
       return (
         <span className={`${chipBase} bg-red-50 text-red-700`}>
           Error{durationLabel ? ` · ${durationLabel}` : ""}
         </span>
       );
-
     default:
       return (
         <span className={`${chipBase} bg-[var(--bg-secondary)] text-[var(--text-secondary)]`}>
@@ -277,106 +211,4 @@ function StatusLine({
         </span>
       );
   }
-}
-
-// ---------------------------------------------------------------------------
-// MeetingHeader — unified header for all meeting states
-// ---------------------------------------------------------------------------
-export interface MeetingHeaderProps {
-  status: string;
-  title: string;
-  description?: string | null;
-  scheduledTime?: string | null;
-  duration?: number | null;
-  /** Elapsed time label for recording state, e.g. "3:42" */
-  elapsed?: string;
-  /** ISO timestamp shown for completed meetings */
-  timestamp?: string;
-  /** Callback to save title — when provided, title is editable */
-  onTitleSave?: (v: string) => void;
-  /** Callback to save description — when provided, description is editable */
-  onDescriptionSave?: (v: string) => void;
-  /** Callback for scheduled time changes */
-  onScheduledTimeChange?: (iso: string | null) => void;
-  /** "← Back to meetings" handler */
-  onBack?: () => void;
-  /** Right-side action buttons */
-  actions?: React.ReactNode;
-}
-
-export function MeetingHeader({
-  status,
-  title,
-  description,
-  scheduledTime,
-  duration,
-  elapsed,
-  timestamp,
-  onTitleSave,
-  onDescriptionSave,
-  onScheduledTimeChange,
-  onBack,
-  actions,
-}: MeetingHeaderProps) {
-  return (
-    <div className="space-y-1">
-      {/* Breadcrumb */}
-      {onBack && (
-        <Button variant="ghost" className="w-fit px-0 text-sm -mb-1" onClick={onBack}>
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to meetings
-        </Button>
-      )}
-
-      {/* Title + actions row */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0 flex-1">
-          {onTitleSave ? (
-            <EditableTitle value={title} onSave={onTitleSave} />
-          ) : (
-            <h2 className="text-2xl font-semibold text-[var(--text-primary)]">{title}</h2>
-          )}
-        </div>
-        {actions && (
-          <div className="flex shrink-0 items-center gap-2 pt-1">
-            {actions}
-          </div>
-        )}
-      </div>
-
-      {/* Description + scheduled time / timestamp + status line */}
-      <div className="flex items-center gap-x-3 min-w-0 flex-wrap">
-        {onDescriptionSave ? (
-          <div className="min-w-0 flex-shrink">
-            <EditableDescription value={description ?? ""} onSave={onDescriptionSave} />
-          </div>
-        ) : description ? (
-          <span className="text-sm text-[var(--text-secondary)] truncate min-w-0 flex-shrink" title={description}>{description}</span>
-        ) : null}
-
-        {onScheduledTimeChange && (
-          <>
-            {(description || onDescriptionSave) && <span className="text-[var(--text-tertiary)] shrink-0">·</span>}
-            <div className="shrink-0">
-              <InlineScheduledTime value={scheduledTime ?? null} onChange={onScheduledTimeChange} />
-            </div>
-          </>
-        )}
-
-        {timestamp && !onScheduledTimeChange && (
-          <>
-            {(description || onDescriptionSave) && <span className="text-[var(--text-tertiary)] shrink-0">·</span>}
-            <span className="text-sm text-[var(--text-secondary)] shrink-0 whitespace-nowrap">
-              {new Date(timestamp).toLocaleString()}
-            </span>
-          </>
-        )}
-
-        {/* Status chip */}
-        <span className="text-[var(--text-tertiary)] shrink-0">·</span>
-        <div className="shrink-0">
-          <StatusLine status={status} elapsed={elapsed} duration={duration} />
-        </div>
-      </div>
-    </div>
-  );
 }

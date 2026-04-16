@@ -245,7 +245,12 @@ program
       claude: DEFAULT_CONFIG.claude,
       openai: DEFAULT_CONFIG.openai,
       ollama: DEFAULT_CONFIG.ollama,
-      recording: { mic_device: micDevice, system_device: systemDevice },
+      recording: {
+        mic_device: micDevice,
+        system_device: systemDevice,
+        aec_enabled: DEFAULT_CONFIG.recording.aec_enabled,
+        dedup_me_against_others: DEFAULT_CONFIG.recording.dedup_me_against_others,
+      },
       shortcuts: DEFAULT_CONFIG.shortcuts,
       audio_retention_days: null,
     };

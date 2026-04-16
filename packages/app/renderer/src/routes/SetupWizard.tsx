@@ -1088,7 +1088,12 @@ function AudioPermissionsPanel({
                 <Info className="h-3 w-3" />
                 Unsupported
               </Badge>
-              <span className="text-xs text-[var(--text-secondary)]">Requires macOS 14.2+</span>
+              <Badge variant="secondary" className="gap-1 bg-[var(--bg-secondary)] text-[var(--text-secondary)]">
+                Optional
+              </Badge>
+              <span className="text-xs text-[var(--text-secondary)]">
+                Requires macOS 14.2+ — mic-only recording still works.
+              </span>
             </>
           ) : systemAudioProbe.status === "granted" ? (
             <Badge className="gap-1 bg-[var(--success-muted,#dcfce7)] text-[var(--success,#15803d)]">

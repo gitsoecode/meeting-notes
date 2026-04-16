@@ -214,7 +214,7 @@ export function AudioLevelMeters({
         label="Microphone"
       >
         <Select value={micSelectValue} onValueChange={(v) => onMicDeviceChange(v === SYSTEM_DEFAULT_VALUE ? "" : v)}>
-          <SelectTrigger className="w-full">
+          <SelectTrigger id="settings-mic" aria-label="Microphone device" className="w-full">
             <SelectValue placeholder="Select microphone" />
           </SelectTrigger>
           <SelectContent>
@@ -250,6 +250,11 @@ export function AudioLevelMeters({
         <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-secondary)]">
           {systemAudioSupported ? "Automatic (AudioTee / macOS 14.2+)" : "Not available (requires macOS 14.2+)"}
         </div>
+        <p className="text-xs text-[var(--text-tertiary)]">
+          {systemAudioSupported
+            ? "A System Audio Recording permission will be requested the first time you start a meeting."
+            : "Mic-only recording still works."}
+        </p>
         <MeterWithOverlay level={snapshot?.system} active={active && systemAudioSupported} size="default" />
         <ChannelStatus level={snapshot?.system} active={active && systemAudioSupported} />
       </ChannelRow>

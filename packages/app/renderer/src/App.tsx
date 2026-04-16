@@ -3,7 +3,7 @@ import { api } from "./ipc-client";
 import type { AppConfigDTO, RecordingStatus } from "../../shared/ipc";
 import { RecordView } from "./routes/RecordView";
 import { MeetingsList } from "./routes/MeetingsList";
-import { MeetingWorkspace } from "./routes/MeetingWorkspace";
+import { MeetingShell } from "./routes/MeetingShell";
 import { PromptsEditor } from "./routes/PromptsEditor";
 import { Settings } from "./routes/Settings";
 import { SetupWizard } from "./routes/SetupWizard";
@@ -14,10 +14,12 @@ import { AppSidebar } from "./components/AppSidebar";
 import { SiteHeader } from "./components/SiteHeader";
 import { SidebarInset, SidebarMain, SidebarProvider } from "./components/ui/sidebar";
 
+export type MeetingView = "workspace" | "details";
+
 type Route =
   | { name: "record" }
   | { name: "meetings" }
-  | { name: "meeting"; runFolder: string }
+  | { name: "meeting"; runFolder: string; view?: MeetingView }
   | { name: "prompts"; promptId?: string }
   | { name: "settings" }
   | { name: "activity" };
@@ -28,8 +30,10 @@ function routeToHash(route: Route): string {
       return "#/record";
     case "meetings":
       return "#/meetings";
-    case "meeting":
-      return `#/meeting/${encodeURIComponent(route.runFolder)}`;
+    case "meeting": {
+      const base = `#/meeting/${encodeURIComponent(route.runFolder)}`;
+      return route.view ? `${base}/${route.view}` : base;
+    }
     case "prompts":
       return route.promptId
         ? `#/prompts/${encodeURIComponent(route.promptId)}`
@@ -41,6 +45,11 @@ function routeToHash(route: Route): string {
   }
 }
 
+function parseMeetingView(segment: string | undefined): MeetingView | undefined {
+  if (segment === "workspace" || segment === "details") return segment;
+  return undefined;
+}
+
 function routeFromHash(hash: string): Route | null {
   const normalized = hash.replace(/^#/, "");
   if (!normalized || normalized === "/" || normalized === "") {
@@ -48,7 +57,7 @@ function routeFromHash(hash: string): Route | null {
   }
 
   const parts = normalized.replace(/^\/+/, "").split("/");
-  const [head, tail] = parts;
+  const [head, tail, extra] = parts;
 
   switch (head) {
     case "record":
@@ -56,10 +65,14 @@ function routeFromHash(hash: string): Route | null {
     case "meetings":
       return { name: "meetings" };
     case "meeting":
-      return tail ? { name: "meeting", runFolder: decodeURIComponent(tail) } : null;
+      return tail
+        ? { name: "meeting", runFolder: decodeURIComponent(tail), view: parseMeetingView(extra) }
+        : null;
     case "prep":
-      // Backward compat: #/prep/:runFolder maps to the unified meeting route
-      return tail ? { name: "meeting", runFolder: decodeURIComponent(tail) } : null;
+      // Backward compat: #/prep/:runFolder[/view] maps to the unified meeting route
+      return tail
+        ? { name: "meeting", runFolder: decodeURIComponent(tail), view: parseMeetingView(extra) }
+        : null;
     case "prompts":
       return tail ? { name: "prompts", promptId: decodeURIComponent(tail) } : { name: "prompts" };
     case "settings":
@@ -175,8 +188,18 @@ export function App() {
     try {
       const d = new Date();
       const title = `Meeting - ${d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`;
-      await api.recording.start({ title });
-      navigate({ name: "record" });
+      // Always create a draft workspace first, then start recording against
+      // that draft. This eliminates the split-brain where Home could host a
+      // live meeting without a folder.
+      const draft = await api.runs.createDraft({ title });
+      try {
+        await api.recording.startForDraft({ runFolder: draft.run_folder });
+      } catch (startErr) {
+        // Leave the draft intact (user's title survives) and land in the
+        // Workspace view so they can retry via Start recording.
+        console.error("startForDraft failed after createDraft", startErr);
+      }
+      navigate({ name: "meeting", runFolder: draft.run_folder, view: "workspace" });
     } catch (err) {
       console.error("Quick start failed", err);
     } finally {
@@ -290,11 +313,13 @@ export function App() {
           <main className="flex min-h-0 flex-1 flex-col">
             {route.name === "record" && (
               <RecordView
-                recording={recording}
                 config={config}
-                onMeetingStopped={(runFolder) => navigate({ name: "meeting", runFolder })}
+                // Recent-meeting clicks and post-quick-start navigation: let
+                // the shell's default-view resolver pick Workspace for
+                // drafts/live and Details for completed/error meetings.
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
-                onOpenPrep={(runFolder) => navigate({ name: "meeting", runFolder })}
+                // Prep flow explicitly targets the editing surface.
+                onOpenPrep={(runFolder) => navigate({ name: "meeting", runFolder, view: "workspace" })}
                 onViewAllMeetings={() => navigate({ name: "meetings" })}
               />
             )}
@@ -305,13 +330,15 @@ export function App() {
               />
             )}
             {route.name === "meeting" && (
-              <MeetingWorkspace
+              <MeetingShell
                 runFolder={route.runFolder}
+                initialView={route.view}
                 recording={recording}
                 config={config}
                 onBack={() => navigate({ name: "meetings" })}
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
                 onOpenPromptLibrary={(promptId) => navigate({ name: "prompts", promptId })}
+                onViewChange={(view) => navigate({ name: "meeting", runFolder: route.runFolder, view })}
                 onDirtyChange={setIsDirty}
               />
             )}
