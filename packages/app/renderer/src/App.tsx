@@ -127,16 +127,18 @@ export function App() {
   );
 
   const navigate = useCallback(
-    (nextRoute: Route) => {
+    (nextRoute: Route, opts?: { replace?: boolean }) => {
       setNav((current) => {
         const currentRoute = current.stack[current.cursor];
         if (routeToHash(currentRoute) === routeToHash(nextRoute)) {
           // No-op: same route, skip stack push.
           return current;
         }
-        const truncated = current.stack.slice(0, current.cursor + 1);
-        const nextStack = [...truncated, nextRoute];
-        const nextState: NavState = { stack: nextStack, cursor: nextStack.length - 1 };
+        const nextStack = opts?.replace
+          ? [...current.stack.slice(0, current.cursor), nextRoute, ...current.stack.slice(current.cursor + 1)]
+          : [...current.stack.slice(0, current.cursor + 1), nextRoute];
+        const nextCursor = opts?.replace ? current.cursor : nextStack.length - 1;
+        const nextState: NavState = { stack: nextStack, cursor: nextCursor };
         if (isDirtyRef.current) {
           setPendingNav({ state: nextState });
           return current;
@@ -396,7 +398,7 @@ export function App() {
                 onBack={() => navigate({ name: "meetings" })}
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
                 onOpenPromptLibrary={(promptId) => navigate({ name: "prompts", promptId })}
-                onViewChange={(view) => navigate({ name: "meeting", runFolder: route.runFolder, view })}
+                onViewChange={(view, opts) => navigate({ name: "meeting", runFolder: route.runFolder, view }, opts)}
                 onDirtyChange={setIsDirty}
               />
             )}

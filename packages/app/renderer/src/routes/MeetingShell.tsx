@@ -83,7 +83,7 @@ interface MeetingShellProps {
   onOpenMeeting: (runFolder: string) => void;
   onOpenPromptLibrary: (promptId?: string) => void;
   /** Notifies the router when the user flips the Workspace/Details toggle. */
-  onViewChange?: (view: MeetingView) => void;
+  onViewChange?: (view: MeetingView, opts?: { replace?: boolean }) => void;
   onDirtyChange?: (isDirty: boolean) => void;
 }
 
@@ -320,7 +320,10 @@ export function MeetingShell({
     const next: MeetingView = "workspace";
     viewResolvedRef.current = true;
     if (next !== view) setView(next);
-    onViewChange?.(next);
+    // Replace the current history entry rather than pushing — otherwise the
+    // initial /meeting/:folder entry and the resolved /meeting/:folder/workspace
+    // entry both sit on the stack, and the first Back click is a silent no-op.
+    onViewChange?.(next, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, runFolder]);
 
