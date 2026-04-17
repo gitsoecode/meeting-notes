@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Avatar, AvatarFallback } from "./ui/avatar";
 import { cn, stripFrontmatter } from "../lib/utils";
 
@@ -117,7 +118,7 @@ export function speakerStyles(name: string): { fallback: string } {
 }
 
 export function TranscriptView({ source }: { source: string }) {
-  const groups = parseTranscriptGroups(source);
+  const groups = useMemo(() => parseTranscriptGroups(source), [source]);
 
   if (groups.length === 0) {
     return (
