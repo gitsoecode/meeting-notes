@@ -379,7 +379,7 @@ export async function installMockApi(page: Page) {
         "notes.md":
           "# Planning Notes\n\nThese are the notes I found:<br />\n\n- Review backlog\n- Confirm owners\n",
         "transcript.md":
-          "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:15` We need to lock the sprint scope.\n\n### Others\n\n`00:32` Let's keep the reporting task in.\n",
+          "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:15` We need to lock the sprint scope.\n\n`00:22` Quick agenda check before we dive in.\n\n### Others\n\n`00:32` Let's keep the reporting task in.\n\n### Me\n\n`00:45` Sounds good to me.\n\nAnd one more thing — I almost forgot the OKRs.\n\n`01:05` Let's revisit those next week.\n",
         "summary.md":
           "---\nsource: mock\n---\n# Summary\n\n## Highlights\n\n- Locked sprint scope.\n- Confirmed follow-up owners.\n",
         "decision-log.md":

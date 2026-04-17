@@ -109,6 +109,71 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByText("Welcome everyone.")).toBeVisible();
   });
 
+  test("transcript groups consecutive same-speaker utterances under one header", async ({
+    meetingWorkspace,
+    page,
+  }) => {
+    await meetingWorkspace.tab("Transcript").click();
+    // Scope every assertion to the transcript tabpanel so generic strings like
+    // "Me" / "ME" don't collide with other UI on the page.
+    const panel = page
+      .getByRole("tabpanel")
+      .filter({ hasText: "Welcome everyone." });
+
+    // All utterance text is preserved.
+    for (const line of [
+      "Welcome everyone.",
+      "We need to lock the sprint scope.",
+      "Quick agenda check before we dive in.",
+      "Let's keep the reporting task in.",
+      "Sounds good to me.",
+      "And one more thing — I almost forgot the OKRs.",
+      "Let's revisit those next week.",
+    ]) {
+      await expect(panel.getByText(line)).toBeVisible();
+    }
+
+    // Fixture has Me → Others → Me. Headers should collapse to:
+    //   2 "Me" headers (consecutive Me utterances within a group share one),
+    //   1 "Others" header.
+    await expect(panel.getByText("Me", { exact: true })).toHaveCount(2);
+    await expect(panel.getByText("Others", { exact: true })).toHaveCount(1);
+
+    // Avatar fallback initials render exactly once per group header.
+    await expect(panel.getByText("ME", { exact: true })).toHaveCount(2);
+    await expect(panel.getByText("O", { exact: true })).toHaveCount(1);
+
+    // Header timestamps come from the FIRST utterance in each grouped block.
+    await expect(panel.getByText("00:00", { exact: true })).toBeVisible();
+    await expect(panel.getByText("00:32", { exact: true })).toBeVisible();
+    await expect(panel.getByText("00:45", { exact: true })).toBeVisible();
+    // Mid-group timestamps are NOT promoted into headers.
+    await expect(panel.getByText("00:15", { exact: true })).toHaveCount(0);
+    await expect(panel.getByText("00:22", { exact: true })).toHaveCount(0);
+    await expect(panel.getByText("01:05", { exact: true })).toHaveCount(0);
+
+    // Mid-group timestamps are still accessible via the per-line title attr.
+    await expect(
+      panel.locator('p[title="00:15"]', { hasText: "We need to lock the sprint scope." })
+    ).toBeVisible();
+    await expect(
+      panel.locator('p[title="01:05"]', { hasText: "Let's revisit those next week." })
+    ).toBeVisible();
+
+    // Bare line (no `MM:SS` prefix) still renders, with no title attr.
+    const bareLine = panel.locator(
+      "p:not([title])",
+      { hasText: "And one more thing — I almost forgot the OKRs." }
+    );
+    await expect(bareLine).toBeVisible();
+
+    // Regression guard: the old card-chrome (grey row fill) is gone from
+    // the transcript pane.
+    await expect(
+      panel.locator('[class*="bg-[var(--bg-secondary)]"]')
+    ).toHaveCount(0);
+  });
+
   test("metadata description can be edited, cancelled, and saved", async ({
     meetingWorkspace,
     page,
