@@ -33,14 +33,14 @@ export function SiteHeader({
   const runFolder = recording?.run_folder;
 
   return (
-    <header className="sticky top-0 z-20 flex h-[var(--header-height,3.75rem)] shrink-0 items-center border-b border-[var(--border-subtle)] bg-[rgba(249,250,246,0.88)] backdrop-blur">
+    <header className="sticky top-0 z-20 flex h-[var(--header-height,3rem)] shrink-0 items-center border-b border-[var(--border-subtle)] bg-[rgba(249,250,246,0.88)] backdrop-blur [-webkit-app-region:drag]">
       <div className="flex w-full items-center gap-3 px-4 md:px-6">
         <SidebarTrigger />
-        <div className="flex shrink-0 items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 [-webkit-app-region:no-drag]">
           <button
             type="button"
             onClick={onGoBack}
-            className="rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-black/5 hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+            className="rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-black/5 hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
             aria-label="Go back"
             disabled={!canGoBack}
           >
@@ -49,7 +49,7 @@ export function SiteHeader({
           <button
             type="button"
             onClick={onGoForward}
-            className="rounded-md p-1.5 text-[var(--text-secondary)] transition-colors hover:bg-black/5 hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
+            className="rounded-md p-1 text-[var(--text-secondary)] transition-colors hover:bg-black/5 hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-[var(--text-secondary)]"
             aria-label="Go forward"
             disabled={!canGoForward}
           >
@@ -57,7 +57,7 @@ export function SiteHeader({
           </button>
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h1 className="shrink-0 text-xl font-semibold tracking-[-0.03em] text-[var(--text-primary)]">
+          <h1 className="shrink-0 text-base font-semibold tracking-[-0.02em] text-[var(--text-primary)]">
             {title}
           </h1>
           {subtitle && (
@@ -77,7 +77,7 @@ export function SiteHeader({
           <button
             type="button"
             onClick={() => onJumpToRecording?.(runFolder)}
-            className="flex shrink-0 items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-gray-50"
+            className="flex shrink-0 items-center gap-2 rounded-full border border-[var(--border-subtle)] bg-white px-3 py-1.5 text-xs font-medium shadow-sm transition-colors hover:bg-gray-50 [-webkit-app-region:no-drag]"
             aria-label="Jump to recording in progress"
           >
             {recording.paused ? (

@@ -116,9 +116,9 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     // Meeting now open. Flip to Details view if we landed on Workspace (the
     // mock transitions the run through draft → processing and we may hit
     // either state first depending on timing).
-    const detailsToggle = page.getByRole("radio", { name: "Details" });
+    const detailsToggle = page.getByRole("tab", { name: "Details" });
     await detailsToggle.waitFor();
-    if ((await detailsToggle.getAttribute("aria-checked")) !== "true") {
+    if ((await detailsToggle.getAttribute("data-state")) !== "active") {
       await detailsToggle.click();
     }
     const analysisTab = page.getByRole("tab", { name: "Analysis" });
@@ -203,24 +203,22 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     // Navigate to completed meeting — this lands in Details view by default.
     await page.getByText("Weekly planning").first().click();
 
-    // Notes editing now lives in Workspace view. There's a helper link in
-    // Details that flips over, and a segmented control too.
-    const editInWorkspace = page.getByRole("button", {
-      name: /Edit prep and notes in Workspace view/,
-    });
-    const editInWorkspaceVisible = await editInWorkspace.isVisible();
+    // Notes editing lives in Workspace view. The Workspace/Details toggle in
+    // the meeting header is the single bridge now.
+    const workspaceToggle = page.getByRole("tab", { name: /^Workspace$/ });
+    const workspaceToggleVisible = await workspaceToggle.isVisible();
 
-    await editInWorkspace.click();
+    await workspaceToggle.click();
 
     // Now in Workspace view — notes editor is inline, no "Edit" button needed.
     const notesEditor = page.locator(".milkdown").nth(1); // Prep is 0, Notes is 1
     const notesEditorVisible = await notesEditor.isVisible();
 
     const observations: string[] = [
-      `"Edit prep and notes in Workspace view" link visible in Details: ${editInWorkspaceVisible}`,
+      `Workspace toggle visible in Details header: ${workspaceToggleVisible}`,
       `Notes editor visible after toggle to Workspace: ${notesEditorVisible}`,
       'OBSERVATION: Notes editing is now inline in the Workspace split pane — no read/edit toggle, cursor goes straight in',
-      'OBSERVATION: The "Edit in Workspace" link in Details gives a single-click bridge for reviewers who arrive on Details first',
+      "OBSERVATION: The Workspace/Details toggle in the meeting header is the single bridge between reading and editing",
       'RECOMMENDATION: Keep this inline-editing model; it removes the old lock/unlock ceremony that Flow 6 used to surface',
     ];
 
@@ -465,8 +463,8 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     await app.navigateRoute({ name: "meeting", runFolder: "/runs/weekly-planning" });
     await expect(page.locator("header h1")).toContainText("Meeting");
 
-    // Reprocess modal
-    await page.getByRole("button", { name: "Launch chat" }).locator("..").getByRole("button").last().click();
+    // Reprocess modal — open the ⋯ overflow menu (last button in the shell header).
+    await page.locator("main header button").last().click();
     await page.getByRole("menuitem", { name: "Reprocess" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();

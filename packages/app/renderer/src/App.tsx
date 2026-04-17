@@ -339,12 +339,11 @@ export function App() {
     <SidebarProvider
       style={
         {
-          "--sidebar-width": "18rem",
-          "--header-height": "4.75rem",
+          "--sidebar-width": "224px",
+          "--header-height": "3rem",
         } as React.CSSProperties
       }
     >
-      <div className="h-8 shrink-0 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,0.88)] backdrop-blur-sm [-webkit-app-region:drag]" />
       <SidebarMain>
         <AppSidebar
           activeNav={activeNav}

@@ -3,7 +3,9 @@ import {
   AlertCircle,
   CirclePlay,
   ExternalLink,
+  FileText,
   MoreHorizontal,
+  NotebookPen,
   Pause,
   Play,
   PlayCircle,
@@ -29,7 +31,6 @@ import { ChatLauncherModal } from "../components/ChatLauncherModal";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { EditableTitle } from "../components/EditableTitle";
 import {
-  EditableDescription,
   InlineScheduledTime,
   StatusLine,
 } from "../components/meeting-header-parts";
@@ -59,10 +60,8 @@ import {
 } from "../components/ui/dropdown-menu";
 import { RadioGroup, RadioGroupItem } from "../components/ui/radio-group";
 import { Spinner } from "../components/ui/spinner";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "../components/ui/toggle-group";
+import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { getDefaultPromptModel, getPromptModelSummary } from "../lib/prompt-metadata";
 import { MeetingDetailsView, type DetailsTabKind } from "./MeetingDetailsView";
 import { MeetingWorkspaceView } from "./MeetingWorkspaceView";
@@ -315,10 +314,9 @@ export function MeetingShell({
   useEffect(() => {
     if (!detail) return;
     if (viewResolvedRef.current) return;
-    const isLiveForThisRun = recording.active && recording.run_folder === runFolder;
-    const editableStatuses = new Set(["draft", "paused", "recording"]);
-    const isEditable = editableStatuses.has(detail.status) || isLiveForThisRun;
-    const next: MeetingView = isEditable ? "workspace" : "details";
+    // Always default to Workspace on first load — users almost always want to
+    // read/edit prep + notes first, and can flip to Details via the header tabs.
+    const next: MeetingView = "workspace";
     viewResolvedRef.current = true;
     if (next !== view) setView(next);
     onViewChange?.(next);
@@ -1013,43 +1011,41 @@ export function MeetingShell({
   })();
 
   const overflowMenu = (
-    <>
-      <Button variant="secondary" size="sm" onClick={() => setChatLauncherOpen(true)}>
-        <ExternalLink className="h-3.5 w-3.5" /> Launch chat
-      </Button>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="icon">
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent>
-          {(isComplete || isError) && (
-            <DropdownMenuItem onSelect={() => setReprocessOpen(true)}>Reprocess</DropdownMenuItem>
-          )}
-          {(isComplete || isError) && (
-            <DropdownMenuItem
-              onSelect={async () => {
-                try {
-                  await api.runs.reopenAsDraft(runFolder);
-                  await refresh();
-                } catch (err) {
-                  console.error("Reopen as draft failed", err);
-                }
-              }}
-            >
-              Edit as draft
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem onSelect={() => api.runs.openInFinder(runFolder)}>Open folder</DropdownMenuItem>
-          {!isRecording && (
-            <DropdownMenuItem onSelect={() => void onDelete()} className="text-[var(--error)]">
-              {isDraft ? "Delete draft" : "Delete meeting"}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuItem onSelect={() => setChatLauncherOpen(true)}>
+          <ExternalLink className="h-3.5 w-3.5" /> Launch chat
+        </DropdownMenuItem>
+        {(isComplete || isError) && (
+          <DropdownMenuItem onSelect={() => setReprocessOpen(true)}>Reprocess</DropdownMenuItem>
+        )}
+        {(isComplete || isError) && (
+          <DropdownMenuItem
+            onSelect={async () => {
+              try {
+                await api.runs.reopenAsDraft(runFolder);
+                await refresh();
+              } catch (err) {
+                console.error("Reopen as draft failed", err);
+              }
+            }}
+          >
+            Edit as draft
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem onSelect={() => api.runs.openInFinder(runFolder)}>Open folder</DropdownMenuItem>
+        {!isRecording && (
+          <DropdownMenuItem onSelect={() => void onDelete()} className="text-[var(--error)]">
+            {isDraft ? "Delete draft" : "Delete meeting"}
+          </DropdownMenuItem>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 
   // ---- Shell layout (Flexbox, not calc-inside-views) ----
@@ -1057,81 +1053,92 @@ export function MeetingShell({
   return (
     <div className="flex h-[calc(100vh-var(--header-height))] flex-col overflow-hidden">
       {/* Three-column shell header */}
-      <header className="flex shrink-0 flex-col gap-2 border-b border-[var(--border-subtle)] bg-white px-4 py-3 md:px-6">
+      <header className="flex shrink-0 flex-col gap-2 border-b border-[var(--border-subtle)] bg-white px-4 py-2 md:px-6">
         {/*
-          Header is a three-zone layout (title | toggle | controls).
-          At narrow viewports the right-side control cluster can exceed a
-          third of the row and would overlap a strictly-centered toggle, so
-          we fall back to a wrap-capable flex layout and send the toggle to
-          its own row (still centered). The grid treatment kicks in at md+
-          where the row has enough width to host all three zones side-by-side.
+          Header is a single flex row: title grows, right toolbar clusters
+          view-tabs + recording controls + ⋯. At narrow widths the tabs wrap
+          to their own row (still right-aligned via order-last).
         */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 md:grid md:grid-cols-3">
-          {/* Left: title + status */}
-          <div className="flex min-w-0 flex-1 items-center gap-3 md:flex-initial md:justify-self-start">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {/* Left: title + status chip (tooltip trigger) */}
+          <div className="flex min-w-0 flex-1 items-center gap-2">
             {isProcessing ? (
-              <h2 className="truncate text-2xl font-semibold text-[var(--text-primary)]">{detail.title}</h2>
+              <h2
+                className="truncate text-base font-semibold text-[var(--text-primary)] md:text-lg"
+                title={detail.title}
+              >
+                {detail.title}
+              </h2>
             ) : (
               <EditableTitle value={detail.title} onSave={onTitleSave} />
             )}
-            {/* Status chip on the left for non-live states. */}
-            {!isLive && (
-              <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
-            )}
+            <TooltipProvider delayDuration={120}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="Meeting status details"
+                    className="shrink-0 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                  >
+                    <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent align="start" className="flex flex-col gap-1.5 max-w-xs">
+                  {isDraft ? (
+                    <InlineScheduledTime
+                      value={detail.scheduled_time ?? null}
+                      onChange={onScheduledTimeChange}
+                    />
+                  ) : (detail.started || detail.date) ? (
+                    <>
+                      <span className="text-[var(--text-secondary)]">
+                        Started {new Date(detail.started ?? detail.date).toLocaleString()}
+                      </span>
+                      {detail.ended && (
+                        <span className="text-[var(--text-secondary)]">
+                          Ended {new Date(detail.ended).toLocaleString()}
+                        </span>
+                      )}
+                    </>
+                  ) : null}
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
           </div>
 
-          {/* Center: Workspace | Details toggle. Wraps to its own row on narrow. */}
-          <div className="order-last flex w-full shrink-0 justify-center md:order-none md:w-auto md:justify-self-center">
-            <ToggleGroup
-              type="single"
+          {/* Right toolbar: view tabs, a divider, then recording controls + ⋯ */}
+          <div className="flex shrink-0 items-center gap-3">
+            <Tabs
               value={view}
               onValueChange={(v) => {
                 if (v === "workspace" || v === "details") setViewSafely(v);
               }}
               aria-label="Meeting view"
-              className="rounded-full border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-1"
             >
-              <ToggleGroupItem value="workspace" className="rounded-full px-4 text-sm transition-all data-[state=on]:bg-white data-[state=on]:shadow-sm">Workspace</ToggleGroupItem>
-              <ToggleGroupItem value="details" className="rounded-full px-4 text-sm transition-all data-[state=on]:bg-white data-[state=on]:shadow-sm">Details</ToggleGroupItem>
-            </ToggleGroup>
-          </div>
-
-          {/* Right: recording controls + ⋯ */}
-          <div className="flex shrink-0 items-center gap-2 md:justify-self-end">
-            {recordingControls}
-            {overflowMenu}
+              <TabsList className="w-auto gap-0.5 rounded-lg border-0 bg-[var(--bg-secondary)] p-0.5">
+                <TabsTrigger
+                  value="workspace"
+                  className="gap-1.5 rounded-md border-0 px-3 py-1 text-xs -mb-0 data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] data-[state=active]:shadow-sm"
+                >
+                  <NotebookPen className="h-3.5 w-3.5" />
+                  Workspace
+                </TabsTrigger>
+                <TabsTrigger
+                  value="details"
+                  className="gap-1.5 rounded-md border-0 px-3 py-1 text-xs -mb-0 data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] data-[state=active]:shadow-sm"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  Details
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <div aria-hidden className="h-5 w-px bg-[var(--border-subtle)]" />
+            <div className="flex items-center gap-2">
+              {recordingControls}
+              {overflowMenu}
+            </div>
           </div>
         </div>
-
-        {/* Second row: description, scheduled time, and a calendar-style
-            timestamp for completed meetings. Hidden while processing to keep
-            the header quieter. */}
-        {!isProcessing && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-            <div className="min-w-0 flex-shrink">
-              <EditableDescription value={detail.description ?? ""} onSave={onDescriptionSave} />
-            </div>
-            {isDraft && (
-              <>
-                <span className="shrink-0 text-[var(--text-tertiary)]">·</span>
-                <div className="shrink-0">
-                  <InlineScheduledTime
-                    value={detail.scheduled_time ?? null}
-                    onChange={onScheduledTimeChange}
-                  />
-                </div>
-              </>
-            )}
-            {!isDraft && (detail.started || detail.date) && (
-              <>
-                <span className="shrink-0 text-[var(--text-tertiary)]">·</span>
-                <span className="shrink-0 whitespace-nowrap text-sm text-[var(--text-secondary)]">
-                  {new Date(detail.started ?? detail.date).toLocaleString()}
-                </span>
-              </>
-            )}
-          </div>
-        )}
       </header>
 
       {/* Failed-outputs banner — shell-level so it shows in both views. */}

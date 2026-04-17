@@ -27,12 +27,7 @@ export class MeetingWorkspacePage {
 
   // View toggle (Workspace | Details segmented control)
   viewToggle(which: MeetingView) {
-    return this.main.getByRole("radio", { name: which });
-  }
-
-  // Link in Details view that flips back to Workspace
-  editInWorkspaceLink() {
-    return this.main.getByRole("button", { name: /Edit prep and notes in Workspace view/ });
+    return this.main.getByRole("tab", { name: which });
   }
 
   // Tabs (Details view only)
@@ -41,7 +36,11 @@ export class MeetingWorkspacePage {
   }
 
   tabsList() {
-    return this.page.getByRole("tablist");
+    // The meeting shell also renders a Workspace/Details tablist; disambiguate
+    // by filtering for the Metadata tab that only the Details tablist contains.
+    return this.page
+      .getByRole("tablist")
+      .filter({ has: this.page.getByRole("tab", { name: "Metadata" }) });
   }
 
   allTabs() {
@@ -116,11 +115,9 @@ export class MeetingWorkspacePage {
   }
 
   moreActionsButton() {
-    return this.main
-      .getByRole("button", { name: "Launch chat" })
-      .locator("..")
-      .getByRole("button")
-      .last();
+    // The shell header right-cluster ends with the ⋯ DropdownMenu trigger.
+    // It's the last button in the header before the tabs row.
+    return this.page.locator("main header button").last();
   }
 
   openFolderButton() {
@@ -211,12 +208,17 @@ export class MeetingWorkspacePage {
    */
   async waitForReady(opts: { view?: "workspace" | "details" } = {}) {
     await this.page.locator("header h1").filter({ hasText: "Meeting" }).waitFor();
-    // Meeting-specific signal: the Workspace|Details toggle is only rendered
+    // Meeting-specific signal: the Workspace|Details tabs are only rendered
     // on the meeting route.
     await this.viewToggle("Workspace").waitFor();
-    const view = opts.view ?? "details";
+    // Default landing view is now Workspace. Switch if the caller expects Details.
+    const view = opts.view ?? "workspace";
+    const target = this.viewToggle(view === "workspace" ? "Workspace" : "Details");
+    if ((await target.getAttribute("data-state")) !== "active") {
+      await target.click();
+    }
     if (view === "details") {
-      await this.page.getByRole("tablist").waitFor();
+      await this.tabsList().waitFor();
     } else {
       await this.workspacePanelGroup().waitFor();
     }

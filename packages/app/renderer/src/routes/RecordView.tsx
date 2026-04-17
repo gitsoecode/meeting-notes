@@ -144,15 +144,15 @@ export function RecordView({
       }}
     >
       {/* New Meeting card */}
-      <Card className="shrink-0 overflow-hidden p-5 md:p-6">
-        <CardHeader className="mb-3">
-          <CardTitle className="text-xl">New meeting</CardTitle>
+      <Card className="shrink-0 overflow-hidden p-4 md:p-5">
+        <CardHeader className="mb-2">
+          <CardTitle className="text-lg">New meeting</CardTitle>
           <CardDescription>
             Start recording now or prepare a meeting workspace for later.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
+        <CardContent className="space-y-3">
+          <div className="space-y-1.5">
             <label className="text-sm font-medium text-[var(--text-secondary)]">Title</label>
             <Input
               value={title}
@@ -161,7 +161,7 @@ export function RecordView({
               placeholder="Untitled Meeting"
             />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <label className="text-sm font-medium text-[var(--text-secondary)]">Description</label>
             <Textarea
               value={description}
@@ -177,7 +177,7 @@ export function RecordView({
             timeLabel="Time"
           />
           <div className="flex flex-wrap items-center gap-3 pt-1">
-            <Button size="lg" onClick={onStart} disabled={starting}>
+            <Button onClick={onStart} disabled={starting}>
               {starting ? (
                 <>
                   <Spinner /> Starting…
@@ -188,7 +188,7 @@ export function RecordView({
                 </>
               )}
             </Button>
-            <Button size="lg" variant="secondary" onClick={onCreateDraft}>
+            <Button variant="secondary" onClick={onCreateDraft}>
               <NotebookPen className="h-4 w-4" /> Prepare for later
             </Button>
             <span className="text-sm text-[var(--text-tertiary)]">
@@ -213,9 +213,9 @@ export function RecordView({
       )}
 
       {/* Coming Up + Recent timeline */}
-      <Card className="shrink-0 overflow-hidden p-5 md:p-6">
-        <CardHeader className="mb-4">
-          <CardTitle className="text-lg">Coming up</CardTitle>
+      <Card className="shrink-0 overflow-hidden p-4 md:p-5">
+        <CardHeader className="mb-3">
+          <CardTitle className="text-base">Coming up</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {upcoming.length === 0 ? (
@@ -238,7 +238,7 @@ export function RecordView({
                   <button
                     key={run.run_id}
                     type="button"
-                    className="flex w-full items-start gap-6 px-4 py-4 text-left transition-colors hover:bg-[var(--bg-secondary)]/50"
+                    className="flex w-full items-start gap-6 px-4 py-3 text-left transition-colors hover:bg-[var(--bg-secondary)]/50"
                     onClick={() => onOpenPrep(run.folder_path)}
                   >
                     <div className="w-16 shrink-0 text-center">
@@ -264,7 +264,7 @@ export function RecordView({
 
         {recent.length > 0 && (
           <>
-            <CardHeader className="mb-4 mt-6 border-t border-[var(--border-default)] pt-5">
+            <CardHeader className="mb-3 mt-4 border-t border-[var(--border-default)] pt-4">
               <CardTitle className="text-base text-[var(--text-secondary)]">Recent</CardTitle>
             </CardHeader>
             <CardContent className="p-0">

@@ -42,7 +42,8 @@ test.describe("Navigation", () => {
     await app.navigateTo("Meetings");
     await meetingsList.waitForReady();
     await meetingsList.meetingRow("Weekly planning").click();
-    await expect(app.page.getByRole("tab", { name: "Analysis" })).toBeVisible();
+    // Default landing on a meeting is now the Workspace view, so assert its tab is active.
+    await expect(app.page.getByRole("tab", { name: "Workspace" })).toHaveAttribute("data-state", "active");
 
     // The Meetings nav button should be functionally active (meeting detail routes
     // set activeNav to "meetings")

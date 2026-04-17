@@ -20,6 +20,7 @@ import {
 } from "./ui/dropdown-menu";
 import {
   Sidebar,
+  SidebarCollapseTrigger,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
@@ -28,6 +29,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "./ui/sidebar";
 import { Spinner } from "./ui/spinner";
 
@@ -59,30 +61,44 @@ export function AppSidebar({
   onImport,
   quickStarting,
 }: AppSidebarProps) {
+  const { collapsed, isMobile } = useSidebar();
+  const isRail = collapsed && !isMobile;
+
   return (
     <Sidebar>
-      <SidebarHeader>
-        <div className="flex items-center gap-2 px-1.5 py-1.5">
-          <MeetingNotesMark className="h-5 w-5" />
-          <span className="text-base font-semibold text-[var(--text-primary)]">Meeting Notes</span>
+      {/* Header doubles as the window-drag region so traffic lights sit inside the sidebar.
+          pt-12 (48px) clears the ~28px-tall macOS traffic lights with comfortable breathing room. */}
+      <SidebarHeader className={`pt-12 [-webkit-app-region:drag] ${isRail ? "px-2" : ""}`}>
+        <div className={`flex items-center gap-2 ${isRail ? "justify-center" : "justify-between px-1.5"}`}>
+          {!isRail && (
+            <div className="flex min-w-0 items-center gap-2">
+              <MeetingNotesMark className="h-5 w-5 shrink-0" />
+              <span className="truncate text-base font-semibold text-[var(--text-primary)]">
+                Meeting Notes
+              </span>
+            </div>
+          )}
+          <SidebarCollapseTrigger />
         </div>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className={isRail ? "px-2" : undefined}>
         <div className="space-y-3">
           <div className="pb-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   size="sm"
-                  className="h-9 w-full justify-between rounded-lg border border-[rgba(45,107,63,0.18)] bg-[rgba(45,107,63,0.08)] px-3 text-[var(--text-primary)] shadow-sm hover:bg-[rgba(45,107,63,0.14)] focus-visible:ring-[var(--ring)]"
+                  className={`h-9 ${isRail ? "w-full justify-center px-0" : "w-full justify-between px-3"} rounded-lg border border-[rgba(45,107,63,0.18)] bg-[rgba(45,107,63,0.08)] text-[var(--text-primary)] shadow-sm hover:bg-[rgba(45,107,63,0.14)] focus-visible:ring-[var(--ring)]`}
                   disabled={quickStarting}
+                  aria-label={isRail ? "Quick Create" : undefined}
+                  title={isRail ? "Quick Create" : undefined}
                 >
                   <span className="flex items-center gap-2">
-                    {quickStarting ? <Spinner className="h-3.5 w-3.5" /> : <PlusCircle className="h-4 w-4" />}
-                    Quick Create
+                    {quickStarting ? <Spinner className="h-4 w-4" /> : <PlusCircle className="h-4 w-4" />}
+                    <span className={isRail ? "sr-only" : undefined}>Quick Create</span>
                   </span>
-                  <ChevronDown className="h-3.5 w-3.5 opacity-50" />
+                  {!isRail && <ChevronDown className="h-3.5 w-3.5 opacity-50" />}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" sideOffset={4} className="w-56">
@@ -112,9 +128,12 @@ export function AppSidebar({
                       <SidebarMenuButton
                         isActive={activeNav === item.id}
                         onClick={() => onNavigate(item.id)}
+                        title={isRail ? item.label : undefined}
+                        aria-label={isRail ? item.label : undefined}
+                        className={isRail ? "justify-center px-0" : undefined}
                       >
                         <Icon className="h-4 w-4" />
-                        <span>{item.label}</span>
+                        <span className={isRail ? "sr-only" : undefined}>{item.label}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   );
@@ -125,7 +144,7 @@ export function AppSidebar({
         </div>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className={isRail ? "px-2" : undefined}>
         <SidebarMenu>
           {secondaryItems.map((item) => {
             const Icon = item.icon;
@@ -134,9 +153,12 @@ export function AppSidebar({
                 <SidebarMenuButton
                   isActive={activeNav === item.id}
                   onClick={() => onNavigate(item.id)}
+                  title={isRail ? item.label : undefined}
+                  aria-label={isRail ? item.label : undefined}
+                  className={isRail ? "justify-center px-0" : undefined}
                 >
                   <Icon className="h-4 w-4" />
-                  <span>{item.label}</span>
+                  {isRail ? <span className="sr-only">{item.label}</span> : <span>{item.label}</span>}
                 </SidebarMenuButton>
               </SidebarMenuItem>
             );

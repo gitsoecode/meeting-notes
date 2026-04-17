@@ -61,15 +61,7 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByText("These are the notes I found:")).toBeVisible();
   });
 
-  test('"Edit prep and notes" link in Details flips to Workspace view', async ({ meetingWorkspace }) => {
-    await expect(meetingWorkspace.editInWorkspaceLink()).toBeVisible();
-    await meetingWorkspace.editInWorkspaceLink().click();
-    await expect(meetingWorkspace.workspacePanelGroup()).toBeVisible();
-    // Tablist is gone in Workspace view
-    await expect(meetingWorkspace.tab("Summary")).toHaveCount(0);
-  });
-
-  // TODO(workspace-details-split): the in-place "Refresh" button on the Summary
+// TODO(workspace-details-split): the in-place "Refresh" button on the Summary
   // tab no longer exists — refreshing a summary now goes through the Reprocess
   // dropdown + modal. Rewrite this test against that flow in a follow-up.
   test.skip("summary tab shows output and can refresh", async ({ meetingWorkspace, page }) => {

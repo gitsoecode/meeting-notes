@@ -278,8 +278,8 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
         onValueChange={(value) => onTabChange(value as DetailsTabKind)}
         className="flex min-h-0 flex-1 flex-col"
       >
-        <div className="flex items-end justify-between gap-4">
-          <TabsList>
+        <div className="min-w-0">
+          <TabsList className="min-w-0 w-full overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <TabsTrigger value="metadata">Metadata</TabsTrigger>
             <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="analysis">Analysis</TabsTrigger>
@@ -287,19 +287,14 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
             <TabsTrigger value="recording">Recording</TabsTrigger>
             <TabsTrigger value="files">Files{attachments.length > 0 ? ` (${attachments.length})` : ""}</TabsTrigger>
           </TabsList>
-          <button
-            type="button"
-            onClick={onFlipToWorkspace}
-            className="mb-1 shrink-0 text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
-          >
-            Edit prep and notes in Workspace view →
-          </button>
         </div>
 
         {/* ---- METADATA TAB ---- */}
         <TabsContent value="metadata">
-          <div className="space-y-6">
-            <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={onRefreshDetail} />
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 shadow-sm md:p-6">
+              <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={onRefreshDetail} />
+            </div>
             {(prepNotes.trim() || notes.trim()) && (
               <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 p-4">
                 <PrepOrNotesPreview label="Prep notes" source={prepNotes} onEdit={onFlipToWorkspace} />

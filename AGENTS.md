@@ -28,10 +28,11 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 ## How To Work In This Repo
 
 - **All tests must pass before completing any task.** Do not dismiss failures as "pre-existing" or "unrelated." If tests fail, fix them — whether or not your changes caused the failure.
-  - **Test Workflow:** Run narrow, directly relevant tests first as soon as you have a candidate fix. Do not wait for manual smoke testing to run those narrow checks.
+  - **Iteration loop (fast):** while iterating on a fix, run only the directly-affected specs via `npm run test:e2e:focus --workspace @meeting-notes/app -- specs/<area>.spec.ts` (8s timeout, 4 workers, desktop-only, line reporter). For a quick "is the whole surface broken?" check, `npm run test:e2e:fast` bails after 5 failures. Do NOT run the full suite during iteration — it wastes time and buries the signal.
+  - **Failing tests must fail fast.** A spec sitting in a long retry loop is a locator problem; investigate the selector, don't wait it out. The Playwright config caps per-test time at 10s for this reason.
   - **Manual Smoke vs Full Suite:** Give the user an opportunity to manual smoke test before running the full required suite (`npm test` and `npm run test:e2e --workspace @meeting-notes/app`), unless they explicitly ask you to run it sooner.
   - **Do not consider an issue resolved until tests are run.**
-  - After user confirmation, run `npm test` (unit) and `npm run test:e2e --workspace @meeting-notes/app` (Playwright) and confirm zero failures before finishing.
+  - After user confirmation, run `npm test` (unit) and `npm run test:e2e --workspace @meeting-notes/app` (Playwright — full suite, both projects) and confirm zero failures before finishing.
 - Build and regression-check with `npm test`.
 - Read `docs/testing-playbook.md` before changing app flows, Playwright fixtures, page objects, IPC-backed UI behavior, or run-lifecycle behavior.
 - Use `docs/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.
