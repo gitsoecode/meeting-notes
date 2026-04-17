@@ -17,7 +17,7 @@ import { LocalModelInstaller } from "../components/LocalModelInstaller";
 import { AudioLevelMeters } from "../components/AudioLevelMeters";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Separator } from "../components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -70,7 +70,7 @@ export function Settings({ config, onChange }: SettingsProps) {
   const [confirmingAction, setConfirmingAction] = useState(false);
   const [installingWhisper, setInstallingWhisper] = useState(false);
 
-  const apiKeysRef = useRef<HTMLDivElement>(null);
+  const apiKeysRef = useRef<HTMLElement>(null);
 
   const refreshInstalledLocal = () => {
     api.llm
@@ -265,15 +265,13 @@ export function Settings({ config, onChange }: SettingsProps) {
         {/* ── Models tab ── */}
         <TabsContent value="models" className="max-w-2xl space-y-5 outline-none">
 
-          {/* Card 1: Text Analysis */}
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Text Analysis</CardTitle>
-                <CardDescription>Default model for meeting summaries and prompt outputs.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          {/* Text Analysis */}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Text Analysis</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Default model for meeting summaries and prompt outputs.</p>
+            </div>
+            <div className="space-y-6">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[var(--text-secondary)]">Default model</label>
                 <ModelDropdown
@@ -316,18 +314,18 @@ export function Settings({ config, onChange }: SettingsProps) {
                   Cloud models are faster; local models stay offline and cost nothing per run.
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          {/* Card 2: Transcription */}
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Transcription</CardTitle>
-                <CardDescription>How recordings are converted to text.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Separator />
+
+          {/* Transcription */}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Transcription</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">How recordings are converted to text.</p>
+            </div>
+            <div className="space-y-4">
               <div className="space-y-2">
                 <label htmlFor="settings-asr" className="text-sm font-medium text-[var(--text-secondary)]">Provider</label>
                 <Select
@@ -461,18 +459,18 @@ export function Settings({ config, onChange }: SettingsProps) {
                   )}
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          {/* Card 3: API Keys */}
-          <Card ref={apiKeysRef} className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>API Keys</CardTitle>
-                <CardDescription>Stored securely in your macOS Keychain.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-6">
+          <Separator />
+
+          {/* API Keys */}
+          <section ref={apiKeysRef} className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">API Keys</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Stored securely in your macOS Keychain.</p>
+            </div>
+            <div className="space-y-6">
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
@@ -516,18 +514,18 @@ export function Settings({ config, onChange }: SettingsProps) {
                   <p className="text-xs text-[var(--text-tertiary)]">Used by OpenAI models for text analysis and cloud transcription.</p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          {/* Card 4: Local Models */}
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Local Models</CardTitle>
-                <CardDescription>Download and manage Ollama models on your machine.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
+          <Separator />
+
+          {/* Local Models */}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Local Models</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Download and manage Ollama models on your machine.</p>
+            </div>
+            <div>
               <LocalModelInstaller
                 installedModels={installedLocal}
                 onInstall={(model, sizeGb) => {
@@ -561,19 +559,20 @@ export function Settings({ config, onChange }: SettingsProps) {
                   });
                 }}
               />
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Chat Launcher</CardTitle>
-                <CardDescription>
-                  Default prompt used when exporting meeting context to an external AI chat app.
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Separator />
+
+          {/* Chat Launcher */}
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Chat Launcher</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Default prompt used when exporting meeting context to an external AI chat app.
+              </p>
+            </div>
+            <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[var(--text-secondary)]">
                   Completed meeting prompt
@@ -644,22 +643,20 @@ export function Settings({ config, onChange }: SettingsProps) {
                   Pre-filled when launching chat during an active recording.
                 </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         </TabsContent>
 
         {/* ── Audio tab ── */}
         <TabsContent value="audio" className="max-w-2xl space-y-5 outline-none">
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-4">
-              <div className="space-y-1">
-                <CardTitle>Audio Input</CardTitle>
-                <CardDescription>
-                  Pick your microphone and verify both channels are receiving audio. Changes take effect immediately.
-                </CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent>
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Audio Input</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Pick your microphone and verify both channels are receiving audio. Changes take effect immediately.
+              </p>
+            </div>
+            <div>
               <AudioLevelMeters
                 active
                 micDevice={config.recording.mic_device}
@@ -673,43 +670,41 @@ export function Settings({ config, onChange }: SettingsProps) {
                 }
                 onDevicesRefreshed={setDevices}
               />
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         </TabsContent>
 
         {/* ── Storage tab ── */}
         <TabsContent value="storage" className="max-w-2xl space-y-5 outline-none">
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Data Storage</CardTitle>
-                <CardDescription>Meeting recordings and notes are stored here.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Data Storage</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Meeting recordings and notes are stored here.</p>
+            </div>
+            <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[var(--text-secondary)]">Meetings directory</label>
                 <div className="flex gap-2">
                   <Input value={config.data_path} readOnly className="bg-[var(--bg-secondary)]" />
-                  <Button variant="secondary" onClick={onChangeDataDir} disabled={busy === "data-path"}>
+                  <Button variant="secondary" size="sm" onClick={onChangeDataDir} disabled={busy === "data-path"}>
                     Move…
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => api.config.openDataDirectory()}>
+                  <Button variant="ghost" size="sm" className="h-9 w-9 p-0" onClick={() => api.config.openDataDirectory()}>
                     <FolderOpen className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Obsidian Integration</CardTitle>
-                <CardDescription>Automatically sync notes to your Obsidian vault.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <Separator />
+
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Obsidian Integration</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Automatically sync notes to your Obsidian vault.</p>
+            </div>
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-sm font-medium text-[var(--text-primary)]">Enable integration</div>
@@ -732,28 +727,28 @@ export function Settings({ config, onChange }: SettingsProps) {
                       placeholder="(not set)"
                       className="bg-[var(--bg-secondary)]"
                     />
-                    <Button variant="secondary" onClick={setObsidianVault} disabled={busy === "vault"}>
+                    <Button variant="secondary" size="sm" onClick={setObsidianVault} disabled={busy === "vault"}>
                       Pick…
                     </Button>
                   </div>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <AudioRetentionCard config={config} onSave={save} />
+          <Separator />
+
+          <AudioRetentionSection config={config} onSave={save} />
         </TabsContent>
 
         {/* ── General tab ── */}
         <TabsContent value="system" className="max-w-2xl space-y-5 outline-none">
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="mb-3">
-              <div className="space-y-1">
-                <CardTitle>Keyboard Shortcuts</CardTitle>
-                <CardDescription>Global shortcuts that work even when the app is in the background.</CardDescription>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-4">
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Keyboard Shortcuts</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Global shortcuts that work even when the app is in the background.</p>
+            </div>
+            <div className="space-y-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[var(--text-secondary)]">Toggle recording</label>
                 <ShortcutRecorder
@@ -763,22 +758,24 @@ export function Settings({ config, onChange }: SettingsProps) {
                   }
                 />
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </section>
 
-          <Card className="overflow-hidden p-5 md:p-6">
-            <CardHeader className="pb-2 mb-3">
-              <CardTitle>System Health</CardTitle>
-              <CardDescription>Check status of required background tools.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
+          <Separator />
+
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">System Health</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">Check status of required background tools.</p>
+            </div>
+            <div className="space-y-2">
               {deps == null ? (
                 <div className="flex items-center gap-2 py-4 text-sm text-[var(--text-secondary)]">
                   <Spinner className="h-3.5 w-3.5" />
                   Checking dependencies…
                 </div>
               ) : (
-                <div className="overflow-hidden rounded-md border border-[var(--border-default)]">
+                <div className="overflow-hidden rounded-md border border-[var(--border-subtle)]">
                   <Table>
                     <TableBody>
                       {dependencyRows.map((row) => (
@@ -796,8 +793,8 @@ export function Settings({ config, onChange }: SettingsProps) {
                   </Table>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </section>
         </TabsContent>
       </Tabs>
 
@@ -1033,7 +1030,7 @@ function retentionMode(days: number | null): string {
   return "custom";
 }
 
-function AudioRetentionCard({
+function AudioRetentionSection({
   config,
   onSave,
 }: {
@@ -1065,17 +1062,15 @@ function AudioRetentionCard({
   };
 
   return (
-    <Card className="overflow-hidden p-5 md:p-6">
-      <CardHeader className="mb-3">
-        <div className="space-y-1">
-          <CardTitle>Audio File Retention</CardTitle>
-          <CardDescription>
-            Automatically delete audio recordings from completed meetings after a set period.
-            Transcripts and notes are always kept.
-          </CardDescription>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <section className="space-y-4">
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Audio File Retention</h3>
+        <p className="text-sm leading-6 text-[var(--text-secondary)]">
+          Automatically delete audio recordings from completed meetings after a set period.
+          Transcripts and notes are always kept.
+        </p>
+      </div>
+      <div className="space-y-4">
         <div className="space-y-2">
           <label className="text-sm font-medium text-[var(--text-secondary)]">
             Delete audio after
@@ -1104,7 +1099,7 @@ function AudioRetentionCard({
             <span className="text-sm text-[var(--text-secondary)]">days</span>
           </div>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

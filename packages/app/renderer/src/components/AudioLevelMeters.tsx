@@ -270,7 +270,7 @@ export function AudioLevelMeters({
           Speak into your mic or play a sound to verify both channels. For a full end-to-end check, use <em>Diagnose audio</em>.
         </p>
         <div className="flex flex-none gap-2">
-          <Button variant="ghost" size="sm" onClick={refresh}>
+          <Button variant="secondary" size="sm" onClick={refresh}>
             <RefreshCw className="h-3.5 w-3.5 mr-1" />
             Refresh
           </Button>

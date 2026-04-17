@@ -2,7 +2,6 @@ import { useState } from "react";
 import { api } from "../ipc-client";
 import type { RunDetail } from "../../../shared/ipc";
 import { Button } from "./ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { Textarea } from "./ui/textarea";
 import {
@@ -77,19 +76,16 @@ export function OverviewPanel({ detail, runFolder, onUpdated }: OverviewPanelPro
   };
 
   return (
-    <div className="space-y-6">
-      {/* Meeting Metadata Card */}
-      <Card className="shadow-sm border-[var(--border-subtle)] bg-white">
-        <CardHeader className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/10 px-6 py-4">
-          <div className="flex items-center gap-2">
-            <Info className="h-4 w-4 text-[var(--text-tertiary)]" />
-            <CardTitle className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">
-              Meeting metadata
-            </CardTitle>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-[var(--border-subtle)]">
+    <div className="space-y-8">
+      {/* Meeting Metadata section */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Info className="h-4 w-4 text-[var(--text-tertiary)]" />
+          <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">
+            Meeting metadata
+          </h3>
+        </div>
+        <div className="divide-y divide-[var(--border-subtle)]">
             <MetadataRow label="Status">
               <span className="text-xs font-medium">{detail.status}</span>
               {manifest.source_mode && (
@@ -209,48 +205,45 @@ export function OverviewPanel({ detail, runFolder, onUpdated }: OverviewPanelPro
                 </div>
               </MetadataRow>
             )}
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </section>
 
-      {/* Run Folder Contents Card */}
+      {/* Run folder contents section */}
       {detail.files.length > 0 && (
-        <Card className="shadow-sm border-[var(--border-subtle)] bg-white overflow-hidden">
-          <CardHeader className="border-b border-[var(--border-subtle)] bg-[var(--bg-secondary)]/10 px-6 py-4">
-            <div className="flex items-center gap-2">
-              <FolderOpen className="h-4 w-4 text-[var(--text-tertiary)]" />
-              <CardTitle className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">
-                Run folder contents
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0">
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <FolderOpen className="h-4 w-4 text-[var(--text-tertiary)]" />
+            <h3 className="text-sm font-bold uppercase tracking-widest text-[var(--text-secondary)]">
+              Run folder contents
+            </h3>
+          </div>
+          <div className="overflow-hidden rounded-md border border-[var(--border-subtle)]">
             <Table>
-              <TableHeader className="bg-[var(--bg-secondary)]/5">
+              <TableHeader>
                 <TableRow className="hover:bg-transparent">
-                  <TableHead className="h-9 px-6 text-[10px] font-bold uppercase tracking-widest">Filename</TableHead>
-                  <TableHead className="h-9 px-6 text-[10px] font-bold uppercase tracking-widest">Kind</TableHead>
-                  <TableHead className="h-9 px-6 text-[10px] font-bold uppercase tracking-widest text-right">Size</TableHead>
+                  <TableHead className="h-9 px-4 text-[10px] font-bold uppercase tracking-widest">Filename</TableHead>
+                  <TableHead className="h-9 px-4 text-[10px] font-bold uppercase tracking-widest">Kind</TableHead>
+                  <TableHead className="h-9 px-4 text-[10px] font-bold uppercase tracking-widest text-right">Size</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {detail.files.map((file) => (
                   <TableRow key={file.name} className="group border-[var(--border-subtle)] hover:bg-[var(--bg-secondary)]/10">
-                    <TableCell className="px-6 py-3 font-mono text-[11px] text-[var(--text-primary)] truncate max-w-[180px]">
+                    <TableCell className="px-4 py-3 font-mono text-[11px] text-[var(--text-primary)] truncate max-w-[180px]">
                       {file.name}
                     </TableCell>
-                    <TableCell className="px-6 py-3 text-[10px] text-[var(--text-tertiary)] uppercase font-semibold tracking-wider">
+                    <TableCell className="px-4 py-3 text-[10px] text-[var(--text-tertiary)] uppercase font-semibold tracking-wider">
                       {file.kind}
                     </TableCell>
-                    <TableCell className="px-6 py-3 text-right text-xs font-medium text-[var(--text-secondary)]">
+                    <TableCell className="px-4 py-3 text-right text-xs font-medium text-[var(--text-secondary)]">
                       {fmtBytes(file.size)}
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+          </div>
+        </section>
       )}
     </div>
   );
@@ -264,7 +257,7 @@ function MetadataRow({
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[100px_1fr] items-start gap-4 px-6 py-3 text-sm">
+    <div className="grid grid-cols-[100px_1fr] items-start gap-4 py-3 text-sm">
       <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--text-tertiary)] pt-0.5">
         {label}
       </div>

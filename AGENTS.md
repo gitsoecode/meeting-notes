@@ -49,6 +49,7 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 - Add or update resilience coverage for run-scoped features that can encounter stale, missing, partial, or interrupted state.
 - Prefer small shared helpers over growing `packages/app/main/ipc.ts` with more business logic.
 - For renderer UI work, prefer `shadcn/ui` primitives and composition patterns as the default approach. Favor extending the shared component layer under `packages/app/renderer/src/components/ui` over introducing new bespoke controls or one-off styling patterns.
+- UI layout philosophy: **rely on whitespace and typography, not borders and boxes.** Default to `<section>` + `<h3>` + whitespace (and `<Separator />` from `components/ui/separator.tsx`) for stacking sections inside a page or tab. Reserve `<Card>` for true floating surfaces — popovers, dropzones, pane-separated dashboards, modal-like widgets on the home screen. Never place a `<Card>` inside a container that already defines a boundary (a `<TabsContent>`, a split pane, a dialog). If a section contains a table or dense grid, a minimal `rounded-md border border-[var(--border-subtle)]` wrapper is enough — no shadow, no tinted header.
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:
   `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`.
 

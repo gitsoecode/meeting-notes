@@ -22,9 +22,12 @@ export class SettingsPage {
   }
 
   card(title: string) {
-    return this.main.locator('[class*="rounded"], [class*="Card"]').filter({
-      has: this.page.getByText(title, { exact: true }),
-    }).first();
+    // Settings sections are flat <section> elements (no Card wrapper); locate by
+    // the heading child instead of looking for rounded/Card class names.
+    return this.main
+      .locator("section")
+      .filter({ has: this.page.getByRole("heading", { name: title, exact: true }) })
+      .first();
   }
 
   // Other tab card

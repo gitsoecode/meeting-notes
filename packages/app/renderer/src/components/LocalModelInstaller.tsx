@@ -124,7 +124,7 @@ export function LocalModelInstaller({
               <SelectItem value={OTHER_VALUE}>Other…</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={handleInstall} disabled={!canInstall}>
+          <Button onClick={handleInstall} disabled={!canInstall} size="sm">
             Install
           </Button>
         </div>
