@@ -161,6 +161,34 @@ function levenshtein(a: string, b: string): number {
   return prev[short.length];
 }
 
+/**
+ * Shift "others" ASR segment times onto the combined-playback timeline.
+ *
+ * The combined.wav mix advances the system track by `-offsetMs` (see
+ * `mergeTimedAudioFiles` in audio.ts) so mic is the time reference.
+ * ASR sees the raw system file, so its segment times are ahead of the
+ * combined timeline by `offsetMs`. Subtract it to align.
+ *
+ * Segments are clamped so start/end never go negative. Segments whose
+ * entire span predates the combined-file start (end_ms < 0 after the
+ * shift) are dropped — they are inaudible in combined.wav and would
+ * otherwise produce broken click-to-seek targets.
+ */
+export function applyOthersOffset(
+  segments: TranscriptSegment[],
+  offsetMs: number
+): TranscriptSegment[] {
+  if (offsetMs === 0) return segments;
+  const out: TranscriptSegment[] = [];
+  for (const seg of segments) {
+    const end = seg.end_ms - offsetMs;
+    if (end < 0) continue;
+    const start = Math.max(0, seg.start_ms - offsetMs);
+    out.push({ ...seg, start_ms: start, end_ms: end });
+  }
+  return out;
+}
+
 export function formatTranscriptMarkdown(result: TranscriptResult): string {
   if (result.segments.length === 0) {
     return result.fullText || "(empty transcript)";

@@ -135,35 +135,20 @@ test.describe("Meeting Workspace", () => {
     await expect(panel.getByText("ME", { exact: true })).toHaveCount(2);
     await expect(panel.getByText("O", { exact: true })).toHaveCount(1);
 
-    // Header timestamps come from the FIRST utterance in each grouped block.
-    await expect(panel.getByText("00:00", { exact: true })).toBeVisible();
-    await expect(panel.getByText("00:32", { exact: true })).toBeVisible();
-    await expect(panel.getByText("00:45", { exact: true })).toBeVisible();
-    // Mid-group timestamps are NOT promoted into headers.
-    await expect(panel.getByText("00:15", { exact: true })).toHaveCount(0);
-    await expect(panel.getByText("00:22", { exact: true })).toHaveCount(0);
-    await expect(panel.getByText("01:05", { exact: true })).toHaveCount(0);
+    // Every timestamped line now renders its own clickable timestamp pill.
+    // `getByRole('button', { name: /Play from 00:15/ })` locates the line
+    // whose timestamp is 00:15 — the whole row is the tap target.
+    for (const ts of ["00:00", "00:15", "00:22", "00:32", "00:45", "01:05"]) {
+      await expect(
+        panel.getByRole("button", { name: new RegExp(`Play from ${ts}`) }),
+      ).toBeVisible();
+    }
 
-    // Mid-group timestamps are still accessible via the per-line title attr.
+    // Bare line (no `MM:SS` prefix) still renders; it's not clickable, so
+    // no "Play from" button points at it.
     await expect(
-      panel.locator('p[title="00:15"]', { hasText: "We need to lock the sprint scope." })
+      panel.getByText("And one more thing — I almost forgot the OKRs."),
     ).toBeVisible();
-    await expect(
-      panel.locator('p[title="01:05"]', { hasText: "Let's revisit those next week." })
-    ).toBeVisible();
-
-    // Bare line (no `MM:SS` prefix) still renders, with no title attr.
-    const bareLine = panel.locator(
-      "p:not([title])",
-      { hasText: "And one more thing — I almost forgot the OKRs." }
-    );
-    await expect(bareLine).toBeVisible();
-
-    // Regression guard: the old card-chrome (grey row fill) is gone from
-    // the transcript pane.
-    await expect(
-      panel.locator('[class*="bg-[var(--bg-secondary)]"]')
-    ).toHaveCount(0);
   });
 
   test("metadata description can be edited, cancelled, and saved", async ({
@@ -185,7 +170,9 @@ test.describe("Meeting Workspace", () => {
   test("recording and files tabs show stored artifacts", async ({ meetingWorkspace, page }) => {
     await meetingWorkspace.tab("Recording").click();
     await expect(page.getByText("audio/mic.wav")).toBeVisible();
-    await expect(page.locator("audio")).toHaveCount(2);
+    // mic.wav and system.wav each render a native <audio>; combined.wav
+    // hosts the shared unified-player audio via React Portal → 3 total.
+    await expect(page.locator("audio")).toHaveCount(3);
 
     await meetingWorkspace.tab("Files").click();
     await expect(page.getByText("Attached files (1)")).toBeVisible();
@@ -194,18 +181,21 @@ test.describe("Meeting Workspace", () => {
 
   test("audio players load and have playable source", async ({ meetingWorkspace, page }) => {
     await meetingWorkspace.tab("Recording").click();
-    await expect(page.locator("audio")).toHaveCount(2);
+    await expect(page.locator("audio")).toHaveCount(3);
 
-    // Each audio element should have a src attribute set (data URL from mock)
-    const audioElements = page.locator("audio");
-    for (let i = 0; i < 2; i++) {
-      const src = await audioElements.nth(i).getAttribute("src");
+    // All three recording-tab <audio> elements should have a blob URL.
+    const recordingAudios = page
+      .getByRole("tabpanel", { name: "Recording" })
+      .locator("audio");
+    await expect(recordingAudios).toHaveCount(3);
+    for (let i = 0; i < 3; i++) {
+      const src = await recordingAudios.nth(i).getAttribute("src");
       expect(src).toBeTruthy();
       expect(src).toContain("blob:");
     }
 
     // Wait for metadata to load, then verify duration > 0
-    const loaded = await audioElements.first().evaluate(
+    const loaded = await recordingAudios.first().evaluate(
       (el) =>
         new Promise<{ duration: number; error: string | null }>((resolve) => {
           const audio = el as HTMLAudioElement;
@@ -226,7 +216,7 @@ test.describe("Meeting Workspace", () => {
     expect(loaded.duration).toBeGreaterThan(0);
 
     // Verify no media error occurred (the element is functional)
-    const mediaError = await audioElements.first().evaluate(
+    const mediaError = await recordingAudios.first().evaluate(
       (el) => (el as HTMLAudioElement).error?.message ?? null
     );
     expect(mediaError).toBeNull();

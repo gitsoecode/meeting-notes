@@ -64,6 +64,7 @@ import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { getDefaultPromptModel, getPromptModelSummary } from "../lib/prompt-metadata";
 import { MeetingDetailsView, type DetailsTabKind } from "./MeetingDetailsView";
+import { PlaybackProvider } from "../components/MeetingAudioPlayer";
 import { MeetingWorkspaceView } from "./MeetingWorkspaceView";
 
 // ---------------------------------------------------------------------------
@@ -510,6 +511,19 @@ export function MeetingShell({
   }, [activePromptId, sortedAnalysisPrompts]);
 
   const recordingFiles = useMemo(() => (detail ? detail.files.filter((f) => f.kind === "media") : []), [detail]);
+
+  // Combined playback file drives click-to-seek from the transcript. We
+  // require an exact `combined.wav` match (not a fallback) — transcript
+  // timestamps are aligned to that specific file; any other recording has
+  // different offsets and mis-seeking would be misleading. See
+  // engine/process-run.ts writeCombinedPlayback.
+  const combinedAudioFileName = useMemo(() => {
+    const match = recordingFiles.find((f) => {
+      const base = f.name.split("/").pop() ?? f.name;
+      return base === "combined.wav";
+    });
+    return match?.name ?? null;
+  }, [recordingFiles]);
 
   // ---- Process steps (for end-meeting dialog) ----
   const processSteps = useMemo<ProcessStep[]>(() => {
@@ -1167,7 +1181,15 @@ export function MeetingShell({
         })()}
 
       {/* View container — flex-1 gives children a real height so Analysis can
-          use h-full instead of calc-against-viewport. */}
+          use h-full instead of calc-against-viewport. Wrapped in
+          PlaybackProvider so the transcript + summary tabs can reach into
+          the shared combined-audio player; the pocket player is hidden on
+          the Recording tab because it renders its own inline player for
+          combined.wav. */}
+      <PlaybackProvider
+        runFolder={runFolder}
+        combinedAudioFileName={combinedAudioFileName}
+      >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 md:p-6">
         {view === "workspace" ? (
           <MeetingWorkspaceView
@@ -1227,9 +1249,11 @@ export function MeetingShell({
             onAddAttachment={() => void onAddAttachment()}
             onRemoveAttachment={(name) => void onRemoveAttachment(name)}
             summaryFileName={promptCollections.summaryFileName}
+            combinedAudioFileName={combinedAudioFileName}
           />
         )}
       </div>
+      </PlaybackProvider>
 
       {/* ---- Dialogs ---- */}
       {reprocessOpen && (

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { FileOutput, FileUp, PlayCircle, Search, Trash2, X } from "lucide-react";
 import { api } from "../ipc-client";
 import type { AppConfigDTO, RecordingStatus, RunDetail } from "../../../shared/ipc";
@@ -10,7 +10,10 @@ import {
   PipelineStatus,
   type PromptOutputStatus,
 } from "../components/PipelineStatus";
-import { TranscriptView } from "../components/TranscriptView";
+import { TranscriptView, type TranscriptViewHandle } from "../components/TranscriptView";
+import { TranscriptSearchBar } from "../components/TranscriptSearchBar";
+import { InlinePlyrAudio, PlaybackInlineHost } from "../components/MeetingAudioPlayer";
+import type { EntryMatch } from "../../../shared/transcript-search";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Spinner } from "../components/ui/spinner";
@@ -88,6 +91,11 @@ export interface MeetingDetailsViewProps {
 
   // Obsidian integration
   summaryFileName: string;
+
+  // Click-to-seek: the combined-playback filename for this meeting, or null
+  // when it's not available. Drives whether transcript timestamps render as
+  // clickable buttons.
+  combinedAudioFileName: string | null;
 }
 
 function EmptyTabContent({ message }: { message: string }) {
@@ -260,7 +268,17 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
     onAddAttachment,
     onRemoveAttachment,
     summaryFileName,
+    combinedAudioFileName,
   } = props;
+
+  // Transcript search state lives inside the details view because the bar
+  // and the transcript render under the same tab. Parent doesn't need it.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [matches, setMatches] = useState<EntryMatch[]>([]);
+  const [currentMatchIndex, setCurrentMatchIndex] = useState<number | null>(null);
+  const transcriptViewRef = useRef<TranscriptViewHandle | null>(null);
+
+  const combinedAudioAvailable = combinedAudioFileName != null;
 
   const obsidianTarget =
     activeTabId === "summary"
@@ -446,7 +464,29 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
           ) : isProcessing ? (
             <div className="space-y-4">{pipelineStatusContent}<EmptyTabContent message="Transcript is being generated…" /></div>
           ) : hasTranscript ? (
-            <TranscriptView source={transcriptContent} />
+            <div className="flex flex-col gap-4">
+              <TranscriptSearchBar
+                onQueryChange={setSearchQuery}
+                matches={matches}
+                currentMatchIndex={currentMatchIndex}
+                onCurrentMatchChange={setCurrentMatchIndex}
+                onNavigateToMatch={(m) => transcriptViewRef.current?.scrollToMatch(m)}
+                shortcutActive={activeTabId === "transcript"}
+              />
+              {!combinedAudioAvailable ? (
+                <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/60 px-3 py-2 text-xs text-[var(--text-secondary)]">
+                  Click-to-play is unavailable for this meeting (no combined audio file).
+                </div>
+              ) : null}
+              <TranscriptView
+                ref={transcriptViewRef}
+                source={transcriptContent}
+                combinedAudioAvailable={combinedAudioAvailable}
+                searchQuery={searchQuery}
+                onMatchesChange={setMatches}
+                currentMatchIndex={currentMatchIndex}
+              />
+            </div>
           ) : (
             <EmptyTabContent message="No transcript available for this meeting." />
           )}
@@ -494,7 +534,16 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
                       </div>
                     </div>
                     {audioPreview ? (
-                      <audio controls preload="metadata" src={source} className="w-full">Your browser does not support audio playback.</audio>
+                      // Combined-audio gets the shared Plyr chrome via the
+                      // inline host (unified with the transcript pocket).
+                      // Per-channel mic/system tracks each get their own
+                      // standalone Plyr instance so they share the same
+                      // theming without competing with playback state.
+                      file.name.endsWith("combined.wav") ? (
+                        <PlaybackInlineHost className="w-full" />
+                      ) : (
+                        <InlinePlyrAudio src={source} className="w-full" />
+                      )
                     ) : videoRecording ? (
                       <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
                         Video preview isn&apos;t available in-app yet. Download to view.

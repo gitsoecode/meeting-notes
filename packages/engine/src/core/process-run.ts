@@ -60,6 +60,7 @@ import {
   buildTranscriptForLlm,
   buildSpeakerExcerpts,
   dedupOverlappingSpeakers,
+  applyOthersOffset,
 } from "./transcript.js";
 import { writeMarkdownFile } from "./markdown.js";
 import type { Logger } from "../logging/logger.js";
@@ -1046,22 +1047,43 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
       for (const track of group) {
         throwIfAborted(signal);
         activeTrack = track;
-        groupTranscripts.push(
-          await transcribeAudio({
-            config,
-            runFolder,
-            audioPath: track.path,
-            speaker: track.speaker,
-            sourceKind: track.sourceKind,
-            gainDb: track.gainDb,
-            offsetMetadata: {
-              source: track.offsetSource,
-              offsetMs: track.offsetMs,
-            },
-            logger,
-            signal,
-          })
-        );
+        const trackTranscript = await transcribeAudio({
+          config,
+          runFolder,
+          audioPath: track.path,
+          speaker: track.speaker,
+          sourceKind: track.sourceKind,
+          gainDb: track.gainDb,
+          offsetMetadata: {
+            source: track.offsetSource,
+            offsetMs: track.offsetMs,
+          },
+          logger,
+          signal,
+        });
+
+        // Align "others" ASR times to the combined-playback timeline.
+        //
+        // combined.wav is mixed mic-reference: system is advanced by
+        // -track.offsetMs in audio.ts so system-position T lands at
+        // combined-position T - offsetMs. ASR runs on the raw system
+        // file and returns system-position times, so we subtract
+        // offsetMs here to match. Without this, transcript timestamps
+        // on "Others" lines drift from combined.wav by the AVFoundation
+        // mic-warmup offset (~300-500ms typical).
+        //
+        // Me tracks are the reference and need no shift. Segments that
+        // would land before the combined-file start are clamped to 0
+        // so click-to-seek never produces a negative time; if the
+        // entire segment predates combined.wav, drop it.
+        if (track.speaker === "others" && track.offsetMs !== 0) {
+          trackTranscript.segments = applyOthersOffset(
+            trackTranscript.segments,
+            track.offsetMs
+          );
+        }
+
+        groupTranscripts.push(trackTranscript);
       }
 
       if (cumulativeOffsetMs > 0) {

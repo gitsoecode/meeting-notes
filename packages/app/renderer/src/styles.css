@@ -1,4 +1,58 @@
 @import "tailwindcss";
+@import "plyr/dist/plyr.css";
+
+/* Plyr theme — wire to our design tokens. */
+.plyr {
+  --plyr-color-main: var(--accent);
+  --plyr-audio-control-color: var(--text-secondary);
+  --plyr-audio-control-color-hover: var(--text-primary);
+  --plyr-audio-control-background-hover: var(--bg-hover);
+  --plyr-audio-controls-background: transparent;
+  --plyr-audio-progress-buffered-background: var(--border-default);
+  --plyr-range-fill-background: var(--accent);
+  --plyr-range-track-height: 4px;
+  --plyr-range-thumb-height: 12px;
+  --plyr-menu-background: var(--bg-primary);
+  --plyr-menu-color: var(--text-primary);
+  --plyr-menu-border-color: var(--border-default);
+  --plyr-font-family: inherit;
+  --plyr-font-size-small: 12px;
+  --plyr-font-size-base: 13px;
+  --plyr-control-radius: var(--radius-sm);
+  border-radius: var(--radius);
+}
+
+.plyr--audio .plyr__controls {
+  padding: 8px 10px;
+}
+
+.plyr__menu__container {
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
+.plyr__time {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ensure Plyr's container actually stretches inside a flex parent. Plyr
+ * moves the <audio> into a wrapper div that defaults to min-content; in a
+ * `flex-1 min-w-0` parent that can collapse to nothing and the controls
+ * disappear. Containers that host a Plyr instance should carry this class. */
+.plyr-host {
+  width: 100%;
+  min-width: 0;
+}
+
+.plyr-host .plyr {
+  width: 100%;
+  min-width: 0;
+}
+
+.plyr-host audio {
+  width: 100%;
+  display: block;
+}
 
 :root {
   color-scheme: light;

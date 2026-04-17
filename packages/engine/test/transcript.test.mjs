@@ -5,7 +5,64 @@ import {
   buildSpeakerExcerpts,
   buildTranscriptForLlm,
   dedupOverlappingSpeakers,
+  applyOthersOffset,
 } from "../dist/core/transcript.js";
+
+// ---- applyOthersOffset ----
+
+test("applyOthersOffset: subtracts offset from segment times", () => {
+  const segments = [
+    { start_ms: 500, end_ms: 1500, text: "hi", speaker: "others" },
+    { start_ms: 2000, end_ms: 3500, text: "there", speaker: "others" },
+  ];
+  const shifted = applyOthersOffset(segments, 400);
+  assert.equal(shifted.length, 2);
+  assert.equal(shifted[0].start_ms, 100);
+  assert.equal(shifted[0].end_ms, 1100);
+  assert.equal(shifted[1].start_ms, 1600);
+  assert.equal(shifted[1].end_ms, 3100);
+});
+
+test("applyOthersOffset: clamps start at 0 for partially-precombined segments", () => {
+  const segments = [
+    { start_ms: 100, end_ms: 1500, text: "spanning start", speaker: "others" },
+  ];
+  const shifted = applyOthersOffset(segments, 400);
+  assert.equal(shifted.length, 1);
+  assert.equal(shifted[0].start_ms, 0);
+  assert.equal(shifted[0].end_ms, 1100);
+});
+
+test("applyOthersOffset: drops segments that end before combined.wav starts", () => {
+  const segments = [
+    { start_ms: 0, end_ms: 200, text: "before", speaker: "others" },
+    { start_ms: 500, end_ms: 1500, text: "after", speaker: "others" },
+  ];
+  const shifted = applyOthersOffset(segments, 400);
+  assert.equal(shifted.length, 1);
+  assert.equal(shifted[0].text, "after");
+  assert.equal(shifted[0].start_ms, 100);
+});
+
+test("applyOthersOffset: returns input unchanged when offset is 0", () => {
+  const segments = [
+    { start_ms: 500, end_ms: 1500, text: "hi", speaker: "others" },
+  ];
+  const shifted = applyOthersOffset(segments, 0);
+  assert.equal(shifted, segments);
+});
+
+test("applyOthersOffset: negative offset shifts segments later", () => {
+  // If system actually started 200ms AFTER mic (rare), offsetMs is -200.
+  // system-t=0 should map to combined-t=+200.
+  const segments = [
+    { start_ms: 0, end_ms: 1000, text: "late start", speaker: "others" },
+  ];
+  const shifted = applyOthersOffset(segments, -200);
+  assert.equal(shifted.length, 1);
+  assert.equal(shifted[0].start_ms, 200);
+  assert.equal(shifted[0].end_ms, 1200);
+});
 
 // ---- formatTranscriptMarkdown ----
 

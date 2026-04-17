@@ -358,6 +358,7 @@ export async function installMockApi(page: Page) {
         { name: "decision-log.md", size: 280, kind: "document" },
         { name: "audio/mic.wav", size: 4200000, kind: "media" },
         { name: "audio/system.wav", size: 6100000, kind: "media" },
+        { name: "audio/combined.wav", size: 8500000, kind: "media" },
       ],
       "/runs/customer-call": [
         { name: "index.md", size: 180, kind: "document" },
