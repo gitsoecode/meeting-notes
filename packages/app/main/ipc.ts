@@ -1279,6 +1279,26 @@ export function registerIpcHandlers(): void {
     });
   });
 
+  ipcMain.handle("prompts:delete", async (_e, id: string) => {
+    if (typeof id !== "string" || !id || id.includes("/") || id.includes("\\") || id.includes("..")) {
+      throw new Error(`Invalid prompt id: ${id}`);
+    }
+    const config = safeLoadConfig();
+    const all = loadAllPrompts(config ?? undefined);
+    const existing = all.find((p) => p.id === id);
+    if (!existing) throw new Error(`Prompt not found: ${id}`);
+    if (existing.builtin) {
+      throw new Error(`Cannot delete built-in prompt "${id}". Use Reset to default instead.`);
+    }
+    const dir = getPromptsDir();
+    const expected = path.resolve(dir, `${id}.md`);
+    const actual = path.resolve(existing.sourcePath);
+    if (actual !== expected) {
+      throw new Error(`Prompt "${id}" is not managed by the prompts directory.`);
+    }
+    fs.rmSync(actual, { force: true });
+  });
+
   ipcMain.handle("prompts:reset-to-default", async (_e, id?: string) => {
     const dir = getPromptsDir();
     const fileName = id ? `${id}.md` : undefined;

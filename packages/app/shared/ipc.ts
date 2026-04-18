@@ -599,6 +599,7 @@ export interface MeetingNotesApi {
     list: () => Promise<PromptRow[]>;
     save: (id: string, body: string, patch: Partial<PromptRow>) => Promise<void>;
     create: (id: string, label: string, filename: string, body: string) => Promise<void>;
+    delete: (id: string) => Promise<void>;
     enable: (id: string, enabled: boolean) => Promise<void>;
     setAuto: (id: string, auto: boolean) => Promise<void>;
     resetToDefault: (id?: string) => Promise<void>;

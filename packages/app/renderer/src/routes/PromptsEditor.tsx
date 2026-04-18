@@ -277,6 +277,23 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
     });
   };
 
+  const onDelete = async () => {
+    if (!active || active.builtin) return;
+    const target = active;
+    setPendingConfirm({
+      title: "Delete prompt?",
+      description: `Delete "${target.label}"? This removes the prompt file from your prompts directory.`,
+      confirmLabel: "Delete prompt",
+      cancelLabel: "Keep prompt",
+      confirmVariant: "destructive",
+      action: async () => {
+        await api.prompts.delete(target.id);
+        setActiveId(null);
+        await refresh(null);
+      },
+    });
+  };
+
   const onOpenFinder = () => api.prompts.openInFinder(activeId ?? undefined);
 
   if (loading) {
@@ -424,6 +441,14 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
                     <DropdownMenuItem onSelect={() => setRunAgainstOpen(true)}>
                       Run against meeting
                     </DropdownMenuItem>
+                    {!active.builtin && (
+                      <DropdownMenuItem
+                        onSelect={onDelete}
+                        className="text-[var(--error)] focus:text-[var(--error)]"
+                      >
+                        Delete prompt
+                      </DropdownMenuItem>
+                    )}
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>

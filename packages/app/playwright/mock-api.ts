@@ -1492,6 +1492,15 @@ export async function installMockApi(page: Page) {
           });
           persistPromptState();
         },
+        async delete(id) {
+          const idx = prompts.findIndex((item) => item.id === id);
+          if (idx === -1) throw new Error(`Prompt not found: ${id}`);
+          if (prompts[idx].builtin) {
+            throw new Error(`Cannot delete built-in prompt "${id}".`);
+          }
+          prompts.splice(idx, 1);
+          persistPromptState();
+        },
         async enable(id, enabled) {
           const prompt = prompts.find((item) => item.id === id);
           if (prompt) {

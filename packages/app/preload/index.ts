@@ -117,6 +117,7 @@ const api: MeetingNotesApi = {
       ipcRenderer.invoke("prompts:save", id, body, patch),
     create: (id, label, filename, body) =>
       ipcRenderer.invoke("prompts:create", id, label, filename, body),
+    delete: (id) => ipcRenderer.invoke("prompts:delete", id),
     enable: (id, enabled) => ipcRenderer.invoke("prompts:enable", id, enabled),
     setAuto: (id, auto) => ipcRenderer.invoke("prompts:set-auto", id, auto),
     resetToDefault: (id) => ipcRenderer.invoke("prompts:reset-to-default", id),
