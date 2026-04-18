@@ -105,6 +105,17 @@ export class MeetingWorkspacePage {
     return this.page.getByRole("heading", { name: "Delete recording?" });
   }
 
+  sourceFilesTrigger() {
+    return this.main.getByRole("button", { name: /^Source files/ });
+  }
+
+  async expandSourceFiles() {
+    const trigger = this.sourceFilesTrigger();
+    if ((await trigger.getAttribute("data-state")) !== "open") {
+      await trigger.click();
+    }
+  }
+
   // Action buttons
   reprocessButton() {
     return this.page.getByRole("menuitem", { name: "Reprocess" });

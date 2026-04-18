@@ -18,6 +18,12 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Spinner } from "../components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "../components/ui/accordion";
 import { findModelEntry } from "../../../shared/llm-catalog";
 import { stripFrontmatter } from "../lib/utils";
 
@@ -511,53 +517,70 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
             </div>
           ) : recordingFiles.length === 0 ? (
             <EmptyTabContent message="No recording yet." />
-          ) : (
-            <div className="space-y-4">
-              {recordingFiles.map((file) => {
-                const source = recordingSources[file.name];
-                const audioPreview = isAudioRecording(file.name) && source;
-                const videoRecording = isVideoRecording(file.name);
-                return (
-                  <div key={file.name} className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-white p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-[var(--text-primary)] break-all">{file.name}</div>
-                        <div className="mt-0.5 text-xs text-[var(--text-secondary)]">{getRecordingTypeLabel(file.name)} · {formatFileSize(file.size)}</div>
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <Button variant="secondary" size="sm" onClick={() => onDownloadRecording(file.name)}>
-                          <FileOutput className="h-3.5 w-3.5" /> Download
-                        </Button>
-                        <Button variant="destructive" size="sm" onClick={() => onRequestDeleteRecording(file.name)}>
-                          <Trash2 className="h-3.5 w-3.5" /> Delete
-                        </Button>
-                      </div>
+          ) : (() => {
+            const combinedFile = combinedAudioFileName
+              ? recordingFiles.find((f) => f.name === combinedAudioFileName)
+              : recordingFiles.find((f) => f.name.endsWith("combined.wav"));
+            const sourceFiles = recordingFiles.filter((f) => f !== combinedFile);
+            const renderFileCard = (file: RunDetail["files"][number]) => {
+              const source = recordingSources[file.name];
+              const audioPreview = isAudioRecording(file.name) && source;
+              const videoRecording = isVideoRecording(file.name);
+              const isCombined = file === combinedFile;
+              return (
+                <div key={file.name} className="space-y-3 rounded-xl border border-[var(--border-subtle)] bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-[var(--text-primary)] break-all">{file.name}</div>
+                      <div className="mt-0.5 text-xs text-[var(--text-secondary)]">{getRecordingTypeLabel(file.name)} · {formatFileSize(file.size)}</div>
                     </div>
-                    {audioPreview ? (
-                      // Combined-audio gets the shared Plyr chrome via the
-                      // inline host (unified with the transcript pocket).
-                      // Per-channel mic/system tracks each get their own
-                      // standalone Plyr instance so they share the same
-                      // theming without competing with playback state.
-                      file.name.endsWith("combined.wav") ? (
-                        <PlaybackInlineHost className="w-full" />
-                      ) : (
-                        <InlinePlyrAudio src={source} className="w-full" />
-                      )
-                    ) : videoRecording ? (
-                      <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
-                        Video preview isn&apos;t available in-app yet. Download to view.
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
-                        Preview is not available. Download the file to inspect it.
-                      </div>
-                    )}
+                    <div className="flex shrink-0 gap-2">
+                      <Button variant="secondary" size="sm" onClick={() => onDownloadRecording(file.name)}>
+                        <FileOutput className="h-3.5 w-3.5" /> Download
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={() => onRequestDeleteRecording(file.name)}>
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </Button>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
+                  {audioPreview ? (
+                    isCombined ? (
+                      <PlaybackInlineHost className="w-full" />
+                    ) : (
+                      <InlinePlyrAudio src={source} className="w-full" />
+                    )
+                  ) : videoRecording ? (
+                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
+                      Video preview isn&apos;t available in-app yet. Download to view.
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-secondary)] px-4 py-4 text-sm text-[var(--text-secondary)]">
+                      Preview is not available. Download the file to inspect it.
+                    </div>
+                  )}
+                </div>
+              );
+            };
+            return (
+              <div className="space-y-4">
+                {combinedFile && renderFileCard(combinedFile)}
+                {sourceFiles.length > 0 && (
+                  <Accordion type="single" collapsible>
+                    <AccordionItem value="source-files" className="px-4">
+                      <AccordionTrigger>
+                        Source files ({sourceFiles.length})
+                      </AccordionTrigger>
+                      <AccordionContent>
+                        <div className="space-y-4">
+                          {sourceFiles.map(renderFileCard)}
+                        </div>
+                      </AccordionContent>
+                    </AccordionItem>
+                  </Accordion>
+                )}
+              </div>
+            );
+          })()}
         </TabsContent>
 
         {/* ---- FILES TAB ---- */}

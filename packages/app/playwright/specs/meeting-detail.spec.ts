@@ -41,7 +41,7 @@ test.describe("Meeting Workspace", () => {
     await expect(page.getByText("Welcome everyone.")).toBeVisible();
 
     await meetingWorkspace.tab("Recording").click();
-    await expect(page.getByText("audio/mic.wav")).toBeVisible();
+    await expect(page.getByText("audio/combined.wav")).toBeVisible();
 
     await meetingWorkspace.tab("Files").click();
     await expect(page.getByText("Attached files (1)")).toBeVisible();
@@ -169,6 +169,11 @@ test.describe("Meeting Workspace", () => {
 
   test("recording and files tabs show stored artifacts", async ({ meetingWorkspace, page }) => {
     await meetingWorkspace.tab("Recording").click();
+    // combined.wav is pinned at the top; mic/system/etc. live behind a
+    // collapsed "Source files" accordion.
+    await expect(page.getByText("audio/combined.wav")).toBeVisible();
+    await expect(page.getByText("audio/mic.wav")).toBeHidden();
+    await meetingWorkspace.expandSourceFiles();
     await expect(page.getByText("audio/mic.wav")).toBeVisible();
     // mic.wav and system.wav each render a native <audio>; combined.wav
     // hosts the shared unified-player audio via React Portal → 3 total.
@@ -181,6 +186,7 @@ test.describe("Meeting Workspace", () => {
 
   test("audio players load and have playable source", async ({ meetingWorkspace, page }) => {
     await meetingWorkspace.tab("Recording").click();
+    await meetingWorkspace.expandSourceFiles();
     await expect(page.locator("audio")).toHaveCount(3);
 
     // All three recording-tab <audio> elements should have a blob URL.
@@ -228,7 +234,7 @@ test.describe("Meeting Workspace", () => {
     await expect(meetingWorkspace.deleteRecordingDialogTitle()).toBeVisible();
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(meetingWorkspace.deleteRecordingDialogTitle()).not.toBeVisible();
-    await expect(page.getByText("audio/mic.wav")).toBeVisible();
+    await expect(page.getByText("audio/combined.wav")).toBeVisible();
   });
 
   test("open folder action calls the external handler", async ({ app, meetingWorkspace }) => {
