@@ -11,6 +11,12 @@ export interface LlmModelEntry {
 
 export const LLM_MODELS: LlmModelEntry[] = [
   {
+    id: "claude-opus-4-7",
+    label: "Opus 4.7",
+    provider: "claude",
+    blurb: "Anthropic's newest flagship. Adaptive thinking for deeper analysis.",
+  },
+  {
     id: "claude-opus-4-6",
     label: "Opus 4.6",
     provider: "claude",

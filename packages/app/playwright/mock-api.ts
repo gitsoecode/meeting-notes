@@ -87,6 +87,12 @@ export async function installMockApi(page: Page) {
     };
     let nextRunCounter = 3;
     let nextJobCounter = 2;
+    // Opt-in test hook: when > 0, startReprocess emits a chain of
+    // output-progress events before output-complete, spaced by this many
+    // ms. Lets tests observe the live token-count tick expected from
+    // streaming LLM providers (Claude, OpenAI). Zero = old synchronous
+    // behavior, used by the bulk of specs.
+    let progressEmissionDelayMs = 0;
     const installedLocalModels = ["qwen3.5:9b"];
     const jobs = [
       {
@@ -850,6 +856,9 @@ export async function installMockApi(page: Page) {
       getLastExternalAction() {
         return clone(externalActionLog[0] ?? null);
       },
+      setProgressEmissionDelay(ms) {
+        progressEmissionDelayMs = Math.max(0, Number(ms) || 0);
+      },
     };
 
     window.api = {
@@ -1146,22 +1155,61 @@ export async function installMockApi(page: Page) {
                 failed: [selectedPromptId],
               });
             } else {
-              writePromptOutput(req.runFolder, selectedPromptId);
-              emit("pipelineProgress", {
-                type: "output-complete",
-                runFolder: req.runFolder,
-                promptOutputId: selectedPrompt.id,
-                label: selectedPrompt.label,
-                filename: selectedPrompt.filename,
-                latencyMs: 800,
-              });
-              if (run) run.status = "complete";
-              emit("pipelineProgress", {
-                type: "run-complete",
-                runFolder: req.runFolder,
-                succeeded: req.onlyIds ?? ["summary"],
-                failed: [],
-              });
+              const finishSuccess = () => {
+                writePromptOutput(req.runFolder, selectedPromptId);
+                emit("pipelineProgress", {
+                  type: "output-complete",
+                  runFolder: req.runFolder,
+                  promptOutputId: selectedPrompt.id,
+                  label: selectedPrompt.label,
+                  filename: selectedPrompt.filename,
+                  latencyMs: 800,
+                });
+                if (run) run.status = "complete";
+                emit("pipelineProgress", {
+                  type: "run-complete",
+                  runFolder: req.runFolder,
+                  succeeded: req.onlyIds ?? ["summary"],
+                  failed: [],
+                });
+                persistState();
+                upsertJob({
+                  ...job,
+                  status: "completed",
+                  cancelable: false,
+                  endedAt: new Date().toISOString(),
+                  progress: {
+                    completedOutputs: 1,
+                    failedOutputs: 0,
+                    totalOutputs: req.onlyIds?.length ?? 1,
+                    currentOutputLabel: selectedPrompt.label,
+                  },
+                });
+              };
+              if (progressEmissionDelayMs > 0) {
+                const progressCounts = [3, 8, 14];
+                const charCounts = [40, 180, 420];
+                let step = 0;
+                const tick = () => {
+                  if (step < progressCounts.length) {
+                    emit("pipelineProgress", {
+                      type: "output-progress",
+                      runFolder: req.runFolder,
+                      promptOutputId: selectedPrompt.id,
+                      tokensGenerated: progressCounts[step],
+                      charsGenerated: charCounts[step],
+                    });
+                    step++;
+                    setTimeout(tick, progressEmissionDelayMs);
+                  } else {
+                    finishSuccess();
+                  }
+                };
+                setTimeout(tick, progressEmissionDelayMs);
+              } else {
+                finishSuccess();
+              }
+              return;
             }
             persistState();
             upsertJob({

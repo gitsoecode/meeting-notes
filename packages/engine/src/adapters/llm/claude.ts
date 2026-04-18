@@ -2,12 +2,33 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { LlmProvider, LlmResponse, LlmCallOptions } from "./provider.js";
 import { throwIfAborted } from "../../core/abort.js";
 
+/**
+ * Minimal structural shape of the pieces of the Anthropic SDK we actually
+ * call. Tests inject a fake that matches this shape without needing a
+ * real API key.
+ */
+export interface ClaudeStreamLike {
+  on(event: "text", cb: (text: string) => void): unknown;
+  finalMessage(): Promise<{
+    usage: { input_tokens: number; output_tokens: number };
+  }>;
+}
+
+export interface ClaudeClientLike {
+  messages: {
+    stream(
+      params: Record<string, unknown>,
+      options?: { signal?: AbortSignal }
+    ): ClaudeStreamLike;
+  };
+}
+
 export class ClaudeProvider implements LlmProvider {
-  private client: Anthropic;
+  private client: ClaudeClientLike;
   private model: string;
 
-  constructor(apiKey: string, model = "claude-sonnet-4-6") {
-    this.client = new Anthropic({ apiKey });
+  constructor(apiKey: string, model = "claude-sonnet-4-6", client?: ClaudeClientLike) {
+    this.client = client ?? (new Anthropic({ apiKey }) as unknown as ClaudeClientLike);
     this.model = model;
   }
 
@@ -19,38 +40,58 @@ export class ClaudeProvider implements LlmProvider {
   ): Promise<LlmResponse> {
     const model = modelOverride && modelOverride.trim() ? modelOverride : this.model;
     throwIfAborted(options?.signal);
-    // When thinking is enabled, Claude requires temperature=1, so we only
-    // apply a custom temperature when thinking is off.
-    const useThinking = true;
-    const createParams: Record<string, unknown> = {
+
+    // Thinking is intentionally NOT enabled. Adaptive thinking delays
+    // time-to-first-text by 30–90+ seconds on long inputs (e.g. a 14k-
+    // token transcript cleanup), which surfaced as a "0 output tokens"
+    // hang in the UI — the streaming callbacks only fire on text_delta,
+    // and nothing streams while the model is thinking. Meeting prompts
+    // don't need extended reasoning; omitting `thinking` gets first
+    // tokens within 1–2s and keeps the UI live.
+    const params: Record<string, unknown> = {
       model,
-      max_tokens: 16384,
+      max_tokens: 50000,
       system: systemPrompt,
       messages: [{ role: "user", content: userMessage }],
     };
-    if (useThinking) {
-      createParams.thinking = { type: "enabled", budget_tokens: 10000 };
-    } else if (options?.temperature != null) {
-      createParams.temperature = options.temperature;
+    if (options?.temperature != null) {
+      params.temperature = options.temperature;
     }
-    const response = await (this.client.messages.create as any)(
-      createParams,
+
+    let content = "";
+    let chunkCount = 0;
+    let lastProgressAt = 0;
+
+    const stream = this.client.messages.stream(
+      params,
       options?.signal ? { signal: options.signal } : undefined
     );
+
+    stream.on("text", (text: string) => {
+      content += text;
+      chunkCount++;
+      const now = Date.now();
+      if (options?.onTokenProgress && now - lastProgressAt >= 500) {
+        lastProgressAt = now;
+        options.onTokenProgress(chunkCount, content.length);
+      }
+    });
+
+    const final = await stream.finalMessage();
     throwIfAborted(options?.signal);
 
-    // Extract text content from response blocks
-    const contentBlocks = response.content as Array<{ type: string; text?: string }>;
-    const textBlocks = contentBlocks.filter(
-      (block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string"
-    );
-    const content = textBlocks.map((block) => block.text).join("\n\n");
+    const inputTokens = final.usage.input_tokens;
+    const outputTokens = final.usage.output_tokens;
+
+    // Snap to the real output-token count so the final UI reading matches
+    // the "{N} output tokens" label exactly.
+    options?.onTokenProgress?.(outputTokens, content.length);
 
     return {
       content,
-      tokensUsed: response.usage.input_tokens + response.usage.output_tokens,
-      promptTokens: response.usage.input_tokens,
-      completionTokens: response.usage.output_tokens,
+      tokensUsed: inputTokens + outputTokens,
+      promptTokens: inputTokens,
+      completionTokens: outputTokens,
       model,
     };
   }
