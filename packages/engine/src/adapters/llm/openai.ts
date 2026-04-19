@@ -65,6 +65,7 @@ export class OpenAIProvider implements LlmProvider {
       if (delta) {
         content += delta;
         chunkCount++;
+        options?.onText?.(delta, content);
         const now = Date.now();
         if (options?.onTokenProgress && now - lastProgressAt >= 500) {
           lastProgressAt = now;

@@ -8,6 +8,7 @@ import { PromptsEditor } from "./routes/PromptsEditor";
 import { Settings } from "./routes/Settings";
 import { SetupWizard } from "./routes/SetupWizard";
 import { ActivityView } from "./routes/ActivityView";
+import { ChatView, type ChatSubview } from "./routes/ChatView";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { MeetingNotesMark } from "./components/MeetingNotesMark";
 import { AppSidebar } from "./components/AppSidebar";
@@ -16,13 +17,29 @@ import { SidebarInset, SidebarMain, SidebarProvider } from "./components/ui/side
 
 export type MeetingView = "workspace" | "details";
 
+type DetailsTabKind =
+  | "metadata"
+  | "summary"
+  | "analysis"
+  | "transcript"
+  | "recording"
+  | "files";
+
 type Route =
   | { name: "record" }
   | { name: "meetings" }
-  | { name: "meeting"; runFolder: string; view?: MeetingView }
+  | {
+      name: "meeting";
+      runFolder: string;
+      view?: MeetingView;
+      initialSeekMs?: number;
+      /** Pre-selected inner tab (Details view) when opening via a chat citation. */
+      initialTabId?: DetailsTabKind;
+    }
   | { name: "prompts"; promptId?: string }
   | { name: "settings" }
-  | { name: "activity" };
+  | { name: "activity" }
+  | { name: "chat"; subview?: ChatSubview };
 
 function routeToHash(route: Route): string {
   switch (route.name) {
@@ -32,7 +49,12 @@ function routeToHash(route: Route): string {
       return "#/meetings";
     case "meeting": {
       const base = `#/meeting/${encodeURIComponent(route.runFolder)}`;
-      return route.view ? `${base}/${route.view}` : base;
+      const withView = route.view ? `${base}/${route.view}` : base;
+      const params = new URLSearchParams();
+      if (route.initialSeekMs != null) params.set("t", String(route.initialSeekMs));
+      if (route.initialTabId) params.set("tab", route.initialTabId);
+      const query = params.toString();
+      return query ? `${withView}?${query}` : withView;
     }
     case "prompts":
       return route.promptId
@@ -42,6 +64,11 @@ function routeToHash(route: Route): string {
       return "#/settings";
     case "activity":
       return "#/activity";
+    case "chat": {
+      if (!route.subview || route.subview.kind === "empty") return "#/chat";
+      if (route.subview.kind === "all-threads") return "#/chat/all";
+      return `#/chat/t/${encodeURIComponent(route.subview.threadId)}`;
+    }
   }
 }
 
@@ -56,7 +83,29 @@ function routeFromHash(hash: string): Route | null {
     return null;
   }
 
-  const parts = normalized.replace(/^\/+/, "").split("/");
+  // Strip (and capture) a `?t=...&tab=...` query suffix.
+  const queryIndex = normalized.indexOf("?");
+  const pathPart = queryIndex === -1 ? normalized : normalized.slice(0, queryIndex);
+  const queryStr = queryIndex === -1 ? "" : normalized.slice(queryIndex + 1);
+  const query = new URLSearchParams(queryStr);
+  const tParam = query.get("t");
+  const initialSeekMs =
+    tParam != null && Number.isFinite(Number(tParam)) ? Number(tParam) : undefined;
+  const tabParam = query.get("tab");
+  const VALID_TABS = new Set<DetailsTabKind>([
+    "metadata",
+    "summary",
+    "analysis",
+    "transcript",
+    "recording",
+    "files",
+  ]);
+  const initialTabId =
+    tabParam && VALID_TABS.has(tabParam as DetailsTabKind)
+      ? (tabParam as DetailsTabKind)
+      : undefined;
+
+  const parts = pathPart.replace(/^\/+/, "").split("/");
   const [head, tail, extra] = parts;
 
   switch (head) {
@@ -66,12 +115,24 @@ function routeFromHash(hash: string): Route | null {
       return { name: "meetings" };
     case "meeting":
       return tail
-        ? { name: "meeting", runFolder: decodeURIComponent(tail), view: parseMeetingView(extra) }
+        ? {
+            name: "meeting",
+            runFolder: decodeURIComponent(tail),
+            view: parseMeetingView(extra),
+            initialSeekMs,
+            initialTabId,
+          }
         : null;
     case "prep":
       // Backward compat: #/prep/:runFolder[/view] maps to the unified meeting route
       return tail
-        ? { name: "meeting", runFolder: decodeURIComponent(tail), view: parseMeetingView(extra) }
+        ? {
+            name: "meeting",
+            runFolder: decodeURIComponent(tail),
+            view: parseMeetingView(extra),
+            initialSeekMs,
+            initialTabId,
+          }
         : null;
     case "prompts":
       return tail ? { name: "prompts", promptId: decodeURIComponent(tail) } : { name: "prompts" };
@@ -79,6 +140,16 @@ function routeFromHash(hash: string): Route | null {
       return { name: "settings" };
     case "activity":
       return { name: "activity" };
+    case "chat": {
+      if (!tail) return { name: "chat", subview: { kind: "empty" } };
+      if (tail === "all") return { name: "chat", subview: { kind: "all-threads" } };
+      if (tail === "t" && extra)
+        return {
+          name: "chat",
+          subview: { kind: "thread", threadId: decodeURIComponent(extra) },
+        };
+      return { name: "chat", subview: { kind: "empty" } };
+    }
     default:
       return null;
   }
@@ -225,7 +296,13 @@ export function App() {
         navigateRoute?: (route: Route) => void;
       };
     };
-    if (!target.__MEETING_NOTES_TEST) return;
+    // Install the test hook unconditionally. Previously we only filled an
+    // existing stub (created by the mocked-e2e harness), but live Electron
+    // tests don't preload a stub — they still need a reliable way to
+    // drive the renderer router without racing hashchange listeners.
+    // Exposing navigate() + navigateRoute() to window is safe: production
+    // never calls them.
+    if (!target.__MEETING_NOTES_TEST) target.__MEETING_NOTES_TEST = {};
     target.__MEETING_NOTES_TEST.navigate = (name) => navigate({ name } as Route);
     target.__MEETING_NOTES_TEST.navigateRoute = (nextRoute) => navigate(nextRoute);
     return () => {
@@ -299,6 +376,8 @@ export function App() {
         return "Settings";
       case "activity":
         return "Activity";
+      case "chat":
+        return "Chat";
     }
   }, [route.name]);
 
@@ -314,6 +393,53 @@ export function App() {
         return undefined;
     }
   }, [route.name]);
+
+  const handleOpenMeetingFromChat = useCallback(
+    async (
+      runId: string,
+      startMs: number | null,
+      source?: "transcript" | "summary" | "prep" | "notes",
+    ) => {
+      try {
+        const all = await api.runs.list();
+        const row = all.find((r) => r.run_id === runId);
+        if (!row) return;
+        // Map the citation source to the right meeting view + tab.
+        //   - transcript / summary: Details view, corresponding tab.
+        //   - prep / notes: Workspace view, where those surfaces live.
+        //   - a seek-ms always wins and forces Details → Transcript
+        //     (seek-on-mount logic in MeetingShell handles the audio).
+        let view: MeetingView = "details";
+        let initialTabId: DetailsTabKind | undefined;
+        if (startMs != null) {
+          view = "details";
+          initialTabId = "transcript";
+        } else if (source === "prep" || source === "notes") {
+          view = "workspace";
+          initialTabId = undefined;
+        } else if (source === "summary") {
+          view = "details";
+          initialTabId = "summary";
+        } else if (source === "transcript") {
+          view = "details";
+          initialTabId = "transcript";
+        } else {
+          view = "details";
+          initialTabId = "metadata";
+        }
+        navigate({
+          name: "meeting",
+          runFolder: row.folder_path,
+          view,
+          initialSeekMs: startMs ?? undefined,
+          initialTabId,
+        });
+      } catch (err) {
+        console.error("Open meeting from chat failed", err);
+      }
+    },
+    [navigate],
+  );
 
   if (config === undefined) {
     return (
@@ -393,6 +519,8 @@ export function App() {
               <MeetingShell
                 runFolder={route.runFolder}
                 initialView={route.view}
+                initialSeekMs={route.initialSeekMs}
+                initialTabId={route.initialTabId}
                 recording={recording}
                 config={config}
                 onBack={() => navigate({ name: "meetings" })}
@@ -417,6 +545,15 @@ export function App() {
               />
             )}
             {route.name === "activity" && <ActivityView />}
+            {route.name === "chat" && (
+              <ChatView
+                subview={route.subview ?? { kind: "empty" }}
+                onSubviewChange={(sv) =>
+                  navigate({ name: "chat", subview: sv }, { replace: true })
+                }
+                onOpenMeetingAt={handleOpenMeetingFromChat}
+              />
+            )}
           </main>
         </SidebarInset>
       </SidebarMain>

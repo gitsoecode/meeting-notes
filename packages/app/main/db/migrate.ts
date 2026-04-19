@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 import { createAppLogger } from "@meeting-notes/engine";
-import { SCHEMA_V1 } from "./schema.js";
+import { SCHEMA_V1, SCHEMA_V4_CHAT } from "./schema.js";
 
 const appLogger = createAppLogger(false);
 
@@ -34,6 +34,13 @@ export function migrate(db: Database.Database): void {
     `);
     db.pragma("user_version = 3");
     appLogger.info("Database migration v3 applied");
+  }
+
+  if (version < 4) {
+    appLogger.info("Applying database migration v4 (chat index)");
+    db.exec(SCHEMA_V4_CHAT);
+    db.pragma("user_version = 4");
+    appLogger.info("Database migration v4 applied");
   }
 }
 

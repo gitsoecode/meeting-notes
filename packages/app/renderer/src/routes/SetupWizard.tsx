@@ -257,6 +257,16 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setInstallError(null);
     try {
       await api.llm.setup({ model: localLlmModel });
+      // Also pull the chat embedding model so semantic search is ready
+      // on first launch. Small (~274MB), quick, and the chat feature
+      // degrades to FTS-only if we skip this — but it's a better first-
+      // session experience to have it ready.
+      try {
+        await api.chat.installEmbedModel();
+      } catch (err) {
+        // Non-fatal — chat still works without embeddings. Log + continue.
+        console.warn("embedding model pull during setup failed", err);
+      }
       const res = await api.llm.check();
       setInstalledLocalModels(res.installedModels);
     } catch (err) {

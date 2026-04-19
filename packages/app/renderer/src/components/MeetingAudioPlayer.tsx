@@ -132,6 +132,11 @@ export function PlaybackProvider({
   const [inlineHost, setInlineHostState] = useState<HTMLElement | null>(null);
   const [pocketBody, setPocketBody] = useState<HTMLElement | null>(null);
 
+  // Pending seek target for calls that arrive before the audio element is
+  // mounted (e.g. ?t=ms deep links from chat citations). Applied once the
+  // element attaches + its source is ready.
+  const pendingSeekRef = useRef<number | null>(null);
+
   const setInlineHost = useCallback((el: HTMLElement | null) => {
     setInlineHostState(el);
   }, []);
@@ -225,16 +230,20 @@ export function PlaybackProvider({
 
   const seekAndPlay = useCallback(
     (sec: number) => {
-      const audio = audioEl;
-      if (!audio || !blobUrl) {
-        // Still loading — open the pocket, show loading message, and mark
-        // intent so the next load triggers play. Rare path: user clicks
-        // before we've fetched the blob.
-        setIsOpen(true);
-        return;
-      }
+      // Always open the pocket so the audio chrome renders into its portal
+      // target, which in turn mounts the <audio> element via React tree.
       setIsOpen(true);
       setLastSeekAt(Date.now());
+
+      const audio = audioEl;
+      if (!audio || !blobUrl) {
+        // Element / source not ready yet. Stash the intent so the mount
+        // effect can replay it as soon as the element attaches. This is
+        // the hot path for chat-citation deep links: InitialSeek fires
+        // before the blob URL has loaded.
+        pendingSeekRef.current = sec;
+        return;
+      }
 
       const apply = () => {
         try {
@@ -274,6 +283,18 @@ export function PlaybackProvider({
     },
     [audioEl, blobUrl],
   );
+
+  // Replay any pending seek once the audio element + blob URL are ready.
+  // Runs whenever either dependency settles, so a deep-link seek that
+  // arrived during the blob fetch finally lands without user action.
+  useEffect(() => {
+    if (pendingSeekRef.current == null) return;
+    if (!audioEl || !blobUrl) return;
+    const pending = pendingSeekRef.current;
+    pendingSeekRef.current = null;
+    // Fire through seekAndPlay to reuse the readyState-branch logic.
+    seekAndPlay(pending);
+  }, [audioEl, blobUrl, seekAndPlay]);
 
   const close = useCallback(() => {
     try {

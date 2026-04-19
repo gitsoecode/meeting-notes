@@ -101,3 +101,97 @@ CREATE TRIGGER IF NOT EXISTS runs_fts_update AFTER UPDATE OF title, description 
   INSERT INTO runs_fts(rowid, title, description) VALUES (NEW.rowid, NEW.title, NEW.description);
 END;
 `;
+
+/**
+ * Chat-index schema (v4). Adds hybrid retrieval tables for the chat assistant:
+ * - `chat_chunks`: one row per retrievable chunk (transcript segment, summary
+ *   section, prep/notes excerpt). Cascades on run deletion.
+ * - `chat_chunks_fts`: FTS5 contentless mirror, kept in sync via triggers.
+ * - `chat_index_meta`: small key/value table recording which embedding model
+ *   produced the current vectors; mismatch triggers a re-embed on startup.
+ * - `chat_threads` + `chat_messages`: chat conversation history, per-thread.
+ *
+ * Note: `chat_chunks_vec` (sqlite-vec vec0 virtual table) is created by the
+ * sqlite-vec loader after the extension is loaded — it can't live in this
+ * static SQL string because the extension isn't loaded at migration time on
+ * pre-existing databases.
+ */
+export const SCHEMA_V4_CHAT = `
+CREATE TABLE IF NOT EXISTS chat_chunks (
+  chunk_id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id           TEXT NOT NULL,
+  kind             TEXT NOT NULL,
+  speaker          TEXT,
+  start_ms         INTEGER,
+  end_ms           INTEGER,
+  text             TEXT NOT NULL,
+  seekable         INTEGER NOT NULL DEFAULT 0,
+  FOREIGN KEY (run_id) REFERENCES runs(run_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_chunks_run ON chat_chunks(run_id);
+CREATE INDEX IF NOT EXISTS idx_chat_chunks_run_start ON chat_chunks(run_id, start_ms);
+
+-- Standalone FTS5 table (not contentless). Stores a second copy of text —
+-- wasteful but trivial at the scale we index. Avoids the fragile
+-- content_rowid wiring against chat_chunks. chunk_id is the primary key
+-- INTEGER of chat_chunks, which is an alias for rowid; we reuse it as the
+-- FTS rowid so the two tables share IDs.
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_chunks_fts USING fts5(
+  text,
+  tokenize='porter unicode61'
+);
+
+CREATE TRIGGER IF NOT EXISTS chat_chunks_fts_insert AFTER INSERT ON chat_chunks BEGIN
+  INSERT INTO chat_chunks_fts(rowid, text) VALUES (NEW.chunk_id, NEW.text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_chunks_fts_delete AFTER DELETE ON chat_chunks BEGIN
+  DELETE FROM chat_chunks_fts WHERE rowid = OLD.chunk_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS chat_chunks_fts_update AFTER UPDATE OF text ON chat_chunks BEGIN
+  DELETE FROM chat_chunks_fts WHERE rowid = OLD.chunk_id;
+  INSERT INTO chat_chunks_fts(rowid, text) VALUES (NEW.chunk_id, NEW.text);
+END;
+
+CREATE TABLE IF NOT EXISTS chat_index_meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS chat_threads (
+  thread_id   TEXT PRIMARY KEY,
+  title       TEXT NOT NULL,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  model_id    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_threads_updated ON chat_threads(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  message_id   TEXT PRIMARY KEY,
+  thread_id    TEXT NOT NULL,
+  role         TEXT NOT NULL,
+  content      TEXT NOT NULL,
+  citations    TEXT,
+  created_at   TEXT NOT NULL,
+  FOREIGN KEY (thread_id) REFERENCES chat_threads(thread_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, created_at);
+`;
+
+/**
+ * The sqlite-vec vec0 virtual table, created after the extension is loaded.
+ * Parameterized on embedding dimension so we can swap models. Uses the
+ * implicit `rowid` as the key — sqlite-vec rejects named INTEGER PRIMARY
+ * KEY columns when Node bindings pass regular numbers, and the implicit
+ * rowid works cleanly with BigInt-bound inserts.
+ */
+export function chatChunksVecSchema(dim: number): string {
+  return `CREATE VIRTUAL TABLE IF NOT EXISTS chat_chunks_vec USING vec0(
+    embedding FLOAT[${dim}]
+  );`;
+}

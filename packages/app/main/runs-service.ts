@@ -31,6 +31,8 @@ import type {
 import { resolveRunDocumentPath, resolveRunFolderPath, RUN_NOTES_FILE, RUN_TRANSCRIPT_FILE } from "./run-access.js";
 import { validatePromptModelSelection } from "./model-validation.js";
 import { getStore } from "./store.js";
+import { indexRun as chatIndexRun } from "./chat-index/index-run.js";
+import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@meeting-notes/engine";
 
 /**
  * Parse speaker excerpts from a saved transcript.md body. The markdown
@@ -265,6 +267,20 @@ export async function reprocessRun(
     }
   }
 
+  // Re-index for chat retrieval now that prompt outputs (e.g. summary) may
+  // have changed. Best-effort.
+  try {
+    const embedder = createOllamaEmbedder({
+      baseUrl: config.ollama.base_url,
+      model: DEFAULT_EMBEDDING_MODEL,
+    });
+    await chatIndexRun(runFolder, { embedder });
+  } catch (err) {
+    logger.warn("chat-index reprocess hook failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   return { runFolder, succeeded, failed };
 }
 
@@ -362,6 +378,22 @@ export async function processRecordedRun(
     signal,
     store,
   });
+
+  // Post-process: index the run for chat retrieval. Best-effort — swallow
+  // any error so a failed embed doesn't break the surrounding processing
+  // flow. Uses nomic-embed-text via the Ollama daemon the user already
+  // configured for pipeline calls.
+  try {
+    const embedder = createOllamaEmbedder({
+      baseUrl: config.ollama.base_url,
+      model: DEFAULT_EMBEDDING_MODEL,
+    });
+    await chatIndexRun(runFolder, { embedder });
+  } catch (err) {
+    logger.warn("chat-index post-process failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   return {
     runFolder,

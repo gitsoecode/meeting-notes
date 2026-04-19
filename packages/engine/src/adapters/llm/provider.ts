@@ -18,6 +18,12 @@ export interface LlmCallOptions {
   signal?: AbortSignal;
   temperature?: number;
   onTokenProgress?: (tokensGenerated: number, charsGenerated: number) => void;
+  /**
+   * Live text chunks from the provider as they're received. Useful for
+   * token-by-token UI streaming (chat assistant). Not all providers emit
+   * this — pipeline callers generally ignore it.
+   */
+  onText?: (delta: string, accumulated: string) => void;
 }
 
 export interface LlmProvider {

@@ -258,6 +258,7 @@ export function Settings({ config, onChange }: SettingsProps) {
         <TabsList className="mb-4">
           <TabsTrigger value="models">Models</TabsTrigger>
           <TabsTrigger value="audio">Audio</TabsTrigger>
+          <TabsTrigger value="chat">Chat</TabsTrigger>
           <TabsTrigger value="storage">Storage</TabsTrigger>
           <TabsTrigger value="system">Other</TabsTrigger>
         </TabsList>
@@ -796,6 +797,10 @@ export function Settings({ config, onChange }: SettingsProps) {
             </div>
           </section>
         </TabsContent>
+
+        <TabsContent value="chat" className="max-w-2xl space-y-5 outline-none">
+          <ChatSettingsSection />
+        </TabsContent>
       </Tabs>
 
       {setupAsrMode && (
@@ -1100,6 +1105,247 @@ function AudioRetentionSection({
           </div>
         )}
       </div>
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chat settings — model default, API keys reminder, system prompt editor.
+// ---------------------------------------------------------------------------
+
+function ChatSettingsSection() {
+  const [systemPrompt, setSystemPrompt] = useState<string>("");
+  const [defaultPrompt, setDefaultPrompt] = useState<string>("");
+  const [defaultModel, setDefaultModel] = useState<string | null>(null);
+  const [savingPrompt, setSavingPrompt] = useState(false);
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [pendingCount, setPendingCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.chat
+      .getSettings()
+      .then((s) => {
+        setSystemPrompt(s.system_prompt);
+        setDefaultPrompt(s.default_system_prompt);
+        setDefaultModel(s.default_model);
+      })
+      .catch(() => {});
+    api.chat.backfillCountPending().then(setPendingCount).catch(() => {});
+  }, []);
+
+  return (
+    <>
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">Default model</h3>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Chat uses the same default model as the rest of the app. Change it in the
+          Models tab. Currently:{" "}
+          <span className="font-mono text-[var(--text-primary)]">
+            {defaultModel ?? "unset"}
+          </span>
+          .
+        </p>
+      </section>
+
+      <Separator />
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">System prompt</h3>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Controls how the chat assistant behaves. The default grounds it in your
+          meetings and requires citations on factual claims — edit at your own risk.
+        </p>
+        <Textarea
+          value={systemPrompt}
+          onChange={(e) => setSystemPrompt(e.target.value)}
+          rows={20}
+          className="min-h-[420px] font-mono text-xs"
+          data-testid="chat-system-prompt-textarea"
+        />
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            disabled={savingPrompt}
+            onClick={async () => {
+              setSavingPrompt(true);
+              setSavedAt(null);
+              try {
+                await api.chat.saveSystemPrompt(systemPrompt);
+                setSavedAt(Date.now());
+              } finally {
+                setSavingPrompt(false);
+              }
+            }}
+            data-testid="chat-system-prompt-save"
+          >
+            {savingPrompt ? "Saving…" : "Save"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={async () => {
+              await api.chat.resetSystemPrompt();
+              setSystemPrompt(defaultPrompt);
+              setSavedAt(Date.now());
+            }}
+            data-testid="chat-system-prompt-reset"
+          >
+            Reset to default
+          </Button>
+          {savedAt != null && Date.now() - savedAt < 4000 && (
+            <span
+              className="text-xs text-[var(--text-tertiary)]"
+              data-testid="chat-system-prompt-saved"
+            >
+              Saved
+            </span>
+          )}
+        </div>
+      </section>
+
+      <Separator />
+
+      <EmbedModelSection />
+
+      <Separator />
+
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">Indexing</h3>
+        <p className="text-xs text-[var(--text-secondary)]">
+          Chat searches an embedding index over your transcripts and summaries.
+          {pendingCount && pendingCount > 0
+            ? ` ${pendingCount} meetings are not yet indexed.`
+            : " All meetings are indexed."}
+        </p>
+        <Button
+          size="sm"
+          onClick={async () => {
+            try {
+              await api.chat.backfillStart();
+            } catch {
+              /* noop */
+            }
+          }}
+          data-testid="chat-backfill-start"
+        >
+          Re-run indexing
+        </Button>
+      </section>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Chat embedding model installer — shown in Settings (and reused by the
+// SetupWizard's LLM step) so users can see whether semantic search is ready
+// and, if not, pull the model with visible progress.
+// ---------------------------------------------------------------------------
+
+function EmbedModelSection() {
+  const [status, setStatus] = useState<{ model: string; installed: boolean } | null>(null);
+  const [pulling, setPulling] = useState(false);
+  const [progress, setProgress] = useState<{ pct: number; completed: number; total: number } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = () => {
+    api.chat
+      .embedModelStatus()
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  };
+
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  useEffect(() => {
+    if (!pulling) return;
+    const unsub = api.on.setupLlmProgress((p) => setProgress(p));
+    return () => unsub();
+  }, [pulling]);
+
+  const install = async () => {
+    setPulling(true);
+    setError(null);
+    setProgress(null);
+    try {
+      await api.chat.installEmbedModel();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setPulling(false);
+      setProgress(null);
+      refresh();
+    }
+  };
+
+  if (!status) {
+    return (
+      <section className="space-y-3">
+        <h3 className="text-sm font-medium text-[var(--text-primary)]">
+          Chat embedding model
+        </h3>
+        <p className="text-xs text-[var(--text-secondary)]">Checking status…</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="space-y-3" data-testid="chat-embed-model-section">
+      <h3 className="text-sm font-medium text-[var(--text-primary)]">
+        Chat embedding model
+      </h3>
+      <p className="text-xs text-[var(--text-secondary)]">
+        Powers semantic search over your transcripts. Chat still works without
+        it but falls back to exact keyword matching.
+      </p>
+      <div className="flex items-center gap-3 text-sm">
+        <span className="font-mono text-xs">{status.model}</span>
+        {status.installed ? (
+          <span
+            className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800"
+            data-testid="chat-embed-model-status"
+            data-installed="true"
+          >
+            ✓ Installed
+          </span>
+        ) : (
+          <span
+            className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+            data-testid="chat-embed-model-status"
+            data-installed="false"
+          >
+            Not installed
+          </span>
+        )}
+      </div>
+      {!status.installed && (
+        <Button
+          size="sm"
+          disabled={pulling}
+          onClick={() => void install()}
+          data-testid="chat-embed-model-install"
+        >
+          {pulling
+            ? progress
+              ? `Installing… ${progress.pct}%`
+              : "Installing…"
+            : "Install"}
+        </Button>
+      )}
+      {progress && pulling && (
+        <div className="h-1 w-full overflow-hidden rounded bg-[var(--bg-secondary)]">
+          <div
+            className="h-full bg-[var(--accent)]"
+            style={{ width: `${progress.pct}%` }}
+          />
+        </div>
+      )}
+      {error && (
+        <div className="text-xs text-[var(--error)]" data-testid="chat-embed-model-error">
+          {error}
+        </div>
+      )}
     </section>
   );
 }

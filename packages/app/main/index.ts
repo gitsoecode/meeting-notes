@@ -17,7 +17,14 @@ import {
 } from "./ipc.js";
 import { setupTray } from "./tray.js";
 import { ensureOllamaDaemon, stopOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
-import { DEFAULT_CONFIG, loadConfig } from "@meeting-notes/engine";
+import {
+  DEFAULT_CONFIG,
+  DEFAULT_EMBEDDING_MODEL,
+  listOllamaModels,
+  loadConfig,
+  pullOllamaModel,
+  type AppConfig,
+} from "@meeting-notes/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
@@ -30,6 +37,37 @@ import { handleStructuredAppLog } from "./activity-monitor.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+/**
+ * Pull the chat embedding model (`nomic-embed-text`) if it isn't already
+ * installed. Best-effort: silent on failure, non-blocking. The chat feature
+ * degrades to FTS-only when embeddings are unavailable, so this is a
+ * quality-of-life improvement rather than a correctness requirement.
+ */
+async function ensureChatEmbeddingModel(config: AppConfig): Promise<void> {
+  try {
+    const installed = await listOllamaModels(config.ollama.base_url);
+    const have = installed.some(
+      (m) => m.name === DEFAULT_EMBEDDING_MODEL || m.name.startsWith(`${DEFAULT_EMBEDDING_MODEL}:`)
+    );
+    if (have) return;
+    appLoggerRef?.info("Pulling chat embedding model in background", {
+      detail: DEFAULT_EMBEDDING_MODEL,
+    });
+    await pullOllamaModel(DEFAULT_EMBEDDING_MODEL, {
+      baseUrl: config.ollama.base_url,
+    });
+    appLoggerRef?.info("Chat embedding model pulled", {
+      detail: DEFAULT_EMBEDDING_MODEL,
+    });
+  } catch (err) {
+    appLoggerRef?.warn("ensureChatEmbeddingModel failed; chat will run FTS-only until resolved", {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+let appLoggerRef: ReturnType<typeof createAppLogger> | null = null;
 
 // Paths: when Vite's dev server env var is set, load from it; otherwise load
 // the built index.html. This makes `electron .` work against dist without
@@ -54,6 +92,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null;
 const appLogger = createAppLogger(false);
+appLoggerRef = appLogger;
 
 setAppLoggerListener(handleStructuredAppLog);
 
@@ -205,6 +244,11 @@ app.whenReady().then(async () => {
         // Logged to ~/.meeting-notes/ollama.log; nothing more to do here.
       });
     }
+    // Ensure the chat embedding model is present. Small (~274MB); pulled
+    // silently in the background so first-chat works without setup steps.
+    void ensureChatEmbeddingModel(config).catch(() => {
+      // Logged below; non-fatal.
+    });
   } catch {
     // No config yet (first run) — wizard will start the daemon at finish.
   }

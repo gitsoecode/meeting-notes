@@ -70,6 +70,8 @@ export class ClaudeProvider implements LlmProvider {
     stream.on("text", (text: string) => {
       content += text;
       chunkCount++;
+      // Raw text chunks for live-streaming consumers (chat UI).
+      options?.onText?.(text, content);
       const now = Date.now();
       if (options?.onTokenProgress && now - lastProgressAt >= 500) {
         lastProgressAt = now;

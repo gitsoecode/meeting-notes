@@ -64,7 +64,28 @@ import { Tabs, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { getDefaultPromptModel, getPromptModelSummary } from "../lib/prompt-metadata";
 import { MeetingDetailsView, type DetailsTabKind } from "./MeetingDetailsView";
-import { PlaybackProvider } from "../components/MeetingAudioPlayer";
+import { PlaybackProvider, usePlayback } from "../components/MeetingAudioPlayer";
+
+/**
+ * Child of PlaybackProvider that fires a one-shot seekAndPlay on mount when
+ * the route was opened with `?t=ms`. Waits until playback is actually
+ * available (blob URL fetched) before triggering.
+ */
+function InitialSeek({ seekMs }: { seekMs: number }) {
+  const { seekAndPlay, combinedAudioAvailable } = usePlayback();
+  const firedRef = useRef(false);
+  useEffect(() => {
+    if (firedRef.current) return;
+    if (!combinedAudioAvailable) return;
+    firedRef.current = true;
+    // Let the audio element attach first (one microtask is enough).
+    const id = setTimeout(() => {
+      seekAndPlay(Math.max(0, seekMs / 1000));
+    }, 0);
+    return () => clearTimeout(id);
+  }, [seekAndPlay, combinedAudioAvailable, seekMs]);
+  return null;
+}
 import { MeetingWorkspaceView } from "./MeetingWorkspaceView";
 
 // ---------------------------------------------------------------------------
@@ -77,6 +98,18 @@ interface MeetingShellProps {
   runFolder: string;
   /** Initial segmented-control state. If omitted, derived from meeting status. */
   initialView?: MeetingView;
+  /**
+   * Optional deep-link target passed from chat citations: on mount, the
+   * playback provider should seek to this millisecond offset and start
+   * playing the combined audio.
+   */
+  initialSeekMs?: number;
+  /**
+   * Pre-selected Details-view inner tab (`metadata` | `summary` |
+   * `transcript` | ...). Used by chat citations that point at a specific
+   * source surface. Respected only when the view is "details".
+   */
+  initialTabId?: DetailsTabKind;
   recording: RecordingStatus;
   config: AppConfigDTO;
   onBack: () => void;
@@ -156,6 +189,8 @@ function buildAnalysisSignature(detail: RunDetail | null): string {
 export function MeetingShell({
   runFolder,
   initialView,
+  initialSeekMs,
+  initialTabId,
   recording,
   config,
   onBack,
@@ -174,7 +209,13 @@ export function MeetingShell({
   const viewResolvedRef = useRef(initialView !== undefined);
 
   // ---- Tab state (Details view) ----
-  const [activeTabId, setActiveTabId] = useState<DetailsTabKind>("metadata");
+  // Priority order on first mount:
+  //   1. explicit `initialTabId` from the router (chat citation → specific tab)
+  //   2. `initialSeekMs` → Transcript tab so the cited line is in context
+  //   3. default "metadata"
+  const [activeTabId, setActiveTabId] = useState<DetailsTabKind>(
+    initialTabId ?? (initialSeekMs != null ? "transcript" : "metadata"),
+  );
   const [tabContents, setTabContents] = useState<Record<string, string>>({});
   const [documentReloadVersion, setDocumentReloadVersion] = useState(0);
 
@@ -290,7 +331,11 @@ export function MeetingShell({
   useEffect(() => {
     void refresh();
     setTabContents({});
-    setActiveTabId("metadata");
+    // Reset to the same priority order as the initial useState: explicit
+    // initialTabId wins, then seek-implies-transcript, then metadata.
+    setActiveTabId(
+      initialTabId ?? (initialSeekMs != null ? "transcript" : "metadata"),
+    );
     setActivePromptId(null);
     setAnalysisSearchQuery("");
     setPrompts([]);
@@ -1193,6 +1238,7 @@ export function MeetingShell({
         runFolder={runFolder}
         combinedAudioFileName={combinedAudioFileName}
       >
+      {initialSeekMs != null && <InitialSeek seekMs={initialSeekMs} />}
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 md:p-6">
         {view === "workspace" ? (
           <MeetingWorkspaceView

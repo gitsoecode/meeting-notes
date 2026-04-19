@@ -206,8 +206,11 @@ export class OllamaProvider implements LlmProvider {
           continue;
         }
         if (chunk.message?.content) {
-          content += chunk.message.content;
+          const delta = chunk.message.content;
+          content += delta;
           chunkCount++;
+          // Forward raw text for callers that want live streaming (chat UI).
+          options?.onText?.(delta, content);
           // Throttle progress callbacks to ~2/sec to avoid flooding IPC.
           const now = Date.now();
           if (options?.onTokenProgress && now - lastProgressAt >= 500) {

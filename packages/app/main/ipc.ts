@@ -48,6 +48,9 @@ import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-m
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware, isSystemAudioSupported } from "./system.js";
+import { registerChatIpc } from "./chat/ipc.js";
+import { indexRun as chatIndexRun } from "./chat-index/index-run.js";
+import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@meeting-notes/engine";
 import type {
   AppActionEvent,
   AppLogQuery,
@@ -1782,6 +1785,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("system:detect-hardware", async () => {
     return detectHardware();
   });
+
+  // ---- chat assistant ----
+  registerChatIpc();
 
   // Create an app logger on first registration — gives us structured
   // startup logs in ~/.meeting-notes/app.log.

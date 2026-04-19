@@ -82,6 +82,10 @@ test.describe("Meetings List", () => {
     page,
   }) => {
     await meetingsList.meetingRow("Weekly planning").click();
+    // Default landing is the Workspace view; flip to Details to reveal tabs.
+    await page.waitForURL(/#\/meeting\//);
+    const details = page.getByRole("tab", { name: "Details" });
+    if (await details.count()) await details.first().click();
     await expect(
       page.getByRole("tab", { name: "Analysis" })
     ).toBeVisible();

@@ -22,6 +22,9 @@ import type {
   PipelineProgressEvent,
   JobSummary,
   LaunchChatRequest,
+  ChatSendRequest,
+  ChatStreamEvent,
+  ChatBackfillProgressDTO,
 } from "../shared/ipc.js";
 
 const api: MeetingNotesApi = {
@@ -182,6 +185,25 @@ const api: MeetingNotesApi = {
     detectApps: () => ipcRenderer.invoke("chatLauncher:detect-apps"),
     launch: (req: LaunchChatRequest) => ipcRenderer.invoke("chatLauncher:launch", req),
   },
+  chat: {
+    send: (req: ChatSendRequest) => ipcRenderer.invoke("chat:send", req),
+    listThreads: () => ipcRenderer.invoke("chat:list-threads"),
+    getThread: (threadId: string) => ipcRenderer.invoke("chat:get-thread", threadId),
+    renameThread: (threadId: string, title: string) =>
+      ipcRenderer.invoke("chat:rename-thread", threadId, title),
+    deleteThread: (threadId: string) => ipcRenderer.invoke("chat:delete-thread", threadId),
+    setThreadModel: (threadId: string, modelId: string | null) =>
+      ipcRenderer.invoke("chat:set-thread-model", threadId, modelId),
+    getSettings: () => ipcRenderer.invoke("chat:get-settings"),
+    saveSystemPrompt: (body: string) => ipcRenderer.invoke("chat:save-system-prompt", body),
+    resetSystemPrompt: () => ipcRenderer.invoke("chat:reset-system-prompt"),
+    backfillStart: () => ipcRenderer.invoke("chat:backfill-start"),
+    backfillStatus: () => ipcRenderer.invoke("chat:backfill-status"),
+    backfillCountPending: () => ipcRenderer.invoke("chat:backfill-count-pending"),
+    listParticipants: () => ipcRenderer.invoke("chat:list-participants"),
+    embedModelStatus: () => ipcRenderer.invoke("chat:embed-model-status"),
+    installEmbedModel: () => ipcRenderer.invoke("chat:install-embed-model"),
+  },
   on: {
     recordingStatus: (cb: (s: RecordingStatus) => void) => {
       const handler = (_e: unknown, status: RecordingStatus) => cb(status);
@@ -239,6 +261,16 @@ const api: MeetingNotesApi = {
       const handler = (_e: unknown, snapshot: AudioMonitorSnapshot) => cb(snapshot);
       ipcRenderer.on("audio-monitor:levels", handler);
       return () => ipcRenderer.removeListener("audio-monitor:levels", handler);
+    },
+    chatStream: (cb: (event: ChatStreamEvent) => void) => {
+      const handler = (_e: unknown, event: ChatStreamEvent) => cb(event);
+      ipcRenderer.on("chat:stream", handler);
+      return () => ipcRenderer.removeListener("chat:stream", handler);
+    },
+    chatBackfillProgress: (cb: (progress: ChatBackfillProgressDTO) => void) => {
+      const handler = (_e: unknown, progress: ChatBackfillProgressDTO) => cb(progress);
+      ipcRenderer.on("chat:backfill-progress", handler);
+      return () => ipcRenderer.removeListener("chat:backfill-progress", handler);
     },
   },
 };

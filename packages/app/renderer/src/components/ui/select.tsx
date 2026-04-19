@@ -12,8 +12,10 @@ export const SelectTrigger = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <SelectPrimitive.Trigger
     ref={ref}
+    // Focus/open: inset ring + border color swap. Inset avoids the
+    // clipping that outer rings suffer in tight overflow ancestors.
     className={cn(
-      "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-[var(--border-default)] bg-white px-3 py-1.5 text-sm text-[var(--text-primary)] shadow-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-primary)] data-[state=open]:ring-2 data-[state=open]:ring-[var(--ring)]/40 disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-[var(--text-secondary)]",
+      "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-[var(--border-default)] bg-white px-3 py-1.5 text-sm text-[var(--text-primary)] shadow-sm outline-none transition-[box-shadow,border-color] duration-150 focus-visible:border-[color:var(--ring)] focus-visible:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ring)_55%,transparent)] data-[state=open]:border-[color:var(--ring)] data-[state=open]:shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--ring)_55%,transparent)] disabled:cursor-not-allowed disabled:opacity-50 data-[placeholder]:text-[var(--text-secondary)]",
       className
     )}
     {...props}

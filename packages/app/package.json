@@ -21,6 +21,7 @@
     "postinstall": "node scripts/patch-audiotee.mjs",
     "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @meeting-notes/engine && npm run build:main && node --test test/*.test.mjs",
     "test:e2e": "npm run build:renderer && playwright test",
+    "test:e2e:electron": "npm run build && playwright test --config=playwright.electron.config.ts",
     "test:e2e:fast": "playwright test --timeout=8000 --max-failures=5 --workers=4 --reporter=line --project=desktop",
     "test:e2e:focus": "playwright test --timeout=8000 --workers=4 --reporter=line --project=desktop",
     "dev": "npm run patch:audiotee && npm run build:mic-capture && npm run build:assets && concurrently -k -r \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run start:electron\"",
@@ -62,6 +63,7 @@
     "react-day-picker": "^9.14.0",
     "react-dom": "^18.3.1",
     "react-resizable-panels": "^4.10.0",
+    "sqlite-vec": "^0.1.9",
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {

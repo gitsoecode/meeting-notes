@@ -8,8 +8,14 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 
 - `packages/app`
   Electron desktop app, preload bridge, IPC layer, renderer flows, and app-specific tests.
+- `packages/app/main/chat-index/`
+  SQLite-backed retrieval for the chat assistant: chunking, Ollama embeddings, hybrid FTS+vector search with RRF merge, backfill state machine.
+- `packages/app/main/chat/`
+  Chat retrieval-assistant loop, citation parser, guardrails (meta regex, citation-worthiness fail-closed, cited-run whitelist), thread CRUD, chat IPC.
 - `packages/engine`
   Shared core for config, recording, transcription, prompt loading, run processing, and filesystem layout.
+- `packages/engine/src/core/chat-index/`
+  Pure (no-DB) chat-index primitives: speaker-turn chunker, markdown chunker, transcript.md parser, Ollama `/api/embed` client, shared types.
 - `packages/cli`
   Node CLI wrapper around the engine for setup, recording, and maintenance workflows.
 - `docs/`
@@ -41,7 +47,8 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
   2. targeted Playwright specs for the changed area
   3. `npm run test:e2e --workspace @meeting-notes/app`
   4. `npm test`
-  5. `npm run rebuild:native --workspace @meeting-notes/app` — **always run this after tests finish** so the Electron app can start. Tests rebuild `better-sqlite3` for Node.js; this restores it for Electron.
+  5. `npm run test:e2e:electron --workspace @meeting-notes/app` — **only when the change touches chat retrieval, indexing, citation playback, SetupWizard flows, or other Electron-main-process behavior that mocks can't prove.** Boots the real packaged main process, the real `meetings.db`, and talks to the user's live Ollama daemon + local library. Takes several minutes; skips cleanly if Ollama isn't reachable. See `docs/private_plans/testing-playbook.md` for the three-tier stack.
+  6. `npm run rebuild:native --workspace @meeting-notes/app` — **always run this after tests finish** so the Electron app can start. Tests rebuild `better-sqlite3` for Node.js; this restores it for Electron.
 - For UI changes, the default testing bar is action completeness, not route render:
   - cover visible buttons, menus, tabs, dropdowns, row actions, bulk actions, and modal confirm/cancel paths on affected pages
   - prefer page-object and semantic assertions over brittle global text checks

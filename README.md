@@ -148,6 +148,41 @@ Transcription is a separate path. Meeting Notes uses **Parakeet** (Apple Silicon
 
 ---
 
+## Chat
+
+The **Chat** tab lets you ask questions across every meeting in your library. It does retrieval-grounded search over your transcripts, summaries, and prep notes, and surfaces answers with clickable citations — each citation jumps to the exact moment in the meeting and plays the audio from there.
+
+The assistant is **read-only**: it can't edit, delete, or rename anything. Each thread is isolated (no cross-thread memory).
+
+### What it needs
+
+- The same Ollama daemon Meeting Notes already uses for local LLMs.
+- A chat model (defaults to whatever you picked in Setup — e.g. `qwen3.5:9b`). You can switch per thread.
+- The **`nomic-embed-text`** embedding model (~274 MB). Pulled automatically on first launch and also surfaced in **Settings → Chat → Chat embedding model**.
+
+If `sqlite-vec` (the native extension that powers vector search) fails to load — or if the embedding model isn't installed — Chat degrades to keyword search only. It doesn't crash. You'll lose paraphrase recall (asking about "rates" won't hit a transcript that said "pricing") but literal matches still work.
+
+### How indexing works
+
+- Every completed or reprocessed meeting is indexed immediately into an FTS5 + vector index inside `~/.meeting-notes/meetings.db`.
+- Pre-existing meetings are indexed in the background the first time you open Chat (or from **Settings → Chat → Re-run indexing**). Under 5 meetings indexes silently; up to 50 shows an unobtrusive progress strip; 50+ shows an explicit Start/Later card.
+
+### Settings → Chat
+
+- **Chat embedding model** — status + Install button
+- **System prompt** — full editor with Save / Reset to default. Controls how the assistant behaves; the default is tuned to cite sparingly, prefer transcript citations over summary/prep/notes, and refuse to fabricate.
+- **Re-run indexing** — rebuilds the chat index over every meeting.
+
+### Switching models
+
+Pick a per-thread model from the composer's model label or from the thread's kebab menu. Installed Ollama tags, Anthropic, and OpenAI models appear in grouped sections (cloud models only if the matching API key is set in Keychain).
+
+### Filter by participant
+
+The composer has a small `Filter` button that takes a participant name. Known participants are suggested from the `run_participants` table when populated; otherwise it falls back to matching the name against meeting titles (so "Lauren" finds the "Lauren Dai catchup" run even if no participants were auto-extracted).
+
+---
+
 ## Updating after code changes
 
 `npm link` is just a symlink to `dist/cli/index.js`, so you only need to rebuild — not relink.
@@ -212,6 +247,9 @@ This records a short clip from each configured device, analyzes volume levels, a
 | Pipeline config | `{vault_path}/{base_folder}/Config/pipeline.json` |
 | Templates | `{vault_path}/{base_folder}/Templates/` |
 | Dashboard | `{vault_path}/{base_folder}/Dashboard.md` |
+| Chat index (FTS + vectors) | `~/.meeting-notes/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
+| Chat threads + messages | Same `meetings.db` (`chat_threads`, `chat_messages`) |
+| Chat system prompt override | `~/.meeting-notes/chat-system-prompt.md` (created only after an edit in Settings) |
 
 ---
 
