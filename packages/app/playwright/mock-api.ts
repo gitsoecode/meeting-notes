@@ -1061,6 +1061,9 @@ export async function installMockApi(page: Page) {
         },
         async readDocument(runFolder, fileName) {
           ensureRunAvailable(runFolder, { prune: true });
+          const key = `${runFolder}|${fileName}`;
+          const counts = (window as any).__ipcCallCounts ??= { readDocument: {} as Record<string, number> };
+          counts.readDocument[key] = (counts.readDocument[key] ?? 0) + 1;
           const content = docs[runFolder]?.[fileName];
           if (content == null) {
             throw new Error(`ENOENT: no such file or directory, open '${runFolder}/${fileName}'`);

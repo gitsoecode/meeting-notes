@@ -40,8 +40,8 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
   - **Do not consider an issue resolved until tests are run.**
   - After user confirmation, run `npm test` (unit) and `npm run test:e2e --workspace @meeting-notes/app` (Playwright — full suite, both projects) and confirm zero failures before finishing.
 - Build and regression-check with `npm test`.
-- Read `docs/testing-playbook.md` before changing app flows, Playwright fixtures, page objects, IPC-backed UI behavior, or run-lifecycle behavior.
-- Use `docs/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.
+- Read `docs/private_plans/testing-playbook.md` before changing app flows, Playwright fixtures, page objects, IPC-backed UI behavior, or run-lifecycle behavior.
+- Use `docs/private_plans/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.
 - For app changes, prefer this test sequence unless the task clearly calls for something narrower:
   1. `npm run test --workspace @meeting-notes/app`
   2. targeted Playwright specs for the changed area
@@ -61,6 +61,20 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:
   `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`.
 
+## Testing
+
+Quick reference. See "How To Work In This Repo" above for the policy around when each command is required — this table is a lookup, not a replacement for that guidance.
+
+| Command | When to use |
+| --- | --- |
+| `npm test` | Unit + integration gate at repo root. Also rebuilds `better-sqlite3` for Node. Required before completing any task. |
+| `npm run test --workspace @meeting-notes/app` | App-level unit tests only. Faster signal during iteration. |
+| `npm run test:e2e --workspace @meeting-notes/app` | Full mock-backed Playwright suite (desktop + narrow viewport projects). Does **not** cover Electron main-process behavior — that lives in `test:e2e:electron`. Required before completing any task. |
+| `npm run test:e2e:focus --workspace @meeting-notes/app -- specs/<area>.spec.ts` | Iteration loop. 8s timeout, 4 workers, desktop-only, line reporter. |
+| `npm run test:e2e:fast --workspace @meeting-notes/app` | "Is the whole surface broken?" — bails after 5 failures. |
+| `npm run test:e2e:electron --workspace @meeting-notes/app` | Live-Electron suite. Only when touching chat retrieval, indexing, citation playback, SetupWizard flows, or other main-process behavior mocks can't prove. Needs a running Ollama. |
+| `npm run rebuild:native --workspace @meeting-notes/app` | Run **after** `npm test` to restore the Electron-targeted `better-sqlite3` binary. |
+
 ## Native Module Rebuild (better-sqlite3)
 
 `better-sqlite3` is a native C++ addon that must be compiled for the correct Node ABI. Node.js and Electron use **different** ABI versions (e.g. Node = 127, Electron = 145), and only one compiled binary exists on disk at a time.
@@ -70,6 +84,23 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 - `npm run rebuild:native` rebuilds for **Electron** (via `electron-rebuild`). After this, Node-based tests will fail until the next `npm test` run auto-repairs them.
 
 **This is expected.** Do not spend time debugging the mismatch — just run the appropriate rebuild command for whichever runtime you need next. If the user reports the app can't load meetings or crashes on start after you ran tests, tell them to run `npm run rebuild:native --workspace @meeting-notes/app`.
+
+## Reference Docs
+
+### Read before changing the relevant area
+
+- [`docs/private_plans/testing-playbook.md`](docs/private_plans/testing-playbook.md) — Three-tier testing stack, action-completeness standard, fixture conventions. Read before changing app flows, Playwright fixtures, page objects, IPC-backed UI, or run-lifecycle behavior.
+- [`docs/private_plans/smoke-flow.md`](docs/private_plans/smoke-flow.md) — Manual QA checklist. Run before shipping changes to recording, processing, prompts, import, settings, or quit behavior.
+- [`docs/private_plans/chat-architecture.md`](docs/private_plans/chat-architecture.md) — Why Chat is shaped the way it is (layered engine/main split, retrieval loop, guardrails). Read before refactoring chat retrieval, chunking, embedding, or citation playback.
+- [`docs/private_plans/privacy-posture-analysis.md`](docs/private_plans/privacy-posture-analysis.md) — Complete outbound-network audit and defensible privacy claims. Read before changing any code that makes a network call or writing privacy-facing copy.
+- [`docs/private_plans/DMG-bundling-and-update-system.md`](docs/private_plans/DMG-bundling-and-update-system.md) — Dependency inventory and packaging/update story. Read before changing `package:mac`, bundled binaries, or `check-bundled-binaries.mjs`.
+
+### Optional background — only if the task is explicitly about this area
+
+- [`docs/private_plans/efficiency-improvements.md`](docs/private_plans/efficiency-improvements.md) — Identified perf bottlenecks (config cache, IPC fanout, SQLite migration). Reference only when the task is explicitly a perf improvement.
+- [`docs/private_plans/notion-integration.md`](docs/private_plans/notion-integration.md) — Aspirational one-way Notion sync design. **Not yet implemented.**
+- [`docs/private_plans/loom-style-screen-recording-investigation.md`](docs/private_plans/loom-style-screen-recording-investigation.md) — Exploratory investigation. **Nothing shipped.**
+- [`docs/private_plans/parallel-agent-pool.md`](docs/private_plans/parallel-agent-pool.md) — Infrastructure setup for a local Claude Code agent pool. Meta, not app code.
 
 ## Plan Handling
 

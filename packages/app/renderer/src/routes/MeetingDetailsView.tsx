@@ -25,7 +25,6 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import { findModelEntry } from "../../../shared/llm-catalog";
-import { stripFrontmatter } from "../lib/utils";
 
 export type DetailsTabKind =
   | "metadata"
@@ -341,7 +340,7 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
                 <div className="flex-1 min-h-0 overflow-y-auto p-5 md:p-6">
                   {summaryContent ? (
                     <MarkdownView
-                      source={stripFrontmatter(summaryContent)}
+                      source={summaryContent}
                       className="markdown-view"
                     />
                   ) : (

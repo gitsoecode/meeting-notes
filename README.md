@@ -1,6 +1,19 @@
 # Meeting Notes
 
-A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product, with Obsidian as an optional integration layer. Meeting Notes records mic + system audio, transcribes locally (or via OpenAI), runs prompts over the transcript to produce structured notes, and keeps the resulting files on disk.
+A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product; the CLI is a secondary surface for power users. Meeting Notes records mic + system audio, transcribes locally (or via OpenAI), runs prompts over the transcript to produce structured notes, and keeps the resulting files on disk.
+
+---
+
+## Features
+
+- **Recording.** Mic + system audio, with pause/resume, live audio meters, and recovery for runs interrupted by quit or crash.
+- **Transcription.** Fully local via Parakeet MLX (Apple Silicon) or whisper.cpp, or cloud via OpenAI. Swap providers in Settings.
+- **Prompt pipeline.** One default summary plus any number of user-defined prompts that run in parallel over the transcript. Outputs stream with live per-section progress.
+- **Chat.** Ask questions across every meeting in your library. Retrieval-grounded answers with click-to-seek audio citations, per-thread model switching, and a participant filter.
+- **Meeting prep.** A pre-meeting notes surface for staging context and prompts before a call.
+- **LLM provider.** Claude (cloud), OpenAI (cloud), or Ollama (fully local). Ollama is bundled in packaged macOS builds — no separate install required. Individual prompts can override the global provider, so you can mix (e.g. local for most prompts, Claude for one specific summary).
+- **Obsidian (optional).** Writes editable markdown into a vault, with a Dataview-powered dashboard for browsing runs.
+- **Native macOS posture.** Electron sandbox on by default, API keys in the macOS Keychain, no telemetry.
 
 ---
 
@@ -9,114 +22,71 @@ A local-first desktop meeting workspace with editable markdown, local control, a
 Install these before running anything:
 
 - **Node ≥ 20**
-- **Obsidian** with the **Dataview** plugin enabled (the dashboard depends on it)
-- An **Anthropic API key** (Claude is the LLM provider)
-- For the default `parakeet-mlx` ASR provider:
-  - **Python 3.12** (or 3.11)
-  - **ffmpeg** (`brew install ffmpeg`)
-  - **macOS 14.2+** for automatic system audio capture (older macOS records mic-only)
+- **ffmpeg** (`brew install ffmpeg`)
+- **macOS 14.2+** for automatic system audio capture (older macOS records mic-only)
+- **Python 3.12** (or 3.11) — only if you pick the `parakeet-mlx` ASR provider
+- An **Anthropic API key** — only if you want Claude as an LLM provider. Leave blank for Ollama-only or OpenAI-only mode.
+- An **OpenAI API key** — if you want OpenAI as an LLM provider, or if you pick the `openai` ASR provider (one key covers both).
 
-If you pick the `openai` ASR provider instead, you'll also need an OpenAI API key and you can skip the Python/Parakeet steps.
+Obsidian is optional. If you want the Dataview dashboard, install Obsidian and enable the Dataview plugin, then point Meeting Notes at your vault during setup.
 
 ---
 
-## Install
+## Run from source (desktop app)
+
+These are source-build steps, not an end-user install. There is no signed `.dmg` release yet — you build locally and launch from the repo.
 
 ```bash
 git clone <repo-url> ~/Projects/Meeting-notes
 cd ~/Projects/Meeting-notes
 npm install
 npm run build
-npm link
 ```
 
-After `npm link`, the `meeting-notes` command is on your `PATH`. Verify with:
+`npm run build` is required on a fresh checkout — `@meeting-notes/engine` exports from `./dist/index.js`, so downstream packages won't resolve until the engine has been built at least once.
 
-```bash
-meeting-notes --help
-```
+### Launch the app
 
-## Desktop App Development
-
-### Build the desktop app once
-
-```bash
-npm run build --workspace @meeting-notes/app
-```
-
-This builds the Electron main process, preload bridge, renderer, and packaged app assets into `packages/app/dist/`.
-
-### Run the desktop app in development
+While actively developing, use the dev server — it watches the main process, preload, and renderer, and launches Electron against the live build:
 
 ```bash
 npm run dev --workspace @meeting-notes/app
 ```
 
-This starts:
-
-- the TypeScript watcher for the Electron main process
-- the TypeScript watcher for the preload bridge
-- the Vite dev server for the renderer
-- Electron pointed at the local dev build
-
-Leave this running while working on the app. Save-to-rebuild is automatic.
-
-### Start the desktop app without watchers
-
-If you already built the app and just want to launch it:
+To launch an already-built copy without watchers:
 
 ```bash
 npm run start --workspace @meeting-notes/app
 ```
 
-### Package the macOS app
+### Package a `.app` for macOS
 
 ```bash
 npm run package:mac --workspace @meeting-notes/app
 ```
 
-This runs the app build, checks bundled binaries, and creates a macOS package under `packages/app/release/`.
+This runs the app build, checks bundled binaries, and produces a packaged `.app` under `packages/app/release/`.
 
 ---
 
-## Configure
+## First-run setup
 
-### 1. Run the setup wizard
+On first launch the app opens an in-app **Setup Wizard**. Follow it to configure:
 
-```bash
-meeting-notes init
-```
+- LLM provider (Claude, Ollama, or a mix) and any required API keys
+- ASR provider (`parakeet-mlx` | `openai` | `whisper-local`) and microphone
+- Optional: Obsidian vault path and base folder for markdown outputs
+- Optional: installing the local Parakeet Python environment (the wizard runs this for you — no Homebrew needed)
 
-This interactively asks for:
-- Obsidian vault path (default `~/Obsidian/My-Vault`)
-- Base folder inside the vault (default `Meetings`)
-- ASR provider (`parakeet-mlx` | `openai` | `whisper-local`)
-- Mic device name (default `default`)
-- System audio is captured automatically on macOS 14.2+ (no setup needed)
-- Your Anthropic API key (and OpenAI key if you chose `openai`)
+API keys go into the macOS Keychain under the service name `meeting-notes`. Config is written to `~/.meeting-notes/config.yaml`. If you chose an Obsidian vault, the wizard bootstraps `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, a `Dashboard.md`, a notes template, and `Config/pipeline.json`.
 
-It then:
-- Writes `~/.meeting-notes/config.yaml`
-- Stores API keys in the **macOS Keychain** under the service name `meeting-notes`
-- Bootstraps your vault: creates `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, a `Dashboard.md`, a notes template, and `Config/pipeline.json`
-
-### 2. Install the local ASR engine (only if you picked `parakeet-mlx`)
-
-```bash
-meeting-notes setup-asr
-```
-
-This creates a Python venv at `~/.meeting-notes/parakeet-venv/`, installs `mlx-audio`, runs a smoke test, and updates your config with the binary path.
-
-### 3. Open Obsidian
-
-Open the vault you configured, enable the **Dataview** plugin, and open `Meetings/Dashboard.md`.
+You can re-open Settings at any time to switch providers, rotate keys, or change the ASR engine.
 
 ---
 
 ## LLM provider: cloud or local
 
-Meeting Notes can summarize meetings either with **Anthropic Claude** (cloud, fastest, costs API credits) or with a **local LLM via Ollama** (free, fully offline, slower per section). You can switch providers in **Settings → LLM** at any time, and individual prompts can override the default — useful if you want most outputs local but one specific prompt to use Claude.
+Meeting Notes can summarize meetings with **Anthropic Claude** (cloud, fastest, costs API credits), **OpenAI** (cloud, costs API credits), or a **local LLM via Ollama** (free, fully offline, slower per section). You can switch providers in **Settings → LLM** at any time, and individual prompts can override the default — useful if you want most outputs local but one specific prompt to hit Claude or OpenAI.
 
 ### Local mode (Ollama)
 
@@ -140,7 +110,7 @@ The **Custom…** option lets you type any tag from [ollama.com/library](https:/
 
 **Speed expectations.** On a 16 GB Apple Silicon machine, a typical 30-minute meeting summary takes 30 s – 2 min per prompt with a 7B–9B model. The Meeting Detail page shows a live spinner and elapsed-seconds counter for each running section, plus a "Running locally" hint after 20 s, so you can see something is happening even on long sections.
 
-**Anthropic API key.** When you run in local-only mode you don't need a Claude API key at all — leave the Anthropic field blank in the wizard and in Settings. You can add a key later if you want a specific prompt to use Claude.
+**Cloud API keys.** When you run in local-only mode you don't need a Claude or OpenAI key at all — leave those fields blank in the wizard and in Settings. You can add either key later if you want a specific prompt to use a cloud model.
 
 ### Local mode (Parakeet, transcription)
 
@@ -183,30 +153,39 @@ The composer has a small `Filter` button that takes a participant name. Known pa
 
 ---
 
-## Updating after code changes
+## Obsidian integration (optional)
 
-`npm link` is just a symlink to `dist/cli/index.js`, so you only need to rebuild — not relink.
+Meeting Notes can write each run's markdown into an Obsidian vault so the notes are editable in the tool you already use for writing. This is entirely optional — the app is fully functional without Obsidian.
 
-**One-off rebuild:**
-```bash
-npm run build
-```
+If you want it:
 
-**While actively developing**, leave this running in a terminal tab:
-```bash
-npm run dev
-```
-That's `tsc --watch` — it recompiles automatically on save, and `meeting-notes` picks up the new build on the next invocation. Nothing else is required (it's not a server).
+1. Install Obsidian and enable the **Dataview** community plugin.
+2. In the Setup Wizard (or **Settings → Obsidian**), enable the integration and point it at your vault and a base folder (defaults: `~/Obsidian/My-Vault` and `Meetings`).
+3. Open `Meetings/Dashboard.md` in Obsidian — Dataview renders the run index.
 
-You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change the `bin` entry in `package.json`, or move the project directory. Re-run `npm install` only when `package.json` dependencies change.
+The vault gets `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, `Dashboard.md`, a notes template, and `Config/pipeline.json`. The app treats these as its source of truth for that vault — edit the templates or pipeline config in place and Meeting Notes picks up the changes.
 
 ---
 
-## Useful commands
+## CLI (advanced / secondary)
+
+> The CLI lags behind the desktop app and doesn't support Chat, meeting prep, or live prompt streaming. New users should use the desktop app. The CLI is here for scripting, headless environments, and a few maintenance commands that aren't surfaced in the UI yet.
+
+To use it, build and symlink from the repo root:
+
+```bash
+npm run build
+npm link
+meeting-notes --help
+```
+
+After `npm link`, the `meeting-notes` command is on your `PATH`. You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change the `bin` entry in `package.json`, or move the project directory.
+
+### Commands
 
 | Command | What it does |
 | --- | --- |
-| `meeting-notes init` | First-time setup wizard |
+| `meeting-notes init` | First-time setup wizard (CLI alternative to the in-app wizard) |
 | `meeting-notes set-key <claude\|openai>` | Add or rotate an API key in the Keychain |
 | `meeting-notes setup-asr` | Install the local Parakeet ASR engine |
 | `meeting-notes start [-t "Title"]` | Start a recording (title defaults to "Untitled Meeting") |
@@ -215,23 +194,35 @@ You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change 
 | `meeting-notes process <audio-file>` | Process an existing audio file |
 | `meeting-notes reprocess <run-path>` | Re-run processing on an existing run |
 | `meeting-notes logs [run-path]` | Show app or run logs |
-| `meeting-notes prompts list` | List configured pipeline prompts |
 | `meeting-notes test-audio` | Test audio capture from configured devices |
+| `meeting-notes prompts list` | List configured pipeline prompts |
+| `meeting-notes prompts path [id]` | Print the on-disk path of a prompt |
+| `meeting-notes prompts new <id>` | Create a new prompt from the default template |
+| `meeting-notes prompts enable\|disable <id>` | Toggle whether a prompt is active |
+| `meeting-notes prompts auto\|manual <id>` | Toggle autorun vs manual-only |
+| `meeting-notes prompts run <id> <run-path>` | Run a single prompt against an existing run |
+| `meeting-notes prompts reset [id]` | Reset a builtin prompt to its shipped default |
+| `meeting-notes config get` | Print the resolved config |
+| `meeting-notes config set-data-path <path>` | Change where runs and app state are stored |
+| `meeting-notes obsidian enable\|disable` | Toggle the Obsidian integration |
+| `meeting-notes obsidian set-vault <vaultPath>` | Point the integration at a vault |
 
-Run `meeting-notes --help` or `meeting-notes <command> --help` for the full list and options.
+Run `meeting-notes --help` or `meeting-notes <command> --help` for full options on any command.
 
----
-
-## Audio Testing
-
-Verify audio capture is working:
+### Audio testing
 
 ```bash
 meeting-notes test-audio
 meeting-notes test-audio --duration 6000   # 6-second test (default 4s)
 ```
 
-This records a short clip from each configured device, analyzes volume levels, and reports whether each device is found, capturing audio, and not silent.
+Records a short clip from each configured device, analyzes volume, and reports whether each device is found, capturing audio, and not silent.
+
+---
+
+## Testing
+
+For the full list of test commands and when to use each, see the **Testing** section in [AGENTS.md](./AGENTS.md). That's the source of truth — the table covers `npm test`, the Playwright suites (full, fast, focused, live-Electron), and the native-module rebuild dance required when switching between the Node test runtime and the Electron runtime.
 
 ---
 
@@ -259,29 +250,29 @@ This records a short clip from each configured device, analyzes volume levels, a
 The global symlink isn't in place. From the project directory: `npm run build && npm link`.
 
 **`Config not found at ~/.meeting-notes/config.yaml`**
-You haven't run setup yet. Run `meeting-notes init`.
+You haven't run setup yet. Launch the app and complete the Setup Wizard, or run `meeting-notes init`.
 
 **`No Anthropic API key found in macOS Keychain`**
-Run `meeting-notes set-key claude`.
+Open Settings in the app and add a key, or run `meeting-notes set-key claude`.
 
 **Dashboard is empty in Obsidian**
 Make sure the Dataview plugin is installed and enabled in Obsidian's community plugins.
 
 **Stale behavior after editing code**
-You forgot to rebuild. Run `npm run build`, or leave `npm run dev` running in a terminal.
+You forgot to rebuild. Run `npm run build`, or leave `npm run dev --workspace @meeting-notes/app` running in a terminal.
 
-**`better-sqlite3` / `NODE_MODULE_VERSION` mismatch when starting or recording in the desktop app**
-The native SQLite module was built for plain Node instead of Electron. Rebuild it for the app runtime:
+**`better-sqlite3` / `NODE_MODULE_VERSION` mismatch when starting the desktop app**
+The native SQLite module was compiled for plain Node (likely by the test runner) instead of Electron. Rebuild it for the app runtime:
 
 ```bash
-PYTHON=/usr/bin/python3 npm_config_build_from_source=true npm_config_runtime=electron npm_config_target=41.2.0 npm_config_disturl=https://electronjs.org/headers npm rebuild better-sqlite3 --workspace @meeting-notes/app
+npm run rebuild:native --workspace @meeting-notes/app
 ```
 
 Notes:
 
-- `npm test` and `npm run test --workspace @meeting-notes/app` may rebuild `better-sqlite3` for the current plain Node runtime first. That is expected for tests.
+- `npm test` automatically rebuilds `better-sqlite3` for the current plain Node runtime first. That's expected for tests.
 - The Electron app needs the Electron-targeted rebuild above if you see `ERR_DLOPEN_FAILED` or a `NODE_MODULE_VERSION` mismatch while launching, opening, or starting a meeting.
-- On this repo, `/usr/bin/python3` is the safest Python for native rebuilds because older `node-gyp` versions may fail with newer Python releases.
+- You'll flip back and forth between these two builds as you move between test runs and app runs. That's expected — don't spend time debugging it, just run the appropriate rebuild for whichever runtime you need next.
 
 ---
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   CirclePlay,
@@ -263,6 +263,45 @@ export function MeetingShell({
   const detailSignatureRef = useRef("");
   const deletedRef = useRef(false);
 
+  // In-flight document loads, keyed by cache key. Value carries the runFolder
+  // snapshot at dispatch time so a response that arrives after a meeting
+  // switch is discarded instead of poisoning the new meeting's cache. Also
+  // serves as a dedupe map — a second caller for the same key while one is
+  // in flight gets the existing promise rather than firing a new IPC.
+  const loadTokensRef = useRef<Map<string, { runFolder: string; promise: Promise<void> }>>(
+    new Map(),
+  );
+
+  const loadDocument = useCallback(
+    (targetRunFolder: string, fileName: string, cacheKey: string): Promise<void> => {
+      const existing = loadTokensRef.current.get(cacheKey);
+      if (existing && existing.runFolder === targetRunFolder) return existing.promise;
+      const p = api.runs
+        .readDocument(targetRunFolder, fileName)
+        .then((content) => {
+          if (loadTokensRef.current.get(cacheKey)?.runFolder !== targetRunFolder) return;
+          setTabContents((prev) =>
+            prev[cacheKey] != null ? prev : { ...prev, [cacheKey]: content },
+          );
+        })
+        .catch((err) => {
+          if (loadTokensRef.current.get(cacheKey)?.runFolder !== targetRunFolder) return;
+          if (err instanceof Error && /ENOENT/i.test(err.message)) return;
+          setTabContents((prev) =>
+            prev[cacheKey] != null ? prev : { ...prev, [cacheKey]: "_(unable to load file)_" },
+          );
+        })
+        .finally(() => {
+          if (loadTokensRef.current.get(cacheKey)?.promise === p) {
+            loadTokensRef.current.delete(cacheKey);
+          }
+        });
+      loadTokensRef.current.set(cacheKey, { runFolder: targetRunFolder, promise: p });
+      return p;
+    },
+    [],
+  );
+
   // ---- Derived state ----
   const isRecordingThis = recording.active && recording.run_folder === runFolder;
   const isDraft = detail?.status === "draft" && !isRecordingThis;
@@ -331,6 +370,7 @@ export function MeetingShell({
   useEffect(() => {
     void refresh();
     setTabContents({});
+    loadTokensRef.current.clear();
     // Reset to the same priority order as the initial useState: explicit
     // initialTabId wins, then seek-implies-transcript, then metadata.
     setActiveTabId(
@@ -372,35 +412,34 @@ export function MeetingShell({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail, runFolder]);
 
-  // ---- Load prep + notes ----
+  // ---- Load prep + notes + attachments ----
+  // All three IPCs dispatch in the same tick so the main process can service
+  // them concurrently (async readFile). Attachments settles its loading flag
+  // off its own promise so the Files tab isn't blocked on prep/notes.
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const prep = await api.runs.readPrep(runFolder);
-        if (!cancelled) setPrepNotes(prep);
-        const n = await api.runs.readDocument(runFolder, "notes.md").catch(() => "");
-        if (!cancelled) {
-          setNotes(n);
-          initialNotesRef.current = n;
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
+    setAttachmentsLoading(true);
+
+    const prepP = api.runs.readPrep(runFolder).catch(() => "");
+    const notesP = api.runs.readDocument(runFolder, "notes.md").catch(() => "");
+    const attachP = api.runs.listAttachments(runFolder).catch(() => []);
+
+    void attachP.then((list) => {
+      if (cancelled) return;
+      setAttachments(list);
+      setAttachmentsLoading(false);
+    });
+
+    void Promise.all([prepP, notesP]).then(([prep, n]) => {
+      if (cancelled) return;
+      setPrepNotes(prep);
+      setNotes(n);
+      initialNotesRef.current = n;
+    });
+
     return () => {
       cancelled = true;
     };
-  }, [runFolder]);
-
-  // ---- Load attachments ----
-  useEffect(() => {
-    setAttachmentsLoading(true);
-    api.runs
-      .listAttachments(runFolder)
-      .then(setAttachments)
-      .catch(() => setAttachments([]))
-      .finally(() => setAttachmentsLoading(false));
   }, [runFolder]);
 
   // ---- Load prompts ----
@@ -637,11 +676,17 @@ export function MeetingShell({
   }, [activeTabId, recordingFiles, recordingSources, runFolder]);
 
   // ---- Load tab content (summary, analysis output, transcript) ----
+  // Delegates to `loadDocument` for in-flight dedupe + stale-response guard,
+  // shared with the prefetch effect below.
   useEffect(() => {
     if (!detail) return;
     let filePath: string | null = null;
     let cacheKey: string | null = null;
     if (activeTabId === "summary") {
+      // Gate summary on prompt metadata being loaded — until then,
+      // promptCollections.summaryFileName is the "summary.md" fallback which
+      // would poison the "summary" cache key if the real filename differs.
+      if (loadingPrompts) return;
       filePath = promptCollections.summaryFileName;
       cacheKey = "summary";
     } else if (activeTabId === "transcript") {
@@ -655,24 +700,39 @@ export function MeetingShell({
       }
     }
     if (!filePath || !cacheKey || tabContents[cacheKey] != null) return;
-    api.runs
-      .readDocument(runFolder, filePath)
-      .then((content) => {
-        setTabContents((prev) => ({ ...prev, [cacheKey!]: content }));
-      })
-      .catch((err) => {
-        if (err instanceof Error && /ENOENT/i.test(err.message)) return;
-        setTabContents((prev) => ({ ...prev, [cacheKey!]: "_(unable to load file)_" }));
-      });
+    void loadDocument(runFolder, filePath, cacheKey);
   }, [
     activePromptId,
     activeTabId,
     detail,
     documentReloadVersion,
+    loadDocument,
+    loadingPrompts,
     promptCollections.analysisPrompts,
     promptCollections.summaryFileName,
     runFolder,
     tabContents,
+  ]);
+
+  // ---- Prefetch summary + transcript on meeting open ----
+  // Fires once detail + prompt metadata are ready, so first click on Summary
+  // or Transcript paints from cache instead of triggering an IPC round-trip.
+  // Skipped for draft/live meetings (no summary/transcript on disk yet).
+  useEffect(() => {
+    if (!detail) return;
+    if (loadingPrompts) return;
+    if (isDraft || isLive) return;
+    void loadDocument(runFolder, promptCollections.summaryFileName, "summary");
+    void loadDocument(runFolder, "transcript.md", "transcript");
+  }, [
+    detail,
+    documentReloadVersion,
+    isDraft,
+    isLive,
+    loadDocument,
+    loadingPrompts,
+    promptCollections.summaryFileName,
+    runFolder,
   ]);
 
   // ---- Dirty state ----

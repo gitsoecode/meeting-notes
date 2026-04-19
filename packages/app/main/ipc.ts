@@ -785,7 +785,7 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     const filePath = resolveRunDocumentPath(runFolder, fileName, config);
     try {
-      return fs.readFileSync(filePath, "utf-8");
+      return await fs.promises.readFile(filePath, "utf-8");
     } catch (err: any) {
       if (err.code === "ENOENT") return "";
       throw err;
@@ -1074,8 +1074,12 @@ export function registerIpcHandlers(): void {
     const config = loadConfig();
     const validatedRunFolder = resolveRunFolderPath(runFolder, config);
     const prepPath = path.join(validatedRunFolder, RUN_PREP_FILE);
-    if (!fs.existsSync(prepPath)) return "";
-    return fs.readFileSync(prepPath, "utf-8");
+    try {
+      return await fs.promises.readFile(prepPath, "utf-8");
+    } catch (err: any) {
+      if (err.code === "ENOENT") return "";
+      throw err;
+    }
   });
 
   ipcMain.handle(
