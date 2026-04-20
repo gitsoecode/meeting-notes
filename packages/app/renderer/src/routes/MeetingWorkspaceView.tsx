@@ -30,6 +30,16 @@ export interface MeetingWorkspaceViewProps {
   isRecording: boolean;
   recording: RecordingStatus;
   sections: PromptOutputStatus[];
+
+  /**
+   * Gate for mounting the Crepe-backed MarkdownEditor instances. MeetingShell
+   * flips this to `true` only after both prep.md and notes.md have resolved
+   * from disk. Mounting before that forces MarkdownEditor into its
+   * destroy-and-recreate-on-value-change path, which can race with Crepe's
+   * async `create()` and leave the live editor tied to a torn-down listener
+   * (observable as "deletions don't save after a view toggle").
+   */
+  notesReady: boolean;
 }
 
 const PREP_SIZE_KEY = "meeting-workspace.prep-size";
@@ -71,6 +81,7 @@ export function MeetingWorkspaceView({
   isRecording,
   recording,
   sections,
+  notesReady,
 }: MeetingWorkspaceViewProps) {
   const [showPrep, setShowPrep] = useState(true);
   const [prepSizePct] = useState<number>(readInitialPrepSize);
@@ -134,7 +145,9 @@ export function MeetingWorkspaceView({
               <span className="text-sm font-medium text-[var(--text-primary)]">Prep</span>
             </div>
             <div className="flex-1 min-h-0">
-              <MarkdownEditor value={prepNotes} onChange={onPrepChange} />
+              {notesReady ? (
+                <MarkdownEditor value={prepNotes} onChange={onPrepChange} flushOnUnmount />
+              ) : null}
             </div>
           </div>
         </ResizablePanel>
@@ -159,11 +172,14 @@ export function MeetingWorkspaceView({
               </Button>
             </div>
             <div className="flex-1 min-h-0">
-              <MarkdownEditor
-                value={notes}
-                onChange={onNotesChange}
-                onBlur={onNotesBlur}
-              />
+              {notesReady ? (
+                <MarkdownEditor
+                  value={notes}
+                  onChange={onNotesChange}
+                  onBlur={onNotesBlur}
+                  flushOnUnmount
+                />
+              ) : null}
             </div>
           </div>
         </ResizablePanel>

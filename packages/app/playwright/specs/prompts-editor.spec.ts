@@ -197,6 +197,30 @@ test.describe("Prompt Library", () => {
     await expect(promptsEditor.saveButton()).toBeEnabled();
   });
 
+  test("switching prompts reseeds the markdown body editor", async ({
+    promptsEditor,
+    page,
+  }) => {
+    // The body editor is Crepe-backed (mount-once contract). Without a `key`
+    // tied to the active prompt id, switching prompts would leave the first
+    // prompt's body visible even though draftBody state changed. This test
+    // guards that the remount-on-switch wiring is in place.
+    const body = page.locator("main .markdown-editor [contenteditable='true']");
+
+    await expect(promptsEditor.titleInput()).toHaveValue("Summary + Action Items");
+    await expect(body).toContainText("Produce a concise summary");
+
+    await promptsEditor.promptSidebarItem("Decision Log").click();
+    await expect(promptsEditor.titleInput()).toHaveValue("Decision Log");
+    await expect(body).toContainText("List the decisions made in the meeting");
+    await expect(body).not.toContainText("Produce a concise summary");
+
+    await promptsEditor.promptSidebarItem("1:1 Follow-up").click();
+    await expect(promptsEditor.titleInput()).toHaveValue("1:1 Follow-up");
+    await expect(body).toContainText("Draft a concise 1:1 follow-up");
+    await expect(body).not.toContainText("List the decisions made in the meeting");
+  });
+
   test("save and more stay visible in a shorter viewport", async ({
     promptsEditor,
     page,

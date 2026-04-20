@@ -11,16 +11,35 @@ export interface MarkdownEditorProps {
   readOnly?: boolean;
   placeholder?: string;
   className?: string;
+  /**
+   * When true, the unmount cleanup synchronously reads `crepe.getMarkdown()`
+   * and forwards any unflushed content through `onChange` before destroying
+   * the editor. This rescues the final keystroke batch on fast
+   * edit-then-unmount paths (e.g., typing and immediately toggling a view)
+   * when the parent is using debounced autosave.
+   *
+   * Set to `false` (default) when the parent uses `key` to intentionally
+   * remount with a new seed — otherwise the cleanup will call `onChange`
+   * with the OLD editor's markdown *after* the parent has already set state
+   * to the NEW seed, clobbering the new value. Explicit-save surfaces
+   * (PromptsEditor) do not need this rescue and should leave it off.
+   */
+  flushOnUnmount?: boolean;
 }
 
 /**
- * Milkdown Crepe based markdown editor. Renders a WYSIWYG-style markdown
- * surface (slash menu, list continuation, inline formatting) and emits
- * the canonical markdown back via `onChange`. The component is
- * controlled-ish — the parent owns the string, but Crepe maintains its
- * own ProseMirror state, so we only re-seed it when the incoming value
- * is genuinely different from what we last emitted (e.g., switching
- * files), to avoid clobbering the editor on every keystroke.
+ * Milkdown Crepe based markdown editor.
+ *
+ * Contract: the parent must mount this component with the **final** content
+ * it wants to seed (read from disk first) — we do not try to re-seed a
+ * running editor. Changing `value` after the first non-empty mount is a no-op
+ * once Crepe has accepted the initial buffer; force a remount via `key` if
+ * the seed needs to change (e.g., switching files).
+ *
+ * The earlier "destroy + recreate on value change" path raced with Crepe's
+ * async `create()` under React StrictMode and left edit events tied to a
+ * torn-down listener — deletions looked fine in the DOM but never flowed
+ * back to `onChange`. See `packages/app/playwright/specs/notes-autosave.spec.ts`.
  */
 export function MarkdownEditor({
   value,
@@ -28,42 +47,32 @@ export function MarkdownEditor({
   onBlur,
   readOnly = false,
   className,
+  flushOnUnmount = false,
 }: MarkdownEditorProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
+  // Last markdown Crepe emitted. We forward *every* emission to onChange
+  // (including Crepe's initial normalization echo) — there is no
+  // user-visible "dirty" state to protect, and swallowing the first event
+  // per listener lost real keystrokes when StrictMode / re-seed created
+  // multiple listeners.
   const lastEmittedRef = useRef<string>(value);
-  // Tracks whether a destroy→recreate cycle is pending so a second value
-  // change mid-cycle can't spawn a parallel recreate (which caused the
-  // Milkdown "context not found" throws we were seeing in the logs).
-  const pendingReseedRef = useRef<string | null>(null);
-  const unmountedRef = useRef(false);
 
   onChangeRef.current = onChange;
   onBlurRef.current = onBlur;
 
-  // Mount the editor exactly once. Re-seeding on value change is handled
-  // by the second effect.
+  // Mount the editor exactly once. The parent owns remount by changing
+  // `key` — this effect intentionally does not depend on `value`.
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
 
-    unmountedRef.current = false;
-
     const crepe = new Crepe({ root, defaultValue: value });
-    let initialized = false;
     crepe.on((api) => {
       api.markdownUpdated((_ctx, markdown) => {
-        // Crepe fires markdownUpdated on creation when it parses and
-        // re-serializes the initial markdown. Skip this first emission
-        // so the parent's dirty-detection isn't tripped by Crepe's
-        // normalization (e.g., whitespace, list marker style).
-        if (!initialized) {
-          initialized = true;
-          lastEmittedRef.current = markdown;
-          return;
-        }
+        if (markdown === lastEmittedRef.current) return;
         lastEmittedRef.current = markdown;
         onChangeRef.current(markdown);
       });
@@ -76,73 +85,32 @@ export function MarkdownEditor({
     void crepe.create();
 
     return () => {
-      unmountedRef.current = true;
       const toDestroy = crepeRef.current;
       crepeRef.current = null;
+      // Pull the current markdown *synchronously* before starting the async
+      // destroy. Crepe batches markdownUpdated on a microtask; a fast
+      // edit-then-unmount path can race such that the final keystroke
+      // batch never fires markdownUpdated (Crepe swallows pending work
+      // during destroy), leaving the parent's buffer stale. Reading here
+      // and forwarding to onChange guarantees the final content survives.
+      if (flushOnUnmount) {
+        try {
+          const finalMarkdown = toDestroy?.getMarkdown();
+          if (typeof finalMarkdown === "string" && finalMarkdown !== lastEmittedRef.current) {
+            lastEmittedRef.current = finalMarkdown;
+            onChangeRef.current(finalMarkdown);
+          }
+        } catch {
+          // If Crepe's ctx is already torn down we can't recover the final
+          // buffer — nothing to do, fall through to destroy.
+        }
+      }
       // Milkdown can throw "context not found" when a ctx.get is in-flight as
       // the editor tears down. That's benign during unmount — swallow it.
       void toDestroy?.destroy().catch(() => {});
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Re-seed the editor when the parent swaps in a value we didn't emit
-  // ourselves (e.g., loading a different notes.md). Crepe doesn't expose
-  // a setMarkdown helper, so we destroy + recreate. This is rare so the
-  // cost is acceptable.
-  useEffect(() => {
-    if (!rootRef.current) return;
-    if (value === lastEmittedRef.current) return;
-
-    // If a reseed is already in flight, just record the latest target value
-    // and let that cycle pick it up when it finishes destroying.
-    if (pendingReseedRef.current !== null) {
-      pendingReseedRef.current = value;
-      return;
-    }
-
-    pendingReseedRef.current = value;
-
-    const oldCrepe = crepeRef.current;
-    const root = rootRef.current;
-
-    const recreate = () => {
-      const seedValue = pendingReseedRef.current ?? value;
-      pendingReseedRef.current = null;
-      if (unmountedRef.current) return;
-      if (!rootRef.current || rootRef.current !== root) return;
-
-      const next = new Crepe({ root, defaultValue: seedValue });
-      let seeded = false;
-      next.on((api) => {
-        api.markdownUpdated((_ctx, markdown) => {
-          if (!seeded) {
-            seeded = true;
-            lastEmittedRef.current = markdown;
-            return;
-          }
-          lastEmittedRef.current = markdown;
-          onChangeRef.current(markdown);
-        });
-        api.blur(() => {
-          onBlurRef.current?.();
-        });
-      });
-      next.setReadonly(readOnly);
-      crepeRef.current = next;
-      lastEmittedRef.current = seedValue;
-      void next.create();
-    };
-
-    if (oldCrepe) {
-      crepeRef.current = null;
-      // Swallow ctx-not-found thrown during teardown; it's benign here.
-      void oldCrepe.destroy().catch(() => {}).then(recreate);
-    } else {
-      recreate();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
 
   useEffect(() => {
     crepeRef.current?.setReadonly(readOnly);

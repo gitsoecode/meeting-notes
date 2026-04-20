@@ -527,7 +527,6 @@ export function App() {
                 onOpenMeeting={(runFolder) => navigate({ name: "meeting", runFolder })}
                 onOpenPromptLibrary={(promptId) => navigate({ name: "prompts", promptId })}
                 onViewChange={(view, opts) => navigate({ name: "meeting", runFolder: route.runFolder, view }, opts)}
-                onDirtyChange={setIsDirty}
               />
             )}
             {route.name === "prompts" && (
@@ -541,7 +540,6 @@ export function App() {
               <Settings
                 config={config}
                 onChange={(nextConfig) => setConfig(nextConfig)}
-                onDirtyChange={setIsDirty}
               />
             )}
             {route.name === "activity" && <ActivityView />}

@@ -173,9 +173,16 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
     [filteredPrompts]
   );
 
+  // Crepe normalizes markdown on initial parse (typically trailing whitespace)
+  // and emits the normalized buffer back through markdownUpdated — without
+  // this, every mount/remount marks the prompt dirty immediately and the
+  // "Discard changes?" modal fires on every prompt switch. Notes/prep don't
+  // care because they don't have a dirty-gate; prompts do.
+  const normalizeBody = (s: string) => s.replace(/\s+$/g, "");
+
   const hasUnsavedChanges = useMemo(() =>
     active != null && (
-      draftBody !== active.body ||
+      normalizeBody(draftBody) !== normalizeBody(active.body) ||
       draftLabel !== active.label ||
       draftFilename !== active.filename ||
       draftDescription !== (active.description ?? "") ||
@@ -567,7 +574,7 @@ export function PromptsEditor({ config, initialPromptId, onDirtyChange }: Prompt
 
               <div className="flex min-h-0 flex-1 bg-white p-6">
                 <div className="flex min-h-0 flex-1 flex-col rounded-lg border border-[var(--border-subtle)] bg-white shadow-sm focus-within:ring-1 focus-within:ring-[var(--accent)]/30">
-                  <MarkdownEditor value={draftBody} onChange={setDraftBody} className="h-full" />
+                  <MarkdownEditor key={active.id} value={draftBody} onChange={setDraftBody} className="h-full" />
                 </div>
               </div>
             </div>

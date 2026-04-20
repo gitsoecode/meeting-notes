@@ -83,6 +83,16 @@ export class MeetingWorkspacePage {
     return this.main.getByText("Prep", { exact: true });
   }
 
+  // Prep pane editor (first .markdown-editor in the workspace split pane).
+  prepEditor() {
+    return this.main.locator(".markdown-editor").nth(0).locator("[contenteditable='true']");
+  }
+
+  // Notes pane editor (second .markdown-editor in the workspace split pane).
+  notesEditor() {
+    return this.main.locator(".markdown-editor").nth(1).locator("[contenteditable='true']");
+  }
+
   // Transcript tab
   transcriptContent() {
     return this.main.locator("main").getByText("Welcome everyone.");

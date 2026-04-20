@@ -220,9 +220,20 @@ export function MeetingShell({
   const [documentReloadVersion, setDocumentReloadVersion] = useState(0);
 
   // ---- Prep / Notes state (Workspace view) ----
+  // Notes and prep autosave on every change (debounced). There is no "unsaved"
+  // state to surface — before any navigation we flush the pending write.
   const [prepNotes, setPrepNotes] = useState("");
   const [notes, setNotes] = useState("");
-  const initialNotesRef = useRef<string | null>(null);
+  // State-backed mirror of *LoadedRef so conditional renders can gate the
+  // editor mount until the initial disk read has committed. Avoids
+  // MarkdownEditor's fragile destroy-and-recreate-on-value-change path, which
+  // can race and leave Crepe with a stale listener (deletions failing to
+  // fire markdownUpdated after a view toggle — see notes-autosave.spec.ts).
+  const [notesReady, setNotesReady] = useState(false);
+  const notesRef = useRef("");
+  const prepRef = useRef("");
+  const notesLoadedRef = useRef(false);
+  const prepLoadedRef = useRef(false);
   const saveTimer = useRef<number | null>(null);
   const prepSaveTimer = useRef<number | null>(null);
 
@@ -387,7 +398,11 @@ export function MeetingShell({
     setRecordingToDelete(null);
     setDeletingRecording(false);
     detailSignatureRef.current = "";
-    initialNotesRef.current = null;
+    notesRef.current = "";
+    prepRef.current = "";
+    notesLoadedRef.current = false;
+    prepLoadedRef.current = false;
+    setNotesReady(false);
     viewResolvedRef.current = initialView !== undefined;
     if (initialView) setView(initialView);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -434,7 +449,13 @@ export function MeetingShell({
       if (cancelled) return;
       setPrepNotes(prep);
       setNotes(n);
-      initialNotesRef.current = n;
+      notesRef.current = n;
+      prepRef.current = prep;
+      // Mark loaded only after the initial values are committed so the autosave
+      // effects don't write the loaded-from-disk value straight back.
+      notesLoadedRef.current = true;
+      prepLoadedRef.current = true;
+      setNotesReady(true);
     });
 
     return () => {
@@ -735,29 +756,69 @@ export function MeetingShell({
     runFolder,
   ]);
 
-  // ---- Dirty state ----
-  // Notes are always inline-editable now; dirty = in-memory buffer differs
-  // from what was loaded from disk. initialNotesRef is populated by the load
-  // effect so the first render after mount is never dirty.
-  const isCompletedMeeting =
-    detail != null && !["draft", "recording", "processing"].includes(detail.status);
-  const isNotesDirty =
-    isCompletedMeeting && initialNotesRef.current != null && notes !== initialNotesRef.current;
+  // Notes + prep autosave (see onNotesChange / onPrepChange below). Before any
+  // navigation we flush pending writes via flushPending() — there's no
+  // user-visible unsaved state, so we never call onDirtyChange.
+  useEffect(() => {
+    onDirtyChange?.(false);
+  }, [onDirtyChange]);
+
+  // Autosave is driven by state-change effects below, not by the event
+  // handlers. That way *any* change to `notes` / `prepNotes` — add, delete,
+  // paste, programmatic — goes through the same save path, guaranteed.
+  useEffect(() => {
+    // Only save once the initial load has committed — otherwise we'd echo the
+    // freshly-read value straight back to disk on first paint.
+    if (!notesLoadedRef.current) return;
+    notesRef.current = notes;
+    if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      api.runs.writeNotes(runFolder, notes).catch(() => {});
+    }, 150);
+  }, [notes, runFolder]);
 
   useEffect(() => {
-    onDirtyChange?.(isNotesDirty);
-  }, [isNotesDirty, onDirtyChange]);
+    if (!prepLoadedRef.current) return;
+    prepRef.current = prepNotes;
+    if (prepSaveTimer.current != null) window.clearTimeout(prepSaveTimer.current);
+    prepSaveTimer.current = window.setTimeout(() => {
+      prepSaveTimer.current = null;
+      api.runs.writePrep(runFolder, prepNotes).catch(() => {});
+    }, 150);
+  }, [prepNotes, runFolder]);
+
+  const flushPending = useCallback(async () => {
+    const writes: Promise<unknown>[] = [];
+    if (saveTimer.current != null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      writes.push(api.runs.writeNotes(runFolder, notesRef.current).catch(() => {}));
+    }
+    if (prepSaveTimer.current != null) {
+      window.clearTimeout(prepSaveTimer.current);
+      prepSaveTimer.current = null;
+      writes.push(api.runs.writePrep(runFolder, prepRef.current).catch(() => {}));
+    }
+    if (writes.length > 0) await Promise.all(writes);
+  }, [runFolder]);
+
+  // On unmount (route change, runFolder swap), preempt pending debounced writes
+  // and fire them synchronously so fast nav can't leave a stale buffer.
   useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (isNotesDirty) {
-        e.preventDefault();
-        e.returnValue = "unsaved";
-        return e.returnValue;
+    return () => {
+      if (saveTimer.current != null) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+        void api.runs.writeNotes(runFolder, notesRef.current).catch(() => {});
+      }
+      if (prepSaveTimer.current != null) {
+        window.clearTimeout(prepSaveTimer.current);
+        prepSaveTimer.current = null;
+        void api.runs.writePrep(runFolder, prepRef.current).catch(() => {});
       }
     };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isNotesDirty]);
+  }, [runFolder]);
 
   // ---- Actions ----
   const onStart = async () => {
@@ -787,7 +848,7 @@ export function MeetingShell({
   };
 
   const flushNotes = async () => {
-    await api.runs.writeNotes(runFolder, notes).catch(() => {});
+    await flushPending();
   };
 
   const resetEndMeetingState = () => {
@@ -867,39 +928,18 @@ export function MeetingShell({
 
   const onNotesChange = (value: string) => {
     setNotes(value);
-    if (saveTimer.current != null) window.clearTimeout(saveTimer.current);
-    saveTimer.current = window.setTimeout(() => {
-      api.runs.writeNotes(runFolder, value).catch(() => {});
-    }, 400);
   };
 
   const onNotesBlur = () => {
-    api.runs.writeNotes(runFolder, notes).catch(() => {});
+    if (saveTimer.current != null) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    api.runs.writeNotes(runFolder, notesRef.current).catch(() => {});
   };
 
   const onPrepChange = (value: string) => {
     setPrepNotes(value);
-    if (prepSaveTimer.current != null) window.clearTimeout(prepSaveTimer.current);
-    prepSaveTimer.current = window.setTimeout(() => {
-      api.runs.writePrep(runFolder, value).catch(() => {});
-    }, 400);
-  };
-
-  const requestNotesDiscard = (
-    action: () => void,
-    description = "You have unsaved notes. Discard your changes and continue?",
-  ) => {
-    if (!isNotesDirty) {
-      action();
-      return;
-    }
-    setPendingConfirm({
-      title: "Discard note changes?",
-      description,
-      confirmLabel: "Discard changes",
-      cancelLabel: "Keep editing",
-      action,
-    });
   };
 
   const onConfirmPendingAction = async () => {
@@ -1013,9 +1053,14 @@ export function MeetingShell({
     </div>
   ) : null;
 
-  // ---- View toggle — no discard guard, both views share shell state ----
+  // ---- View toggle — flush any pending notes/prep debounce before the
+  // workspace editors unmount. Without this, a fast "edit then toggle"
+  // could tear down Crepe before the 150ms autosave debounce fires, so
+  // the last keystroke batch (typically the user's final deletion) never
+  // reaches disk. See packages/app/playwright/specs/notes-autosave.spec.ts.
   const setViewSafely = (next: MeetingView) => {
     if (next === view) return;
+    void flushPending();
     setView(next);
     onViewChange?.(next);
   };
@@ -1311,6 +1356,7 @@ export function MeetingShell({
             isRecording={isRecording}
             recording={recording}
             sections={sections}
+            notesReady={notesReady}
           />
         ) : (
           <MeetingDetailsView
@@ -1320,7 +1366,7 @@ export function MeetingShell({
             prepNotes={prepNotes}
             notes={notes}
             activeTabId={activeTabId}
-            onTabChange={(tab) => requestNotesDiscard(() => setActiveTabId(tab))}
+            onTabChange={(tab) => setActiveTabId(tab)}
             onFlipToWorkspace={() => setViewSafely("workspace")}
             onRefreshDetail={() => void refresh()}
             summaryContent={summaryContent}
