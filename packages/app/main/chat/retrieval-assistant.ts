@@ -13,7 +13,7 @@ import {
   type LlmProvider,
   type SearchResult,
   type StoredCitation,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import { searchMeetings } from "../chat-index/retrieve.js";
 import { addMessage, createThread, listMessages, getThread, renameThread } from "./threads.js";
 import { readChatSystemPrompt } from "./prompt.js";

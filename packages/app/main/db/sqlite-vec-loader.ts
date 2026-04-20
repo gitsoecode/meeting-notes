@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { createAppLogger } from "@meeting-notes/engine";
+import { createAppLogger } from "@gistlist/engine";
 import { chatChunksVecSchema } from "./schema.js";
 
 const appLogger = createAppLogger(false);

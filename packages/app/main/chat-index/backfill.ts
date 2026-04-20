@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { createAppLogger, loadConfig } from "@meeting-notes/engine";
+import { createAppLogger, loadConfig } from "@gistlist/engine";
 import { getDb } from "../db/connection.js";
 import { countRunChunks } from "./store.js";
 import { indexRun } from "./index-run.js";
@@ -159,7 +159,7 @@ export class ChatIndexBackfill extends EventEmitter {
  */
 export async function createDefaultBackfill(): Promise<ChatIndexBackfill> {
   const { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } = await import(
-    "@meeting-notes/engine"
+    "@gistlist/engine"
   );
   const config = loadConfig();
   const embedder = createOllamaEmbedder({

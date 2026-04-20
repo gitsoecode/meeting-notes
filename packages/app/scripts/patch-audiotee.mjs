@@ -18,7 +18,7 @@
 //      the parent bundle.
 //   2. Re-signs it ad-hoc with the com.apple.security.inherit entitlement so
 //      macOS attributes its TCC requests to the responsible process (Electron
-//      in dev, Meeting Notes in a packaged build).
+//      in dev, Gistlist in a packaged build).
 //
 // Run manually: node packages/app/scripts/patch-audiotee.mjs
 // Runs automatically after `npm install` (via the app's postinstall hook) and

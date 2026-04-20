@@ -40,7 +40,7 @@ import {
   type LlmProvider,
   type PipelineProgressEvent,
   type RunManifest,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
@@ -50,7 +50,7 @@ import { listAppEntries, listProcesses, trackChildProcess } from "./activity-mon
 import { detectHardware, isSystemAudioSupported } from "./system.js";
 import { registerChatIpc } from "./chat/ipc.js";
 import { indexRun as chatIndexRun } from "./chat-index/index-run.js";
-import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@meeting-notes/engine";
+import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@gistlist/engine";
 import type {
   AppActionEvent,
   AppLogQuery,
@@ -581,7 +581,7 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("system:get-app-identity", async () => {
     // `app.getName()` returns whatever `app.setName()` set, which is
-    // "Meeting Notes" since we call setName in main/index.ts. But TCC
+    // "Gistlist" since we call setName in main/index.ts. But TCC
     // identifies apps by the **bundle** — in dev the bundle is Electron.
     // Expose both so the UI can tell users what name to look for in
     // System Settings.
@@ -900,7 +900,7 @@ export function registerIpcHandlers(): void {
   const importMediaRun = async (mediaPath: string, title: string) => {
     const config = loadConfig();
     const validatedMediaPath = assertImportMediaPath(mediaPath);
-    const { createRun, mediaHasAudioStream } = await import("@meeting-notes/engine");
+    const { createRun, mediaHasAudioStream } = await import("@gistlist/engine");
     if (!(await mediaHasAudioStream(validatedMediaPath))) {
       throw new Error("This recording does not contain a usable audio track.");
     }
@@ -1622,7 +1622,7 @@ export function registerIpcHandlers(): void {
     // engine/core/config.ts — if either changes, this check needs to move.
     const parakeetBin = path.join(
       os.homedir(),
-      ".meeting-notes",
+      ".gistlist",
       "parakeet-venv",
       "bin",
       "mlx_audio.stt.generate"
@@ -1794,7 +1794,7 @@ export function registerIpcHandlers(): void {
   registerChatIpc();
 
   // Create an app logger on first registration — gives us structured
-  // startup logs in ~/.meeting-notes/app.log.
+  // startup logs in ~/.gistlist/app.log.
   try {
     createAppLogger(false).info("Electron IPC handlers registered");
   } catch {

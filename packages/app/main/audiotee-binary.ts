@@ -17,7 +17,7 @@ import { app } from "electron";
  * re-signed with the `com.apple.security.inherit` entitlement. Then the
  * helper inherits TCC responsibility from the parent Electron process, and
  * the user's "System Audio Recording Only" grant for Electron (in dev) or
- * Meeting Notes (in prod) is what macOS checks.
+ * Gistlist (in prod) is what macOS checks.
  *
  * Returns `undefined` if the bundled helper isn't found — AudioTee will
  * then fall back to its default (stock npm binary). That path records

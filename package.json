@@ -1,7 +1,7 @@
 {
-  "name": "meeting-notes-monorepo",
+  "name": "gistlist-monorepo",
   "version": "0.1.0",
-  "description": "Local-first meeting recording and processing system",
+  "description": "Gistlist — local-first meeting recording and processing system",
   "type": "module",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
@@ -12,12 +12,12 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
-    "build:engine": "npm run build --workspace @meeting-notes/engine",
-    "build:cli": "npm run build --workspace @meeting-notes/cli",
-    "build:app": "npm run build --workspace @meeting-notes/app",
+    "build:engine": "npm run build --workspace @gistlist/engine",
+    "build:cli": "npm run build --workspace @gistlist/cli",
+    "build:app": "npm run build --workspace @gistlist/app",
     "test": "node packages/app/scripts/ensure-better-sqlite3.mjs && npm run build && node --test packages/engine/test/*.test.mjs packages/app/test/*.test.mjs",
-    "dev:app": "npm run dev --workspace @meeting-notes/app",
-    "start": "npm run start --workspace @meeting-notes/cli"
+    "dev:app": "npm run dev --workspace @gistlist/app",
+    "start": "npm run start --workspace @gistlist/cli"
   },
   "engines": {
     "node": ">=20"

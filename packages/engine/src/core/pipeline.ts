@@ -154,7 +154,7 @@ const __dirname = path.dirname(__filename);
 export const DEFAULT_PROMPTS_DIR = path.resolve(__dirname, "../defaults/prompts");
 
 /**
- * Prompts live in `~/.meeting-notes/prompts/` — outside the data directory
+ * Prompts live in `~/.gistlist/prompts/` — outside the data directory
  * so they're never touched by Obsidian. This is the single source of truth
  * for prompt location; callers no longer take config.
  */
@@ -261,7 +261,7 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
 }
 
 /**
- * Load every prompt from `~/.meeting-notes/prompts/`.
+ * Load every prompt from `~/.gistlist/prompts/`.
  * Backfills any newly shipped default prompts that are missing locally
  * without overwriting user-edited files. Returns builtin prompts first,
  * then the rest alphabetically by filename.

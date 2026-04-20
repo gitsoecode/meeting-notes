@@ -33,7 +33,7 @@ export class ParakeetMlxProvider implements AsrProvider {
     if (!fs.existsSync(this.binaryPath)) {
       throw new Error(
         `Parakeet binary not found at ${this.binaryPath}. ` +
-        `Run "meeting-notes setup-asr" to install Parakeet.`
+        `Run "gistlist setup-asr" to install Parakeet.`
       );
     }
 
@@ -61,7 +61,7 @@ export class ParakeetMlxProvider implements AsrProvider {
       throw new Error(
         `Parakeet (mlx_audio.stt.generate) failed: ${msg}\n` +
         `\nCommand: ${this.binaryPath} ${args.join(" ")}\n` +
-        `\nTry reinstalling: rm -rf ~/.meeting-notes/parakeet-venv && meeting-notes setup-asr`
+        `\nTry reinstalling: rm -rf ~/.gistlist/parakeet-venv && gistlist setup-asr`
       );
     }
 

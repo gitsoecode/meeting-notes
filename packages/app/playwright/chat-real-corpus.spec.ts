@@ -3,7 +3,7 @@
  *
  * This spec is intentionally different from chat.spec.ts: it does NOT mock
  * the IPC layer. It boots the packaged Electron app against the user's real
- * Meeting Notes library and asks a real question that should have a real
+ * Gistlist library and asks a real question that should have a real
  * answer.
  *
  * It skips cleanly on CI where no corpus or Ollama is available, but runs

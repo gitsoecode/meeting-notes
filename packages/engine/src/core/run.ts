@@ -84,7 +84,7 @@ function getNotesTemplate(config: AppConfig): string {
   if (fs.existsSync(templatePath)) {
     return fs.readFileSync(templatePath, "utf-8");
   }
-  return "# Meeting Notes\n\n- \n";
+  return "# Gistlist\n\n- \n";
 }
 
 export interface CreateRunOptions {

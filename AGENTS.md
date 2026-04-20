@@ -2,7 +2,7 @@
 
 ## Project Identity
 
-Meeting Notes is a local-first desktop meeting workspace for solo power users. The product is a desktop app first. Obsidian is an optional integration layer, not a required mode. The core value is editable markdown, local control, and customizable prompt-driven outputs.
+Gistlist is a local-first desktop meeting workspace for solo power users. The product is a desktop app first. Obsidian is an optional integration layer, not a required mode. The core value is editable markdown, local control, and customizable prompt-driven outputs.
 
 ## Repo Map
 
@@ -34,21 +34,21 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 ## How To Work In This Repo
 
 - **All tests must pass before completing any task.** Do not dismiss failures as "pre-existing" or "unrelated." If tests fail, fix them — whether or not your changes caused the failure.
-  - **Iteration loop (fast):** while iterating on a fix, run only the directly-affected specs via `npm run test:e2e:focus --workspace @meeting-notes/app -- specs/<area>.spec.ts` (8s timeout, 4 workers, desktop-only, line reporter). For a quick "is the whole surface broken?" check, `npm run test:e2e:fast` bails after 5 failures. Do NOT run the full suite during iteration — it wastes time and buries the signal.
+  - **Iteration loop (fast):** while iterating on a fix, run only the directly-affected specs via `npm run test:e2e:focus --workspace @gistlist/app -- specs/<area>.spec.ts` (8s timeout, 4 workers, desktop-only, line reporter). For a quick "is the whole surface broken?" check, `npm run test:e2e:fast` bails after 5 failures. Do NOT run the full suite during iteration — it wastes time and buries the signal.
   - **Failing tests must fail fast.** A spec sitting in a long retry loop is a locator problem; investigate the selector, don't wait it out. The Playwright config caps per-test time at 10s for this reason.
-  - **Manual Smoke vs Full Suite:** Give the user an opportunity to manual smoke test before running the full required suite (`npm test` and `npm run test:e2e --workspace @meeting-notes/app`), unless they explicitly ask you to run it sooner.
+  - **Manual Smoke vs Full Suite:** Give the user an opportunity to manual smoke test before running the full required suite (`npm test` and `npm run test:e2e --workspace @gistlist/app`), unless they explicitly ask you to run it sooner.
   - **Do not consider an issue resolved until tests are run.**
-  - After user confirmation, run `npm test` (unit) and `npm run test:e2e --workspace @meeting-notes/app` (Playwright — full suite, both projects) and confirm zero failures before finishing.
+  - After user confirmation, run `npm test` (unit) and `npm run test:e2e --workspace @gistlist/app` (Playwright — full suite, both projects) and confirm zero failures before finishing.
 - Build and regression-check with `npm test`.
 - Read `docs/private_plans/testing-playbook.md` before changing app flows, Playwright fixtures, page objects, IPC-backed UI behavior, or run-lifecycle behavior.
 - Use `docs/private_plans/smoke-flow.md` for manual QA when changing app flows such as recording, reprocessing, prompts, import, settings, or quit behavior.
 - For app changes, prefer this test sequence unless the task clearly calls for something narrower:
-  1. `npm run test --workspace @meeting-notes/app`
+  1. `npm run test --workspace @gistlist/app`
   2. targeted Playwright specs for the changed area
-  3. `npm run test:e2e --workspace @meeting-notes/app`
+  3. `npm run test:e2e --workspace @gistlist/app`
   4. `npm test`
-  5. `npm run test:e2e:electron --workspace @meeting-notes/app` — **only when the change touches chat retrieval, indexing, citation playback, SetupWizard flows, or other Electron-main-process behavior that mocks can't prove.** Boots the real packaged main process, the real `meetings.db`, and talks to the user's live Ollama daemon + local library. Takes several minutes; skips cleanly if Ollama isn't reachable. See `docs/private_plans/testing-playbook.md` for the three-tier stack.
-  6. `npm run rebuild:native --workspace @meeting-notes/app` — **always run this after tests finish** so the Electron app can start. Tests rebuild `better-sqlite3` for Node.js; this restores it for Electron.
+  5. `npm run test:e2e:electron --workspace @gistlist/app` — **only when the change touches chat retrieval, indexing, citation playback, SetupWizard flows, or other Electron-main-process behavior that mocks can't prove.** Boots the real packaged main process, the real `meetings.db`, and talks to the user's live Ollama daemon + local library. Takes several minutes; skips cleanly if Ollama isn't reachable. See `docs/private_plans/testing-playbook.md` for the three-tier stack.
+  6. `npm run rebuild:native --workspace @gistlist/app` — **always run this after tests finish** so the Electron app can start. Tests rebuild `better-sqlite3` for Node.js; this restores it for Electron.
 - For UI changes, the default testing bar is action completeness, not route render:
   - cover visible buttons, menus, tabs, dropdowns, row actions, bulk actions, and modal confirm/cancel paths on affected pages
   - prefer page-object and semantic assertions over brittle global text checks
@@ -59,7 +59,8 @@ Meeting Notes is a local-first desktop meeting workspace for solo power users. T
 - For renderer UI work, prefer `shadcn/ui` primitives and composition patterns as the default approach. Favor extending the shared component layer under `packages/app/renderer/src/components/ui` over introducing new bespoke controls or one-off styling patterns.
 - UI layout philosophy: **rely on whitespace and typography, not borders and boxes.** Default to `<section>` + `<h3>` + whitespace (and `<Separator />` from `components/ui/separator.tsx`) for stacking sections inside a page or tab. Reserve `<Card>` for true floating surfaces — popovers, dropzones, pane-separated dashboards, modal-like widgets on the home screen. Never place a `<Card>` inside a container that already defines a boundary (a `<TabsContent>`, a split pane, a dialog). If a section contains a table or dense grid, a minimal `rounded-md border border-[var(--border-subtle)]` wrapper is enough — no shadow, no tinted header.
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:
-  `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`.
+  `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`, `source-available` (never "open source").
+  Primary tagline: **"Your meetings stay on your machine."** See [`docs/private_plans/brand-and-direction.md`](docs/private_plans/brand-and-direction.md) for the full voice rules, banned-word list, and tone examples.
 
 ## Testing
 
@@ -68,27 +69,30 @@ Quick reference. See "How To Work In This Repo" above for the policy around when
 | Command | When to use |
 | --- | --- |
 | `npm test` | Unit + integration gate at repo root. Also rebuilds `better-sqlite3` for Node. Required before completing any task. |
-| `npm run test --workspace @meeting-notes/app` | App-level unit tests only. Faster signal during iteration. |
-| `npm run test:e2e --workspace @meeting-notes/app` | Full mock-backed Playwright suite (desktop + narrow viewport projects). Does **not** cover Electron main-process behavior — that lives in `test:e2e:electron`. Required before completing any task. |
-| `npm run test:e2e:focus --workspace @meeting-notes/app -- specs/<area>.spec.ts` | Iteration loop. 8s timeout, 4 workers, desktop-only, line reporter. |
-| `npm run test:e2e:fast --workspace @meeting-notes/app` | "Is the whole surface broken?" — bails after 5 failures. |
-| `npm run test:e2e:electron --workspace @meeting-notes/app` | Live-Electron suite. Only when touching chat retrieval, indexing, citation playback, SetupWizard flows, or other main-process behavior mocks can't prove. Needs a running Ollama. |
-| `npm run rebuild:native --workspace @meeting-notes/app` | Run **after** `npm test` to restore the Electron-targeted `better-sqlite3` binary. |
+| `npm run test --workspace @gistlist/app` | App-level unit tests only. Faster signal during iteration. |
+| `npm run test:e2e --workspace @gistlist/app` | Full mock-backed Playwright suite (desktop + narrow viewport projects). Does **not** cover Electron main-process behavior — that lives in `test:e2e:electron`. Required before completing any task. |
+| `npm run test:e2e:focus --workspace @gistlist/app -- specs/<area>.spec.ts` | Iteration loop. 8s timeout, 4 workers, desktop-only, line reporter. |
+| `npm run test:e2e:fast --workspace @gistlist/app` | "Is the whole surface broken?" — bails after 5 failures. |
+| `npm run test:e2e:electron --workspace @gistlist/app` | Live-Electron suite. Only when touching chat retrieval, indexing, citation playback, SetupWizard flows, or other main-process behavior mocks can't prove. Needs a running Ollama. |
+| `npm run rebuild:native --workspace @gistlist/app` | Run **after** `npm test` to restore the Electron-targeted `better-sqlite3` binary. |
 
 ## Native Module Rebuild (better-sqlite3)
 
 `better-sqlite3` is a native C++ addon that must be compiled for the correct Node ABI. Node.js and Electron use **different** ABI versions (e.g. Node = 127, Electron = 145), and only one compiled binary exists on disk at a time.
 
 - `npm test` automatically rebuilds for **Node.js** (via `ensure-better-sqlite3.mjs`). After running tests, the Electron app will crash with `ERR_DLOPEN_FAILED` / `NODE_MODULE_VERSION` mismatch.
-- To restore the Electron app after running tests: `npm run rebuild:native --workspace @meeting-notes/app`
+- To restore the Electron app after running tests: `npm run rebuild:native --workspace @gistlist/app`
 - `npm run rebuild:native` rebuilds for **Electron** (via `electron-rebuild`). After this, Node-based tests will fail until the next `npm test` run auto-repairs them.
 
-**This is expected.** Do not spend time debugging the mismatch — just run the appropriate rebuild command for whichever runtime you need next. If the user reports the app can't load meetings or crashes on start after you ran tests, tell them to run `npm run rebuild:native --workspace @meeting-notes/app`.
+**This is expected.** Do not spend time debugging the mismatch — just run the appropriate rebuild command for whichever runtime you need next. If the user reports the app can't load meetings or crashes on start after you ran tests, tell them to run `npm run rebuild:native --workspace @gistlist/app`.
 
 ## Reference Docs
 
 ### Read before changing the relevant area
 
+- [`docs/private_plans/brand-and-direction.md`](docs/private_plans/brand-and-direction.md) — Canonical brand doc: product soul, voice rules, banned-word list, design statement, positioning words. Read before writing any user-facing copy or making a positioning decision.
+- [`docs/private_plans/website-brief.md`](docs/private_plans/website-brief.md) — Self-contained spec for the marketing site (separate repo). Read before editing public copy that should stay in sync with the site, or before changing brand-visible defaults (bundle ID, product name, tagline).
+- [`docs/private_plans/naming-and-migration.md`](docs/private_plans/naming-and-migration.md) — Record of the 2026-04-19 rename from Meeting Notes to Gistlist, including migration steps for a live install. Read before changing CLI names, config paths, or keychain service strings.
 - [`docs/private_plans/testing-playbook.md`](docs/private_plans/testing-playbook.md) — Three-tier testing stack, action-completeness standard, fixture conventions. Read before changing app flows, Playwright fixtures, page objects, IPC-backed UI, or run-lifecycle behavior.
 - [`docs/private_plans/smoke-flow.md`](docs/private_plans/smoke-flow.md) — Manual QA checklist. Run before shipping changes to recording, processing, prompts, import, settings, or quit behavior.
 - [`docs/private_plans/chat-architecture.md`](docs/private_plans/chat-architecture.md) — Why Chat is shaped the way it is (layered engine/main split, retrieval loop, guardrails). Read before refactoring chat retrieval, chunking, embedding, or citation playback.

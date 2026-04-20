@@ -4,7 +4,7 @@
 // bundle using the main app's entitlements. The bundled `audiotee` helper in
 // Contents/MacOS/audiotee needs a *different* entitlement
 // (`com.apple.security.inherit`) so that macOS TCC attributes its permission
-// requests to the parent Meeting Notes.app rather than to audiotee itself.
+// requests to the parent Gistlist.app rather than to audiotee itself.
 //
 // Without this, the "System Audio Recording" grant the user gives to Meeting
 // Notes is never consulted when audiotee calls the CoreAudio taps API, and

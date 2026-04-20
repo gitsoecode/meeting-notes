@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getConfigDir } from "@meeting-notes/engine";
+import { getConfigDir } from "@gistlist/engine";
 
 export const DEFAULT_CHAT_SYSTEM_PROMPT = `You are a meeting-grounded assistant for one user. You answer questions about their meetings using the tools provided.
 

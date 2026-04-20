@@ -21,7 +21,7 @@ import {
   type AppConfig,
   type Logger,
   type PipelineProgressEvent,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import type { RecordingStatus } from "../shared/ipc.js";
 import { buildInterruptedRunUpdate } from "./recording-lifecycle.js";
 import {

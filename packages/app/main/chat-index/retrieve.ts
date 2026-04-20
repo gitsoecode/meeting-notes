@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { SearchFilters, SearchResult } from "@meeting-notes/engine";
+import type { SearchFilters, SearchResult } from "@gistlist/engine";
 import { getDb, awaitSqliteVec } from "../db/connection.js";
 import { isVecAvailable } from "../db/sqlite-vec-loader.js";
 

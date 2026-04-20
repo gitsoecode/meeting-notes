@@ -1,6 +1,6 @@
 import { Entry } from "@napi-rs/keyring";
 
-const SERVICE = "meeting-notes";
+const SERVICE = "gistlist";
 
 export type SecretName = "claude" | "openai";
 
@@ -48,7 +48,7 @@ export async function requireSecret(name: SecretName): Promise<string> {
   if (!v) {
     throw new Error(
       `No ${SECRET_LABELS[name]} API key found in macOS Keychain. ` +
-        `Run \`meeting-notes init\` or \`meeting-notes set-key ${name}\` to set one.`
+        `Run \`gistlist init\` or \`gistlist set-key ${name}\` to set one.`
     );
   }
   return v;

@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { AudioTee, type AudioChunk } from "audiotee";
-import { pickPhysicalMic } from "@meeting-notes/engine";
+import { pickPhysicalMic } from "@gistlist/engine";
 import { broadcastToAll } from "./events.js";
 import { isRecording } from "./recording.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";

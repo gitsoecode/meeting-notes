@@ -103,6 +103,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [embedProgress, setEmbedProgress] = useState<{
+    pct: number;
+  } | null>(null);
+  const [enableSemanticSearch, setEnableSemanticSearch] = useState(true);
+  const [embedAlreadyInstalled, setEmbedAlreadyInstalled] = useState(false);
 
   useEffect(() => {
     api.obsidian.detectVaults().then(setDetectedVaults).catch(() => {});
@@ -135,6 +140,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         .check()
         .then((res) => setInstalledLocalModels(res.installedModels))
         .catch(() => setInstalledLocalModels([]));
+      api.chat
+        .embedModelStatus()
+        .then((s) => setEmbedAlreadyInstalled(!!s.installed))
+        .catch(() => setEmbedAlreadyInstalled(false));
     }
   }, [step, keysChecked]);
 
@@ -153,7 +162,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       api.depsCheck().then(setDeps).catch(() => {});
       api.deps.checkBrew().then(setBrewAvailable).catch(() => setBrewAvailable(false));
       // Load app identity so we can tell the user what to look for in
-      // System Settings (e.g., "Electron" in dev, "Meeting Notes" in prod).
+      // System Settings (e.g., "Electron" in dev, "Gistlist" in prod).
       api.system.getAppIdentity().then(setAppIdentity).catch(() => {});
       // Read current mic permission state (doesn't prompt).
       api.system
@@ -193,7 +202,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     if (usesObsidian && vaultPath) {
       setDataPath(joinPath(vaultPath, "Meeting-notes"));
     } else if (!usesObsidian) {
-      setDataPath("~/Documents/Meeting Notes");
+      setDataPath("~/Documents/Gistlist");
     } else {
       setDataPath("");
     }
@@ -257,16 +266,6 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setInstallError(null);
     try {
       await api.llm.setup({ model: localLlmModel });
-      // Also pull the chat embedding model so semantic search is ready
-      // on first launch. Small (~274MB), quick, and the chat feature
-      // degrades to FTS-only if we skip this — but it's a better first-
-      // session experience to have it ready.
-      try {
-        await api.chat.installEmbedModel();
-      } catch (err) {
-        // Non-fatal — chat still works without embeddings. Log + continue.
-        console.warn("embedding model pull during setup failed", err);
-      }
       const res = await api.llm.check();
       setInstalledLocalModels(res.installedModels);
     } catch (err) {
@@ -319,6 +318,24 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               : parseInt(retentionValue, 10),
       };
       await api.config.initProject(req);
+      // Embeddings are always local (Ollama + nomic-embed-text) regardless
+      // of which LLM provider the user picked. Only pull if the user
+      // opted in on step 3 and the model isn't already installed. Failure
+      // is non-fatal — chat degrades to FTS-only without it.
+      if (enableSemanticSearch && !embedAlreadyInstalled) {
+        setEmbedProgress({ pct: 0 });
+        const unsub = api.on.setupLlmProgress((p) =>
+          setEmbedProgress({ pct: p.pct })
+        );
+        try {
+          await api.chat.installEmbedModel();
+        } catch (err) {
+          console.warn("embedding model pull during setup failed", err);
+        } finally {
+          unsub();
+          setEmbedProgress(null);
+        }
+      }
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -356,7 +373,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         <div className="mx-auto flex w-full max-w-[35rem] flex-col gap-4">
           <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
             <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-            Meeting Notes setup
+            Gistlist setup
           </div>
 
           <div className="flex gap-1.5">
@@ -374,7 +391,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
           {step === 0 && (
             <WizardStep
-              title="Welcome to Meeting Notes"
+              title="Welcome to Gistlist"
               description="A local-first desktop app for meeting notes. Record in the app or import an existing recording, and your transcript, summary, and custom outputs land in editable markdown on disk. Obsidian is optional. Let's get you set up."
               footer={<Button onClick={() => setStep(1)}>Get started</Button>}
             />
@@ -474,7 +491,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       setDataPath(e.target.value);
                       setDataPathTouched(true);
                     }}
-                    placeholder="/Users/you/Documents/Meeting Notes"
+                    placeholder="/Users/you/Documents/Gistlist"
                   />
                   <Button variant="secondary" onClick={pickDataDir}>Pick…</Button>
                 </PickerRow>
@@ -569,34 +586,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               </div>
 
               {llmProvider === "ollama" && (
-                <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4">
-                  {installedLocalModels.length > 0 && (
-                    <Field label="Already on this machine">
-                      <Select
-                        value={
-                          hasInstalledLocalModel(installedLocalModels, localLlmModel)
-                            ? localLlmModel
-                            : "__pick__"
-                        }
-                        onValueChange={(value) => {
-                          if (value !== "__pick__") setLocalLlmModel(value);
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__pick__">— pick from below instead —</SelectItem>
-                          {installedLocalModels.map((model) => (
-                            <SelectItem key={model} value={model}>✓ {model}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </Field>
-                  )}
-
+                <div
+                  className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] p-4"
+                  data-testid="local-llm-picker"
+                >
                   <Field
-                    label="Recommended for your machine"
+                    label="Local model"
                     meta={
                       hardware?.totalRamGb
                         ? `${hardware.totalRamGb} GB RAM${hardware.chip ? `, ${hardware.chip}` : ""}`
@@ -604,29 +599,72 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     }
                   >
                     <Select value={localLlmModel} onValueChange={setLocalLlmModel}>
-                      <SelectTrigger>
+                      <SelectTrigger data-testid="local-llm-select">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {LLM_MODELS.filter((model) => model.provider === "ollama").map((model) => {
-                          const tooBig =
-                            typeof hardware?.totalRamGb === "number" &&
-                            typeof model.minRamGb === "number" &&
-                            model.minRamGb > hardware.totalRamGb;
-                          const installed = hasInstalledLocalModel(installedLocalModels, model.id);
-                          const sizeLabel = model.sizeGb ? ` · ${model.sizeGb} GB` : "";
-                          return (
-                            <SelectItem key={model.id} value={model.id} disabled={tooBig}>
-                              {installed ? "✓ " : ""}
-                              {model.label}
-                              {sizeLabel}
-                              {tooBig ? ` · needs ${model.minRamGb} GB RAM` : ""}
-                            </SelectItem>
+                        {(() => {
+                          const curated = LLM_MODELS.filter(
+                            (model) => model.provider === "ollama"
                           );
-                        })}
+                          const recommendedId = recommendLocalModel(hardware?.totalRamGb);
+                          const extras = installedLocalModels.filter(
+                            (id) =>
+                              !curated.some((m) => localModelIdsMatch(m.id, id)) &&
+                              !/embed/i.test(id)
+                          );
+                          return (
+                            <>
+                              {curated.map((model) => {
+                                const tooBig =
+                                  typeof hardware?.totalRamGb === "number" &&
+                                  typeof model.minRamGb === "number" &&
+                                  model.minRamGb > hardware.totalRamGb;
+                                const installed = hasInstalledLocalModel(
+                                  installedLocalModels,
+                                  model.id
+                                );
+                                const recommended =
+                                  model.id === recommendedId;
+                                const sizeLabel = model.sizeGb
+                                  ? ` · ${model.sizeGb} GB`
+                                  : "";
+                                const tags: string[] = [];
+                                if (installed) tags.push("✓ installed");
+                                if (recommended && !tooBig)
+                                  tags.push("recommended");
+                                if (tooBig)
+                                  tags.push(
+                                    `needs ${model.minRamGb} GB RAM`
+                                  );
+                                const tagLabel = tags.length
+                                  ? ` · ${tags.join(" · ")}`
+                                  : "";
+                                return (
+                                  <SelectItem
+                                    key={model.id}
+                                    value={model.id}
+                                    disabled={tooBig}
+                                  >
+                                    {model.label}
+                                    {sizeLabel}
+                                    {tagLabel}
+                                  </SelectItem>
+                                );
+                              })}
+                              {extras.map((id) => (
+                                <SelectItem key={id} value={id}>
+                                  {id} · ✓ installed
+                                </SelectItem>
+                              ))}
+                            </>
+                          );
+                        })()}
                       </SelectContent>
                     </Select>
-                    {localLlmModel && <Hint>{findModelEntry(localLlmModel)?.blurb}</Hint>}
+                    {localLlmModel && (
+                      <Hint>{findModelEntry(localLlmModel)?.blurb}</Hint>
+                    )}
                   </Field>
                 </div>
               )}
@@ -643,6 +681,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       onChange={(e) => setClaudeKey(e.target.value)}
                       placeholder={hasClaude ? "leave blank to keep existing" : "sk-ant-…"}
                     />
+                    {hasClaude && !claudeKey && (
+                      <Hint>
+                        Found an Anthropic key in your macOS keychain. Leave blank to keep using it.
+                      </Hint>
+                    )}
                   </Field>
                 )}
 
@@ -658,6 +701,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                         onChange={(e) => setOpenaiKey(e.target.value)}
                         placeholder={hasOpenai ? "leave blank to keep existing" : "sk-…"}
                       />
+                      {hasOpenai && !openaiKey && (
+                        <Hint>
+                          Found an OpenAI key in your macOS keychain. Leave blank to keep using it.
+                        </Hint>
+                      )}
                     </Field>
 
                     {asrProvider === "openai" && (
@@ -668,13 +716,34 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   </div>
                 )}
               </div>
+
+              <div data-testid="semantic-search-opt-in">
+                {embedAlreadyInstalled ? (
+                  <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
+                    <div className="text-sm font-medium text-[var(--text-primary)]">
+                      Semantic search in Chat
+                    </div>
+                    <div className="mt-1 text-sm text-[var(--text-secondary)]">
+                      The local embedding model is already installed — semantic search is ready.
+                    </div>
+                  </div>
+                ) : (
+                  <SettingToggle
+                    id="wizard-enable-semantic-search"
+                    checked={enableSemanticSearch}
+                    onCheckedChange={setEnableSemanticSearch}
+                    title="Enable semantic search in Chat (~274 MB download)"
+                    description="Lets Chat find transcripts by meaning, not just keywords (e.g. asking about “rates” will hit a transcript that said “pricing”). Runs locally — your transcripts never leave your machine. You can change this later in Settings."
+                  />
+                )}
+              </div>
             </WizardStep>
           )}
 
           {step === 4 && (
             <WizardStep
               title="Dependencies"
-              description="These are the tools Meeting Notes uses to record and transcribe audio. Missing items can be installed for you with Homebrew."
+              description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you with Homebrew."
               footer={
                 <WizardActions
                   back={{ label: "Back", onClick: () => setStep(3), disabled: installing !== null }}
@@ -687,7 +756,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     disabled: installing !== null,
                   }}
                   primary={{
-                    label: busy ? "Finishing…" : "Finish setup",
+                    label: busy
+                      ? embedProgress
+                        ? `Pulling embedding model… ${embedProgress.pct}%`
+                        : "Finishing…"
+                      : "Finish setup",
                     onClick: onFinish,
                     disabled: finishDisabled,
                   }}
@@ -733,12 +806,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                       onInstall={installParakeet}
                       footerNote={
                         !deps.parakeet
-                          ? "Creates a Python venv at ~/.meeting-notes/parakeet-venv and downloads model weights (~600 MB). Takes about a minute."
+                          ? "Creates a Python venv at ~/.gistlist/parakeet-venv and downloads model weights (~600 MB). Takes about a minute."
                           : undefined
                       }
                     />
                   )}
-                  {useLocalLlm && localLlmModel && (
+                  {llmProvider === "ollama" && localLlmModel && (
                     <DependencyRow
                       name={`Model: ${localLlmModel}`}
                       ok={hasInstalledLocalModel(installedLocalModels, localLlmModel)}
@@ -797,6 +870,32 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               )}
 
               {/* BlackHole skip checkbox removed — system audio is automatic */}
+
+              {busy && embedProgress && (
+                <div
+                  className="space-y-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
+                  data-testid="embed-pull-progress"
+                >
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-[var(--text-primary)]">
+                      Downloading embedding model (~274 MB)
+                    </span>
+                    <span className="font-mono text-xs text-[var(--text-secondary)]">
+                      {embedProgress.pct}%
+                    </span>
+                  </div>
+                  <div className="h-1 w-full overflow-hidden rounded bg-[var(--bg-tertiary)]">
+                    <div
+                      className="h-full bg-[var(--accent)] transition-[width]"
+                      style={{ width: `${embedProgress.pct}%` }}
+                    />
+                  </div>
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Powers semantic search in Chat. Runs locally — your
+                    transcripts never leave your machine.
+                  </p>
+                </div>
+              )}
 
               {error && (
                 <div className="text-sm text-[var(--error)]">{error}</div>
@@ -1036,7 +1135,7 @@ function AudioPermissionsPanel({
   onRequestMic: () => void;
   onProbeSystemAudio: () => void;
 }) {
-  const bundleLabel = appIdentity?.tccBundleName ?? "Meeting Notes";
+  const bundleLabel = appIdentity?.tccBundleName ?? "Gistlist";
   const isDev = appIdentity?.isDev ?? false;
 
   return (
@@ -1143,7 +1242,7 @@ function AudioPermissionsPanel({
               macOS is delivering silent audio because the <strong>"System Audio Recording Only"</strong> permission
               hasn't been granted.{" "}
               {isDev ? (
-                <>Because this is a development build, grant the permission to <strong className="text-[var(--text-primary)]">"Electron"</strong> (not "Meeting Notes"). A packaged build will correctly show "Meeting Notes".</>
+                <>Because this is a development build, grant the permission to <strong className="text-[var(--text-primary)]">"Electron"</strong> (not "Gistlist"). A packaged build will correctly show "Gistlist".</>
               ) : (
                 <>Grant it to <strong className="text-[var(--text-primary)]">"{bundleLabel}"</strong>.</>
               )}

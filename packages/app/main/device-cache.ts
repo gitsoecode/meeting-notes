@@ -1,4 +1,4 @@
-import { FfmpegRecorder } from "@meeting-notes/engine";
+import { FfmpegRecorder } from "@gistlist/engine";
 
 let cachedDevices: string[] | null = null;
 let cacheTimestamp = 0;

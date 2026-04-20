@@ -610,7 +610,7 @@ export interface InitConfigRequest {
  * The API surface exposed to the renderer via contextBridge.
  * Keep this in sync with `preload/index.ts` and `main/ipc.ts`.
  */
-export interface MeetingNotesApi {
+export interface GistlistApi {
   // Config
   config: {
     get: () => Promise<AppConfigDTO | null>;
@@ -736,9 +736,9 @@ export interface MeetingNotesApi {
     openMicrophonePermissionPane: () => Promise<void>;
     /**
      * Return the app's display name and the **bundle name TCC shows in
-     * System Settings**. In a packaged build they're both "Meeting Notes".
+     * System Settings**. In a packaged build they're both "Gistlist".
      * In dev, the bundle is "Electron" so users have to grant the
-     * permission to "Electron" (not "Meeting Notes"). The UI uses
+     * permission to "Electron" (not "Gistlist"). The UI uses
      * `tccBundleName` when telling the user what to look for.
      */
     getAppIdentity: () => Promise<{
@@ -747,7 +747,7 @@ export interface MeetingNotesApi {
       /**
        * Absolute path to the running .app bundle (e.g.,
        * `/path/to/node_modules/electron/dist/Electron.app` in dev, or
-       * `/Applications/Meeting Notes.app` in prod). Used so the UI can
+       * `/Applications/Gistlist.app` in prod). Used so the UI can
        * "Reveal in Finder" — macOS often won't list an app in the System
        * Audio Recording Only list until it's been manually added via the
        * "+" button, which needs the bundle path.
@@ -872,6 +872,6 @@ export interface MeetingNotesApi {
 
 declare global {
   interface Window {
-    api: MeetingNotesApi;
+    api: GistlistApi;
   }
 }

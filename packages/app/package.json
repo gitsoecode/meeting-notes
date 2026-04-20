@@ -1,7 +1,7 @@
 {
-  "name": "@meeting-notes/app",
+  "name": "@gistlist/app",
   "version": "0.1.0",
-  "description": "Meeting Notes desktop app",
+  "description": "Gistlist desktop app",
   "private": true,
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",
@@ -19,7 +19,7 @@
     "package:mac": "npm run build && npm run check:bundle && electron-builder --mac --config.directories.output=release",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
-    "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @meeting-notes/engine && npm run build:main && node --test test/*.test.mjs",
+    "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @gistlist/engine && npm run build:main && node --test test/*.test.mjs",
     "test:e2e": "npm run build:renderer && playwright test",
     "test:e2e:electron": "npm run build && playwright test --config=playwright.electron.config.ts",
     "test:e2e:fast": "playwright test --timeout=8000 --max-failures=5 --workers=4 --reporter=line --project=desktop",
@@ -36,7 +36,7 @@
     "@codemirror/lang-markdown": "^6.3.0",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.35.0",
-    "@meeting-notes/engine": "*",
+    "@gistlist/engine": "*",
     "@milkdown/crepe": "^7.20.0",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-avatar": "^1.1.11",
@@ -87,14 +87,14 @@
     "wait-on": "^8.0.1"
   },
   "build": {
-    "appId": "com.meeting-notes.app",
-    "productName": "Meeting Notes",
+    "appId": "app.gistlist.desktop",
+    "productName": "Gistlist",
     "files": [
       "dist/**/*",
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/@meeting-notes/engine/dist/defaults/audio/**/*"
+      "node_modules/@gistlist/engine/dist/defaults/audio/**/*"
     ],
     "extraResources": [
       {
@@ -110,8 +110,8 @@
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "extendInfo": {
-        "NSMicrophoneUsageDescription": "Meeting Notes uses your microphone to capture your voice during meetings for local transcription.",
-        "NSAudioCaptureUsageDescription": "Meeting Notes captures system audio so the other participants in your meeting can be transcribed."
+        "NSMicrophoneUsageDescription": "Gistlist uses your microphone to capture your voice during meetings for local transcription.",
+        "NSAudioCaptureUsageDescription": "Gistlist captures system audio so the other participants in your meeting can be transcribed."
       },
       "extraFiles": [
         {

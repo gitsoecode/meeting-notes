@@ -20,7 +20,7 @@ import {
   type LlmCallFn,
   type LlmProvider,
   type PipelineProgressEvent,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import type {
   BulkReprocessRequest,
   BulkReprocessResult,
@@ -32,7 +32,7 @@ import { resolveRunDocumentPath, resolveRunFolderPath, RUN_NOTES_FILE, RUN_TRANS
 import { validatePromptModelSelection } from "./model-validation.js";
 import { getStore } from "./store.js";
 import { indexRun as chatIndexRun } from "./chat-index/index-run.js";
-import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@meeting-notes/engine";
+import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@gistlist/engine";
 
 /**
  * Parse speaker excerpts from a saved transcript.md body. The markdown

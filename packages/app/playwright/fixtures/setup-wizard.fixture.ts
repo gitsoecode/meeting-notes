@@ -26,7 +26,7 @@ export const test = base.extend<WizardFixtures>({
       };
     });
     await page.goto("/");
-    await expect(page.getByText("Meeting Notes setup")).toBeVisible();
+    await expect(page.getByText("Gistlist setup")).toBeVisible();
     await use(new SetupWizardPage(page));
   },
 });

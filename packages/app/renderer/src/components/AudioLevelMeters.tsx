@@ -389,7 +389,7 @@ function PermissionBanner({
   appIdentity: AppIdentity | null;
 }) {
   const isDev = appIdentity?.isDev ?? false;
-  const bundleLabel = appIdentity?.tccBundleName ?? "Meeting Notes";
+  const bundleLabel = appIdentity?.tccBundleName ?? "Gistlist";
   const bundleName = isDev ? "Electron" : bundleLabel;
   const bundlePath = appIdentity?.bundlePath ?? null;
 
@@ -429,7 +429,7 @@ function PermissionBanner({
         {isDev ? (
           <>
             Because this is a development build, the permission belongs to{" "}
-            <strong className="text-[var(--text-primary)]">"Electron"</strong>, not "Meeting Notes".
+            <strong className="text-[var(--text-primary)]">"Electron"</strong>, not "Gistlist".
           </>
         ) : (
           <>Grant it to <strong className="text-[var(--text-primary)]">"{bundleLabel}"</strong>.</>
@@ -503,7 +503,7 @@ function DiagnoseResult({
   const systemResult = report.results.find((r) => r.role === "system");
   const systemProblem = !!systemResult && (systemResult.error || !systemResult.recorded || systemResult.isSilent);
   const isDev = appIdentity?.isDev ?? false;
-  const bundleLabel = appIdentity?.tccBundleName ?? "Meeting Notes";
+  const bundleLabel = appIdentity?.tccBundleName ?? "Gistlist";
   const bundleName = isDev ? "Electron" : bundleLabel;
   return (
     <div className="space-y-2 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 p-3 text-xs">

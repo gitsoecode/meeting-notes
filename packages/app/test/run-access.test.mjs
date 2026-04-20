@@ -21,7 +21,7 @@ function makeConfig(dataPath) {
 }
 
 test("assertPathInsideRoot rejects traversal outside the allowed root", () => {
-  const root = "/tmp/meeting-notes";
+  const root = "/tmp/gistlist";
   assert.throws(
     () => assertPathInsideRoot(root, "/tmp/other-place/file.md", "Run document"),
     /outside the allowed directory/
@@ -29,7 +29,7 @@ test("assertPathInsideRoot rejects traversal outside the allowed root", () => {
 });
 
 test("resolveRunFolderPath and resolveRunDocumentPath keep access scoped to a run folder", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-access-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-run-access-"));
   const dataPath = path.join(tmpDir, "Meetings");
   const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "My Run");
 
@@ -74,7 +74,7 @@ test("run media names stay scoped to source recordings (flat and segmented)", ()
 });
 
 test("resolveRunMediaPath keeps media access scoped to a run folder", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-media-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-run-media-"));
   const dataPath = path.join(tmpDir, "Meetings");
   const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "Media Run");
   const audioDir = path.join(runFolder, RUN_AUDIO_DIR);
@@ -95,7 +95,7 @@ test("resolveRunMediaPath keeps media access scoped to a run folder", () => {
 });
 
 test("resolveRunMediaPath resolves segmented recording paths", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-seg-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-run-seg-"));
   const dataPath = path.join(tmpDir, "Meetings");
   const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "Segment Run");
   const segDir = path.join(runFolder, RUN_AUDIO_DIR, "2026-04-13_10-31-13");
@@ -116,7 +116,7 @@ test("resolveRunMediaPath resolves segmented recording paths", () => {
 });
 
 test("listRunFiles includes source media but hides normalized internals", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-run-files-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-run-files-"));
   const dataPath = path.join(tmpDir, "Meetings");
   const runFolder = path.join(dataPath, "Runs", "2026", "04", "08", "Imported Run");
   const audioDir = path.join(runFolder, RUN_AUDIO_DIR);

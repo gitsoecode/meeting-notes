@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import path from "node:path";
-import { getConfigDir, createAppLogger } from "@meeting-notes/engine";
+import { getConfigDir, createAppLogger } from "@gistlist/engine";
 import { migrate } from "./migrate.js";
 import { loadSqliteVec } from "./sqlite-vec-loader.js";
 

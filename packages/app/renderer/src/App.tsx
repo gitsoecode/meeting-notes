@@ -10,7 +10,7 @@ import { SetupWizard } from "./routes/SetupWizard";
 import { ActivityView } from "./routes/ActivityView";
 import { ChatView, type ChatSubview } from "./routes/ChatView";
 import { ConfirmDialog } from "./components/ConfirmDialog";
-import { MeetingNotesMark } from "./components/MeetingNotesMark";
+import { GistlistMark } from "./components/GistlistMark";
 import { AppSidebar } from "./components/AppSidebar";
 import { SiteHeader } from "./components/SiteHeader";
 import { SidebarInset, SidebarMain, SidebarProvider } from "./components/ui/sidebar";
@@ -445,8 +445,8 @@ export function App() {
     return (
       <div className="loading-splash bg-[var(--bg-secondary)]">
         <div className="space-y-3 text-center">
-          <MeetingNotesMark />
-          <div className="text-sm text-[var(--text-secondary)]">Loading Meeting Notes…</div>
+          <GistlistMark />
+          <div className="text-sm text-[var(--text-secondary)]">Loading Gistlist…</div>
         </div>
       </div>
     );

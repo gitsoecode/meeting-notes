@@ -44,9 +44,9 @@ function buildMenu(): Menu {
         },
       },
       { type: "separator" },
-      { label: "Open Meeting Notes", click: () => ensureMainWindow() },
+      { label: "Open Gistlist", click: () => ensureMainWindow() },
       { type: "separator" },
-      { label: "Quit Meeting Notes", click: () => app.quit() },
+      { label: "Quit Gistlist", click: () => app.quit() },
     ]);
   }
 
@@ -68,16 +68,16 @@ function buildMenu(): Menu {
         },
       },
       { type: "separator" },
-      { label: "Open Meeting Notes", click: () => ensureMainWindow() },
+      { label: "Open Gistlist", click: () => ensureMainWindow() },
       { type: "separator" },
-      { label: "Quit Meeting Notes", click: () => app.quit() },
+      { label: "Quit Gistlist", click: () => app.quit() },
     ]);
   }
 
   return Menu.buildFromTemplate([
-    { label: "Meeting Notes", enabled: false },
+    { label: "Gistlist", enabled: false },
     { type: "separator" },
-    { label: "Open Meeting Notes", click: () => ensureMainWindow() },
+    { label: "Open Gistlist", click: () => ensureMainWindow() },
     {
       label: "Quick Record",
       click: () => {
@@ -85,7 +85,7 @@ function buildMenu(): Menu {
       },
     },
     { type: "separator" },
-    { label: "Quit Meeting Notes", click: () => app.quit() },
+    { label: "Quit Gistlist", click: () => app.quit() },
   ]);
 }
 
@@ -112,7 +112,7 @@ export function setupTray(): void {
     );
   }
   tray = new Tray(idleIcon);
-  tray.setToolTip("Meeting Notes");
+  tray.setToolTip("Gistlist");
   tray.setContextMenu(buildMenu());
 }
 
@@ -125,10 +125,10 @@ export function refreshTray(): void {
 
   tray.setToolTip(
     recording
-      ? "Meeting Notes — Recording"
+      ? "Gistlist — Recording"
       : paused
-        ? "Meeting Notes — Paused"
-        : "Meeting Notes"
+        ? "Gistlist — Paused"
+        : "Gistlist"
   );
 
   if (idleIcon && recordingIcon) {

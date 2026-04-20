@@ -48,7 +48,7 @@ export async function setupLlm(opts: SetupLlmOptions): Promise<void> {
   if (!up) {
     throw new Error(
       `Ollama daemon not reachable at ${baseUrl}. The app should start it ` +
-        `automatically — try restarting Meeting Notes.`
+        `automatically — try restarting Gistlist.`
     );
   }
   onLog?.("✓ Ollama daemon reachable");

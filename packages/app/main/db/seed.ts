@@ -4,7 +4,7 @@ import {
   walkRunFolders,
   createAppLogger,
   type RunManifest,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 
 const appLogger = createAppLogger(false);
 

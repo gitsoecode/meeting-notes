@@ -1,4 +1,4 @@
-import { listOllamaModels } from "@meeting-notes/engine";
+import { listOllamaModels } from "@gistlist/engine";
 
 const SUPPORTED_CLAUDE_MODELS = new Set([
   "claude-opus-4-6",

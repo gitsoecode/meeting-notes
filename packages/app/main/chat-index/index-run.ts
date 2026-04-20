@@ -7,8 +7,8 @@ import {
   parseTranscriptMarkdown,
   createAppLogger,
   type ChunkInput,
-} from "@meeting-notes/engine";
-import type { TranscriptResult } from "@meeting-notes/engine/adapters/asr/provider";
+} from "@gistlist/engine";
+import type { TranscriptResult } from "@gistlist/engine/adapters/asr/provider";
 import { getDb } from "../db/connection.js";
 import { isVecAvailable } from "../db/sqlite-vec-loader.js";
 import { clearRunChunks, insertRunChunks } from "./store.js";

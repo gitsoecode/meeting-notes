@@ -1,4 +1,4 @@
-import type { SearchResult, StoredCitation } from "@meeting-notes/engine";
+import type { SearchResult, StoredCitation } from "@gistlist/engine";
 
 /**
  * Wire form used by the assistant:

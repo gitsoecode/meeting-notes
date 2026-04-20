@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import type { ChunkInput } from "@meeting-notes/engine";
+import type { ChunkInput } from "@gistlist/engine";
 import { isVecAvailable } from "../db/sqlite-vec-loader.js";
 
 /**

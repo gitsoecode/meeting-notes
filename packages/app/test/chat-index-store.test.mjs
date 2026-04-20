@@ -24,7 +24,7 @@ const {
 } = await import(new URL("../dist/main/chat-index/store.js", import.meta.url).href);
 
 function makeDb() {
-  // In-memory sqlite so we don't touch the user's real ~/.meeting-notes/meetings.db.
+  // In-memory sqlite so we don't touch the user's real ~/.gistlist/meetings.db.
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA_V1);

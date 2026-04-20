@@ -3,11 +3,11 @@ import { defineConfig } from "@playwright/test";
 /**
  * Separate Playwright config for **live Electron** specs that drive the
  * actual packaged main process (not the Vite dev server) and talk to the
- * user's real Meeting Notes library + Ollama daemon. Acceptance-blocking
+ * user's real Gistlist library + Ollama daemon. Acceptance-blocking
  * for the chat assistant: proves the retrieval → synthesis → cite → seek
  * loop works against real data.
  *
- * Run with: `npm run test:e2e:electron --workspace @meeting-notes/app`
+ * Run with: `npm run test:e2e:electron --workspace @gistlist/app`
  */
 export default defineConfig({
   testDir: "./playwright/electron-live",

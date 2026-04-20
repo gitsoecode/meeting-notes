@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG } from "@meeting-notes/engine";
+import { DEFAULT_CONFIG } from "@gistlist/engine";
 
 export interface ShortcutRegistry {
   register: (shortcut: string, handler: () => void) => boolean;

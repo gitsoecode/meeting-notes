@@ -6,7 +6,7 @@ import {
   listOllamaModels,
   loadConfig,
   pullOllamaModel,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import type {
   ChatBackfillProgressDTO,
   ChatCitationDTO,
@@ -36,7 +36,7 @@ import {
   setThreadModel as dbSetThreadModel,
 } from "./threads.js";
 import { ChatIndexBackfill } from "../chat-index/backfill.js";
-import { createOllamaEmbedder } from "@meeting-notes/engine";
+import { createOllamaEmbedder } from "@gistlist/engine";
 
 const appLogger = createAppLogger(false);
 
@@ -214,8 +214,10 @@ export function registerChatIpc(): void {
   ipcMain.handle(
     "chat:embed-model-status",
     async (): Promise<{ model: string; installed: boolean }> => {
-      const config = loadConfig();
+      // The wizard calls this *before* config exists. Don't blow up — fall
+      // back to "not installed" so the UI can offer to pull the model.
       try {
+        const config = loadConfig();
         const models = await listOllamaModels(config.ollama.base_url);
         const installed = models.some(
           (m) =>

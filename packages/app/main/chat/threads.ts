@@ -1,5 +1,5 @@
 import { ulid } from "ulid";
-import type { ChatMessage, ChatThread, StoredCitation } from "@meeting-notes/engine";
+import type { ChatMessage, ChatThread, StoredCitation } from "@gistlist/engine";
 import { getDb } from "../db/connection.js";
 
 export function listThreads(): ChatThread[] {

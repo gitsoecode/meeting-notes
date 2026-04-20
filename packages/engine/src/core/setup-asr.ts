@@ -101,16 +101,15 @@ async function ensureFfmpeg(): Promise<string> {
 export async function setupAsr(opts: SetupAsrOptions = {}): Promise<void> {
   const { onLog } = opts;
   const log = (msg: string) => onLog?.(msg);
-  log("\n  Meeting Notes — ASR setup (Parakeet via mlx-audio)\n");
+  log("\n  Gistlist — ASR setup (Parakeet via mlx-audio)\n");
 
-  // 1. Load config (or start from defaults if not initialized yet)
-  let config;
+  // 1. Load config — may not exist yet if invoked from the setup wizard
+  // before "Finish setup" runs. Persist step below is skipped in that case.
+  let config: Awaited<ReturnType<typeof loadConfig>> | null = null;
   try {
     config = loadConfig();
   } catch {
-    throw new Error(
-      "Config not found. Run 'meeting-notes init' first, then 'meeting-notes setup-asr'."
-    );
+    config = null;
   }
 
   // 2. Verify prerequisites
@@ -166,7 +165,7 @@ export async function setupAsr(opts: SetupAsrOptions = {}): Promise<void> {
 
   // 7. Smoke test — generate 3s of TTS audio and transcribe it
   log("\n  Running smoke test (generates TTS audio + transcribes)...");
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-setup-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-setup-"));
   const aiffPath = path.join(tmpDir, "speech.aiff");
   const wavPath = path.join(tmpDir, "speech.wav");
   const outBase = path.join(tmpDir, "out");
@@ -198,15 +197,20 @@ export async function setupAsr(opts: SetupAsrOptions = {}): Promise<void> {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 
-  // 8. Persist config
-  config.asr_provider = "parakeet-mlx";
-  config.parakeet_mlx = {
-    binary_path: parakeetBin,
-    model: DEFAULT_MODEL,
-  };
-  saveConfig(config);
-
-  log("\n  ✓ Parakeet ready. Config updated.");
+  // 8. Persist config — skipped if no config exists yet (the setup wizard
+  // will write the full config on its Finish step using the same provider
+  // and binary path).
+  if (config) {
+    config.asr_provider = "parakeet-mlx";
+    config.parakeet_mlx = {
+      binary_path: parakeetBin,
+      model: DEFAULT_MODEL,
+    };
+    saveConfig(config);
+    log("\n  ✓ Parakeet ready. Config updated.");
+  } else {
+    log("\n  ✓ Parakeet ready. Config will be written on Finish.");
+  }
   log(`    asr_provider: parakeet-mlx`);
   log(`    binary:       ${parakeetBin}`);
   log(`    model:        ${DEFAULT_MODEL}\n`);

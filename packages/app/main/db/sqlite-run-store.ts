@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
-import type { RunStore } from "@meeting-notes/engine";
-import type { RunManifest, RunStatus, PromptOutputState } from "@meeting-notes/engine";
+import type { RunStore } from "@gistlist/engine";
+import type { RunManifest, RunStatus, PromptOutputState } from "@gistlist/engine";
 import { regenerateIndexMd } from "./index-md-writer.js";
 
 export class SqliteRunStore implements RunStore {

@@ -1,11 +1,11 @@
 {
-  "name": "@meeting-notes/cli",
+  "name": "@gistlist/cli",
   "version": "0.1.0",
-  "description": "Meeting Notes CLI",
+  "description": "Gistlist CLI",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE",
   "bin": {
-    "meeting-notes": "./dist/index.js"
+    "gistlist": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -13,7 +13,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@meeting-notes/engine": "*",
+    "@gistlist/engine": "*",
     "commander": "^13.1.0"
   },
   "devDependencies": {

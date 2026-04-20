@@ -107,7 +107,7 @@ interface LegacyAppConfig {
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  data_path: path.join(os.homedir(), "Documents", "Meeting Notes"),
+  data_path: path.join(os.homedir(), "Documents", "Gistlist"),
   obsidian_integration: {
     enabled: false,
   },
@@ -118,7 +118,7 @@ const DEFAULT_CONFIG: AppConfig = {
     model_path: "",
   },
   parakeet_mlx: {
-    binary_path: path.join(os.homedir(), ".meeting-notes", "parakeet-venv", "bin", "mlx_audio.stt.generate"),
+    binary_path: path.join(os.homedir(), ".gistlist", "parakeet-venv", "bin", "mlx_audio.stt.generate"),
     model: "mlx-community/parakeet-tdt-0.6b-v2",
   },
   claude: {
@@ -144,7 +144,7 @@ const DEFAULT_CONFIG: AppConfig = {
 };
 
 export function getConfigDir(): string {
-  return path.join(os.homedir(), ".meeting-notes");
+  return path.join(os.homedir(), ".gistlist");
 }
 
 export function getConfigPath(): string {
@@ -200,7 +200,7 @@ export function loadConfig(): AppConfig {
     _cachedMtimeMs = stat.mtimeMs;
   } catch {
     throw new Error(
-      `Config not found at ${configPath}. Run "meeting-notes init" first.`
+      `Config not found at ${configPath}. Run "gistlist init" first.`
     );
   }
 

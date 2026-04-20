@@ -1,4 +1,4 @@
-/** SQLite schema v1 for Meeting Notes. */
+/** SQLite schema v1 for Gistlist. */
 export const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS runs (
   run_id           TEXT PRIMARY KEY,

@@ -43,7 +43,7 @@ import {
   setupAsr,
   moveDataDirectory,
   testAudioCapture,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import { createPrompter } from "./prompt.js";
 
 /**
@@ -82,7 +82,7 @@ interface RunProcessingPipelineOpts {
     system_path?: string;
     system_captured: boolean;
   };
-  logger: import("@meeting-notes/engine").Logger;
+  logger: import("@gistlist/engine").Logger;
   autoOnly: boolean;
 }
 
@@ -152,7 +152,7 @@ async function runProcessingPipeline(opts: RunProcessingPipelineOpts): Promise<b
 const program = new Command();
 
 program
-  .name("meeting-notes")
+  .name("gistlist")
   .description("Local-first meeting recording and processing with Obsidian integration")
   .version("0.1.0");
 
@@ -163,7 +163,7 @@ program
   .action(async () => {
     const prompter = createPrompter();
 
-    console.log("\n  Meeting Notes — Setup\n");
+    console.log("\n  Gistlist — Setup\n");
 
     const dataPathInput = await prompter.ask(
       "Data directory (where meeting runs are stored)",
@@ -205,7 +205,7 @@ program
           : "parakeet-mlx";
 
     // --- API keys → macOS Keychain ---
-    console.log("\n  API keys (stored in macOS Keychain under service 'meeting-notes')");
+    console.log("\n  API keys (stored in macOS Keychain under service 'gistlist')");
 
     const keysToCollect: SecretName[] = ["claude"];
     if (normalizedAsr === "openai") keysToCollect.push("openai");
@@ -263,12 +263,12 @@ program
     console.log(`  Data folder:     ${resolveBasePath(config)}`);
     console.log(`  Dashboard:       ${path.join(resolveBasePath(config), "Dashboard.md")}`);
     if (normalizedAsr === "parakeet-mlx") {
-      console.log(`\n  Next step: run 'meeting-notes setup-asr' to install Parakeet.`);
+      console.log(`\n  Next step: run 'gistlist setup-asr' to install Parakeet.`);
     }
     if (obsidianEnabled) {
       console.log(`\n  Open your Obsidian vault and install the Dataview plugin for dashboard queries.\n`);
     } else {
-      console.log(`\n  Obsidian integration is off. You can turn it on later with 'meeting-notes config obsidian enable'.\n`);
+      console.log(`\n  Obsidian integration is off. You can turn it on later with 'gistlist config obsidian enable'.\n`);
     }
   });
 
@@ -295,7 +295,7 @@ program
         return;
       }
       await setSecret(name, key);
-      console.log(`  Stored ${label} key in macOS Keychain (service: meeting-notes).`);
+      console.log(`  Stored ${label} key in macOS Keychain (service: gistlist).`);
     } finally {
       prompter.close();
     }
@@ -329,7 +329,7 @@ program
     const existing = loadActiveRecording();
     if (existing && existing.pids.some((p) => isProcessAlive(p))) {
       console.error(`  Recording already in progress: ${existing.title}`);
-      console.error(`  Run "meeting-notes stop" to finish it first.`);
+      console.error(`  Run "gistlist stop" to finish it first.`);
       process.exit(1);
     }
     if (existing) {
@@ -395,7 +395,7 @@ program
     if (reason === "sigint") {
       updateRunStatus(run.folderPath, "aborted", { ended: new Date().toISOString() });
       console.log(
-        `\n  Aborted. Audio is in ${run.folderPath} — run "meeting-notes process <audio-file>" later if you want to transcribe it.\n`
+        `\n  Aborted. Audio is in ${run.folderPath} — run "gistlist process <audio-file>" later if you want to transcribe it.\n`
       );
       return;
     }
@@ -495,7 +495,7 @@ program
     const alive = active.pids.filter((p) => isProcessAlive(p));
     if (alive.length === 0) {
       console.log(`  Stale state: recording for "${active.title}" appears to have died.`);
-      console.log(`  Run "meeting-notes stop" to clean up and process anyway.`);
+      console.log(`  Run "gistlist stop" to clean up and process anyway.`);
       return;
     }
 
@@ -600,7 +600,7 @@ program
 
     updateRunStatus(resolvedPath, "processing");
 
-    const { ClaudeProvider, runPipeline } = await import("@meeting-notes/engine");
+    const { ClaudeProvider, runPipeline } = await import("@gistlist/engine");
     const claude = new ClaudeProvider(apiKey, config.claude.model);
     const logger = createRunLogger(path.join(resolvedPath, "run.log"), true);
 
@@ -823,7 +823,7 @@ Available variables: {{title}}, {{date}}, {{transcript}}, {{notes}}, {{me_excerp
     };
     fs.writeFileSync(dest, buildMarkdown(frontmatter, body), "utf-8");
     console.log(`  Created: ${dest}`);
-    console.log(`  Edit the body to define your prompt, then run "meeting-notes prompts list" to verify.`);
+    console.log(`  Edit the body to define your prompt, then run "gistlist prompts list" to verify.`);
   });
 
 prompts
@@ -909,7 +909,7 @@ prompts
       process.exit(1);
     }
     if (!target.enabled) {
-      console.error(`  Prompt "${id}" is disabled. Run "meeting-notes prompts enable ${id}" first.`);
+      console.error(`  Prompt "${id}" is disabled. Run "gistlist prompts enable ${id}" first.`);
       process.exit(1);
     }
 
@@ -932,7 +932,7 @@ prompts
       process.exit(1);
     }
 
-    const { ClaudeProvider, runPipeline } = await import("@meeting-notes/engine");
+    const { ClaudeProvider, runPipeline } = await import("@gistlist/engine");
     const claude = new ClaudeProvider(apiKey, config.claude.model);
     const logger = createRunLogger(path.join(resolvedPath, "run.log"), true);
 
@@ -1051,7 +1051,7 @@ obsidianCmd
     };
     if (!config.obsidian_integration.vault_path) {
       console.warn(
-        "  Warning: no vault_path set. Run 'meeting-notes config obsidian set-vault <path>' next."
+        "  Warning: no vault_path set. Run 'gistlist config obsidian set-vault <path>' next."
       );
     }
     saveConfig(config);

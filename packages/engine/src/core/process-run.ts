@@ -1257,7 +1257,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   if (config.llm_provider === "claude" && !claudeKey) {
     logger.warn(
       "LLM pipeline skipped — no Anthropic API key in macOS Keychain " +
-        "(run 'meeting-notes set-key claude' or switch llm_provider to 'ollama')"
+        "(run 'gistlist set-key claude' or switch llm_provider to 'ollama')"
     );
     {
       const endedIso = new Date().toISOString();
@@ -1271,7 +1271,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   if (config.llm_provider === "openai" && !openaiKey) {
     logger.warn(
       "LLM pipeline skipped — no OpenAI API key in macOS Keychain " +
-        "(run 'meeting-notes set-key openai' or switch llm_provider to 'ollama')"
+        "(run 'gistlist set-key openai' or switch llm_provider to 'ollama')"
     );
     {
       const endedIso = new Date().toISOString();

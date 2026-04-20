@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
-  MeetingNotesApi,
+  GistlistApi,
   AppConfigDTO,
   AppActionEvent,
   AppLogEntry,
@@ -27,7 +27,7 @@ import type {
   ChatBackfillProgressDTO,
 } from "../shared/ipc.js";
 
-const api: MeetingNotesApi = {
+const api: GistlistApi = {
   config: {
     get: () => ipcRenderer.invoke("config:get"),
     save: (config: AppConfigDTO) => ipcRenderer.invoke("config:save", config),

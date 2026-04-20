@@ -222,7 +222,7 @@ test.describe("Settings", () => {
   test("data directory shows current path", async ({ settings }) => {
     await settings.openTab("Storage");
     await expect(settings.dataPathInput()).toHaveValue(
-      "/Users/test/Meeting Notes"
+      "/Users/test/Gistlist"
     );
   });
 

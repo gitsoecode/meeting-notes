@@ -1,4 +1,4 @@
-// Public API for @meeting-notes/engine
+// Public API for @gistlist/engine
 // Everything needed by the CLI and Electron app flows through here.
 
 export {

@@ -27,7 +27,7 @@ SORT date DESC
 \`\`\`
 `;
 
-const NOTES_TEMPLATE = `# Meeting Notes
+const NOTES_TEMPLATE = `# Gistlist
 
 -
 `;

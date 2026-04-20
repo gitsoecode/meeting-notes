@@ -19,9 +19,9 @@ test.describe("Setup Wizard", () => {
     // Skip Obsidian (default is off)
     await wizard.nextButton().click();
     await expect(wizard.dataDirHeading()).toBeVisible();
-    // Data dir should auto-fill to ~/Documents/Meeting Notes
+    // Data dir should auto-fill to ~/Documents/Gistlist
     await expect(wizard.dataPathInput()).toHaveValue(
-      "~/Documents/Meeting Notes"
+      "~/Documents/Gistlist"
     );
     await page.screenshot({
       path: "test-results/screenshots/wizard-step2-datadir.png",

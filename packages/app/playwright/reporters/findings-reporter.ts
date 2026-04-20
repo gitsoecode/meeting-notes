@@ -60,7 +60,7 @@ class FindingsReporter implements Reporter {
     const total = this.findings.length;
 
     const lines: string[] = [];
-    lines.push("# Meeting Notes — E2E Test & UX Audit Report\n");
+    lines.push("# Gistlist — E2E Test & UX Audit Report\n");
     lines.push(`Generated: ${new Date().toISOString()}\n`);
 
     // Executive Summary

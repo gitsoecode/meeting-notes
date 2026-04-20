@@ -13,7 +13,7 @@ test("loadConfig returns consistent results across calls (cache exercised)", asy
   // the contract — two sequential calls return equal configs.
   // We can't easily test mtime caching in isolation without controlling
   // the config path, so we verify the API contract holds.
-  const { invalidateConfigCache } = await import("@meeting-notes/engine");
+  const { invalidateConfigCache } = await import("@gistlist/engine");
 
   // Just ensure invalidateConfigCache exists and is callable
   assert.equal(typeof invalidateConfigCache, "function");

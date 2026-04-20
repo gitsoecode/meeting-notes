@@ -379,7 +379,7 @@ export function ActivityView() {
             </Badge>
             <CardTitle className="text-xl">Inspect raw output</CardTitle>
             <CardDescription>
-              {source.kind === "app" ? appPath || "~/.meeting-notes/app.log" : "Run log for the selected job."}
+              {source.kind === "app" ? appPath || "~/.gistlist/app.log" : "Run log for the selected job."}
             </CardDescription>
           </div>
           <div className="hidden rounded-lg bg-[linear-gradient(180deg,rgba(45,107,63,0.12),rgba(45,107,63,0.03))] p-4 md:block">

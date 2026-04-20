@@ -11,7 +11,7 @@ import {
   PlusCircle,
   Settings2,
 } from "lucide-react";
-import { MeetingNotesMark } from "./MeetingNotesMark";
+import { GistlistMark } from "./GistlistMark";
 import { Button } from "./ui/button";
 import {
   DropdownMenu,
@@ -74,9 +74,9 @@ export function AppSidebar({
         <div className={`flex items-center gap-2 ${isRail ? "justify-center" : "justify-between px-1.5"}`}>
           {!isRail && (
             <div className="flex min-w-0 items-center gap-2">
-              <MeetingNotesMark className="h-5 w-5 shrink-0" />
+              <GistlistMark className="h-5 w-5 shrink-0" />
               <span className="truncate text-base font-semibold text-[var(--text-primary)]">
-                Meeting Notes
+                Gistlist
               </span>
             </div>
           )}

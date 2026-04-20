@@ -1,6 +1,6 @@
 import { cn } from "../lib/utils";
 
-export function MeetingNotesMark({ className }: { className?: string }) {
+export function GistlistMark({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 1024 1024"
@@ -8,13 +8,13 @@ export function MeetingNotesMark({ className }: { className?: string }) {
       className={cn("h-10 w-10 shrink-0", className)}
     >
       <defs>
-        <linearGradient id="meeting-notes-mark-bg" x1="50%" x2="50%" y1="0%" y2="100%">
+        <linearGradient id="gistlist-mark-bg" x1="50%" x2="50%" y1="0%" y2="100%">
           <stop offset="0%" stopColor="#2D6B3F" />
           <stop offset="100%" stopColor="#214F2F" />
         </linearGradient>
       </defs>
 
-      <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#meeting-notes-mark-bg)" />
+      <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#gistlist-mark-bg)" />
 
       <g fill="#FFFFFF">
         <rect x="278" y="434" width="54" height="104" rx="27" />

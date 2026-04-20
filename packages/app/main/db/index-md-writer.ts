@@ -4,7 +4,7 @@ import {
   buildIndexBody,
   writeMarkdownFile,
   type RunManifest,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 
 /**
  * Regenerate index.md as a write-only side effect after DB mutations.

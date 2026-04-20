@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
-    <linearGradient id="meeting-notes-bg" x1="50%" x2="50%" y1="0%" y2="100%">
+    <linearGradient id="gistlist-bg" x1="50%" x2="50%" y1="0%" y2="100%">
       <stop offset="0%" stop-color="#2D6B3F" />
       <stop offset="100%" stop-color="#214F2F" />
     </linearGradient>
   </defs>
-  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#meeting-notes-bg)" />
+  <rect x="96" y="96" width="832" height="832" rx="196" fill="url(#gistlist-bg)" />
   <g fill="#FFFFFF">
     <rect x="278" y="434" width="54" height="104" rx="27" />
     <rect x="376" y="369" width="54" height="234" rx="27" />

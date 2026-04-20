@@ -8,7 +8,7 @@ export class SetupWizardPage {
   }
 
   brand() {
-    return this.page.getByText("Meeting Notes setup");
+    return this.page.getByText("Gistlist setup");
   }
 
   progressDots() {
@@ -25,7 +25,7 @@ export class SetupWizardPage {
 
   // Step headings
   welcomeHeading() {
-    return this.page.getByRole("heading", { name: "Welcome to Meeting Notes" });
+    return this.page.getByRole("heading", { name: "Welcome to Gistlist" });
   }
 
   obsidianHeading() {
@@ -80,7 +80,7 @@ export class SetupWizardPage {
 
   // Step 2: Data directory
   dataPathInput() {
-    return this.page.getByPlaceholder("/Users/you/Documents/Meeting Notes");
+    return this.page.getByPlaceholder("/Users/you/Documents/Gistlist");
   }
 
   pickDataDirButton() {
@@ -92,8 +92,21 @@ export class SetupWizardPage {
     return this.page.getByRole("combobox").first();
   }
 
-  localLlmToggle() {
+  llmProviderSelect() {
     return this.page.getByRole("combobox").nth(1);
+  }
+
+  /** @deprecated misnomer — selects LLM *provider*, not model. Use llmProviderSelect(). */
+  localLlmToggle() {
+    return this.llmProviderSelect();
+  }
+
+  localModelSelect() {
+    return this.page.getByTestId("local-llm-select");
+  }
+
+  localModelPicker() {
+    return this.page.getByTestId("local-llm-picker");
   }
 
   apiKeyInput() {

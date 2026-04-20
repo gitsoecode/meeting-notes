@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ChildProcess } from "node:child_process";
-import { getConfigDir, type StructuredLogEntry } from "@meeting-notes/engine";
+import { getConfigDir, type StructuredLogEntry } from "@gistlist/engine";
 import type { ActivityProcess, AppLogEntry, AppLogQuery } from "../shared/ipc.js";
 import { broadcastToAll } from "./events.js";
 

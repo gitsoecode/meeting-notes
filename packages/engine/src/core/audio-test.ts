@@ -46,7 +46,7 @@ export async function testAudioCapture(opts: {
   }
 
   const results: DeviceTestResult[] = [];
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-audio-test-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-audio-test-"));
 
   try {
     // Test mic device via ffmpeg

@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, resolveRunsPath, type AppConfig } from "@meeting-notes/engine";
+import { loadConfig, resolveRunsPath, type AppConfig } from "@gistlist/engine";
 
 export const RUN_INDEX_FILE = "index.md";
 export const RUN_NOTES_FILE = "notes.md";

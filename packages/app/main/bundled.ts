@@ -22,7 +22,7 @@ export type BundledBinary = "ollama" | "ffmpeg";
 
 export function bundledBin(name: BundledBinary): string {
   if (app.isPackaged) {
-    // process.resourcesPath = .../Meeting Notes.app/Contents/Resources
+    // process.resourcesPath = .../Gistlist.app/Contents/Resources
     return path.join(process.resourcesPath, "bin", name);
   }
   // Dev: walk up from dist/main/ to packages/app/resources/bin/

@@ -1,4 +1,4 @@
-import type { MeetingNotesApi } from "../../shared/ipc";
+import type { GistlistApi } from "../../shared/ipc";
 
 /**
  * Thin wrapper around `window.api` that the main process exposes via the
@@ -6,6 +6,6 @@ import type { MeetingNotesApi } from "../../shared/ipc";
  * handle the "api not present" case during Vite dev when the renderer is
  * occasionally loaded outside Electron for quick visual checks.
  */
-export const api: MeetingNotesApi = window.api;
+export const api: GistlistApi = window.api;
 
-export type { MeetingNotesApi };
+export type { GistlistApi };

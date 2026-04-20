@@ -35,7 +35,7 @@ function rebuildBetterSqlite3() {
   if (npmExecPath) {
     return spawnSync(
       process.execPath,
-      [npmExecPath, "rebuild", "better-sqlite3", "--workspace", "@meeting-notes/app"],
+      [npmExecPath, "rebuild", "better-sqlite3", "--workspace", "@gistlist/app"],
       {
         cwd: repoRoot,
         env,
@@ -46,7 +46,7 @@ function rebuildBetterSqlite3() {
 
   return spawnSync(
     "npm",
-    ["rebuild", "better-sqlite3", "--workspace", "@meeting-notes/app"],
+    ["rebuild", "better-sqlite3", "--workspace", "@gistlist/app"],
     {
       cwd: repoRoot,
       env,

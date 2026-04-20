@@ -10,7 +10,7 @@ const promptDefaultsDir = new URL(
 );
 
 test("shipped builtin prompts remain resettable defaults without all being auto prompts", async () => {
-  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-prompt-home-"));
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-prompt-home-"));
   const previousHome = process.env.HOME;
   process.env.HOME = tempHome;
 
@@ -45,7 +45,7 @@ test("shipped builtin prompts remain resettable defaults without all being auto 
 });
 
 test("loading prompts backfills newly shipped starter prompts for existing installs", async () => {
-  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-prompt-home-"));
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-prompt-home-"));
   const previousHome = process.env.HOME;
   process.env.HOME = tempHome;
 

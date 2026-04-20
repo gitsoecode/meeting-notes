@@ -3,12 +3,12 @@ import { app, BrowserWindow, globalShortcut, nativeImage, net, protocol } from "
 // In dev this cosmetically renames the app (menu bar, dock tooltip) but TCC
 // still identifies the bundle as "Electron" because we're running the stock
 // Electron.app from node_modules. In a packaged build the bundle itself is
-// named "Meeting Notes" so TCC agrees.
-app.setName("Meeting Notes");
+// named "Gistlist" so TCC agrees.
+app.setName("Gistlist");
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { createAppLogger, setAppLoggerListener, unloadOllamaModels } from "@meeting-notes/engine";
+import { createAppLogger, setAppLoggerListener, unloadOllamaModels } from "@gistlist/engine";
 import {
   registerIpcHandlers,
   broadcastAppAction,
@@ -24,7 +24,7 @@ import {
   loadConfig,
   pullOllamaModel,
   type AppConfig,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
@@ -109,7 +109,7 @@ function createMainWindow(): BrowserWindow {
     height: 800,
     minWidth: 820,
     minHeight: 620,
-    title: "Meeting Notes",
+    title: "Gistlist",
     show: false,
     backgroundColor: "#f6f7f2",
     titleBarStyle: "hiddenInset",
@@ -200,7 +200,7 @@ app.whenReady().then(async () => {
   try {
     const db = getDb();
     const config = loadConfig();
-    const { resolveRunsPath } = await import("@meeting-notes/engine");
+    const { resolveRunsPath } = await import("@gistlist/engine");
     const result = seedDbFromFilesystem(db, resolveRunsPath(config));
     if (result.imported > 0) {
       appLogger.info("Database healed from filesystem", {
@@ -241,7 +241,7 @@ app.whenReady().then(async () => {
     const config = loadConfig();
     if (config.llm_provider === "ollama") {
       void ensureOllamaDaemon().catch(() => {
-        // Logged to ~/.meeting-notes/ollama.log; nothing more to do here.
+        // Logged to ~/.gistlist/ollama.log; nothing more to do here.
       });
     }
     // Ensure the chat embedding model is present. Small (~274MB); pulled

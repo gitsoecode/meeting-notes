@@ -1,7 +1,7 @@
 /**
  * Real-corpus, real-Ollama, real-Electron acceptance suite for the chat
  * assistant. No mocks. Boots the compiled Electron main process, points it
- * at the user's existing Meeting Notes library + Ollama daemon, and drives
+ * at the user's existing Gistlist library + Ollama daemon, and drives
  * every user-visible chat flow end-to-end:
  *   - indexing the real library
  *   - asking a real question with citations rendered
@@ -18,12 +18,12 @@
  *
  * Prerequisites (documented here so you can reproduce if the test fails):
  *   - Ollama running on 127.0.0.1:11434 with the default chat model pulled
- *     (currently qwen3.5:9b per ~/.meeting-notes/config.yaml) plus
+ *     (currently qwen3.5:9b per ~/.gistlist/config.yaml) plus
  *     nomic-embed-text (auto-pulled by the app if missing).
- *   - The user's Meeting Notes library must contain at least one meeting
+ *   - The user's Gistlist library must contain at least one meeting
  *     mentioning "Lauren" (we target the Lauren Dai catchup).
  *
- * Run: `npm run test:e2e:electron --workspace @meeting-notes/app`
+ * Run: `npm run test:e2e:electron --workspace @gistlist/app`
  */
 import { _electron as electron, expect, test } from "@playwright/test";
 import type { ElectronApplication, Page } from "@playwright/test";
@@ -51,7 +51,7 @@ test.describe.configure({ mode: "serial" });
 test.beforeAll(async () => {
   if (!fs.existsSync(MAIN_ENTRY)) {
     throw new Error(
-      `Electron main entry not built at ${MAIN_ENTRY}. Run 'npm run build --workspace @meeting-notes/app' first.`,
+      `Electron main entry not built at ${MAIN_ENTRY}. Run 'npm run build --workspace @gistlist/app' first.`,
     );
   }
   const electronBinary = path.join(

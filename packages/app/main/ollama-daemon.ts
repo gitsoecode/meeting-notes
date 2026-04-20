@@ -2,7 +2,7 @@ import { spawn, type ChildProcess, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
-import { pingOllama, getConfigDir, createAppLogger } from "@meeting-notes/engine";
+import { pingOllama, getConfigDir, createAppLogger } from "@gistlist/engine";
 import { bundledBin, bundledBinExists } from "./bundled.js";
 import { trackChildProcess, updateTrackedProcess } from "./activity-monitor.js";
 
@@ -134,7 +134,7 @@ export async function ensureOllamaDaemon(): Promise<OllamaState> {
   trackedProcessId = null;
   throw new Error(
     `Ollama daemon failed to start within ${PING_TIMEOUT_MS}ms. ` +
-      `Check ~/.meeting-notes/ollama.log for details.`
+      `Check ~/.gistlist/ollama.log for details.`
   );
 }
 

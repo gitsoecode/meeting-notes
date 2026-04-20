@@ -1,6 +1,10 @@
-# Meeting Notes
+# Gistlist
 
-A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product; the CLI is a secondary surface for power users. Meeting Notes records mic + system audio, transcribes locally (or via OpenAI), runs prompts over the transcript to produce structured notes, and keeps the resulting files on disk.
+> **Your meetings stay on your machine.**
+
+A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product; the CLI is a secondary surface for power users. Gistlist records mic + system audio, transcribes locally (or via OpenAI), runs prompts over the transcript to produce structured notes, and keeps the resulting files on disk.
+
+No account. No cloud sync. No telemetry.
 
 ---
 
@@ -28,7 +32,7 @@ Install these before running anything:
 - An **Anthropic API key** — only if you want Claude as an LLM provider. Leave blank for Ollama-only or OpenAI-only mode.
 - An **OpenAI API key** — if you want OpenAI as an LLM provider, or if you pick the `openai` ASR provider (one key covers both).
 
-Obsidian is optional. If you want the Dataview dashboard, install Obsidian and enable the Dataview plugin, then point Meeting Notes at your vault during setup.
+Obsidian is optional. If you want the Dataview dashboard, install Obsidian and enable the Dataview plugin, then point Gistlist at your vault during setup.
 
 ---
 
@@ -43,26 +47,26 @@ npm install
 npm run build
 ```
 
-`npm run build` is required on a fresh checkout — `@meeting-notes/engine` exports from `./dist/index.js`, so downstream packages won't resolve until the engine has been built at least once.
+`npm run build` is required on a fresh checkout — `@gistlist/engine` exports from `./dist/index.js`, so downstream packages won't resolve until the engine has been built at least once.
 
 ### Launch the app
 
 While actively developing, use the dev server — it watches the main process, preload, and renderer, and launches Electron against the live build:
 
 ```bash
-npm run dev --workspace @meeting-notes/app
+npm run dev --workspace @gistlist/app
 ```
 
 To launch an already-built copy without watchers:
 
 ```bash
-npm run start --workspace @meeting-notes/app
+npm run start --workspace @gistlist/app
 ```
 
 ### Package a `.app` for macOS
 
 ```bash
-npm run package:mac --workspace @meeting-notes/app
+npm run package:mac --workspace @gistlist/app
 ```
 
 This runs the app build, checks bundled binaries, and produces a packaged `.app` under `packages/app/release/`.
@@ -78,7 +82,7 @@ On first launch the app opens an in-app **Setup Wizard**. Follow it to configure
 - Optional: Obsidian vault path and base folder for markdown outputs
 - Optional: installing the local Parakeet Python environment (the wizard runs this for you — no Homebrew needed)
 
-API keys go into the macOS Keychain under the service name `meeting-notes`. Config is written to `~/.meeting-notes/config.yaml`. If you chose an Obsidian vault, the wizard bootstraps `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, a `Dashboard.md`, a notes template, and `Config/pipeline.json`.
+API keys go into the macOS Keychain under the service name `gistlist`. Config is written to `~/.gistlist/config.yaml`. If you chose an Obsidian vault, the wizard bootstraps `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, a `Dashboard.md`, a notes template, and `Config/pipeline.json`.
 
 You can re-open Settings at any time to switch providers, rotate keys, or change the ASR engine.
 
@@ -86,16 +90,16 @@ You can re-open Settings at any time to switch providers, rotate keys, or change
 
 ## LLM provider: cloud or local
 
-Meeting Notes can summarize meetings with **Anthropic Claude** (cloud, fastest, costs API credits), **OpenAI** (cloud, costs API credits), or a **local LLM via Ollama** (free, fully offline, slower per section). You can switch providers in **Settings → LLM** at any time, and individual prompts can override the default — useful if you want most outputs local but one specific prompt to hit Claude or OpenAI.
+Gistlist can summarize meetings with **Anthropic Claude** (cloud, fastest, costs API credits), **OpenAI** (cloud, costs API credits), or a **local LLM via Ollama** (free, fully offline, slower per section). You can switch providers in **Settings → LLM** at any time, and individual prompts can override the default — useful if you want most outputs local but one specific prompt to hit Claude or OpenAI.
 
 ### Local mode (Ollama)
 
-In development, Meeting Notes will prefer a system `ollama` on `PATH` if you already have one installed. For packaged macOS releases, we bundle the Ollama binary into the `.app` so end users don't need to install anything separately. On startup, Meeting Notes will:
+In development, Gistlist will prefer a system `ollama` on `PATH` if you already have one installed. For packaged macOS releases, we bundle the Ollama binary into the `.app` so end users don't need to install anything separately. On startup, Gistlist will:
 
 1. **Reuse a system Ollama daemon** if one is already running on `localhost:11434`. We just talk to it — no second daemon, no duplicate models.
 2. Otherwise, **spawn a daemon ourselves** — preferring a system `ollama` binary on `PATH` if one exists, falling back to the bundled binary in packaged builds — and stop it cleanly when you quit.
 
-Models live in the standard `~/.ollama/models` directory regardless of which daemon ends up serving them. That means any models you've already pulled with Ollama are picked up automatically with **no duplicate downloads**, and anything you pull from inside Meeting Notes is also visible to a system Ollama install if you ever set one up.
+Models live in the standard `~/.ollama/models` directory regardless of which daemon ends up serving them. That means any models you've already pulled with Ollama are picked up automatically with **no duplicate downloads**, and anything you pull from inside Gistlist is also visible to a system Ollama install if you ever set one up.
 
 **Picking a model.** The Settings → LLM dropdown lists a curated set of models chosen for transcript-style work (action items, structured outputs, agentic prompts). Defaults are filtered by your machine's RAM:
 
@@ -114,7 +118,7 @@ The **Custom…** option lets you type any tag from [ollama.com/library](https:/
 
 ### Local mode (Parakeet, transcription)
 
-Transcription is a separate path. Meeting Notes uses **Parakeet** (Apple Silicon MLX) for fully local transcription. Parakeet is installed during the Setup Wizard's dependencies step into a Python venv at `~/.meeting-notes/parakeet-venv` — the wizard handles this end-to-end, no Homebrew needed. If you'd rather use OpenAI's cloud transcription instead, switch the provider in **Settings → Transcription**.
+Transcription is a separate path. Gistlist uses **Parakeet** (Apple Silicon MLX) for fully local transcription. Parakeet is installed during the Setup Wizard's dependencies step into a Python venv at `~/.gistlist/parakeet-venv` — the wizard handles this end-to-end, no Homebrew needed. If you'd rather use OpenAI's cloud transcription instead, switch the provider in **Settings → Transcription**.
 
 ---
 
@@ -126,7 +130,7 @@ The assistant is **read-only**: it can't edit, delete, or rename anything. Each 
 
 ### What it needs
 
-- The same Ollama daemon Meeting Notes already uses for local LLMs.
+- The same Ollama daemon Gistlist already uses for local LLMs.
 - A chat model (defaults to whatever you picked in Setup — e.g. `qwen3.5:9b`). You can switch per thread.
 - The **`nomic-embed-text`** embedding model (~274 MB). Pulled automatically on first launch and also surfaced in **Settings → Chat → Chat embedding model**.
 
@@ -134,7 +138,7 @@ If `sqlite-vec` (the native extension that powers vector search) fails to load �
 
 ### How indexing works
 
-- Every completed or reprocessed meeting is indexed immediately into an FTS5 + vector index inside `~/.meeting-notes/meetings.db`.
+- Every completed or reprocessed meeting is indexed immediately into an FTS5 + vector index inside `~/.gistlist/meetings.db`.
 - Pre-existing meetings are indexed in the background the first time you open Chat (or from **Settings → Chat → Re-run indexing**). Under 5 meetings indexes silently; up to 50 shows an unobtrusive progress strip; 50+ shows an explicit Start/Later card.
 
 ### Settings → Chat
@@ -155,7 +159,7 @@ The composer has a small `Filter` button that takes a participant name. Known pa
 
 ## Obsidian integration (optional)
 
-Meeting Notes can write each run's markdown into an Obsidian vault so the notes are editable in the tool you already use for writing. This is entirely optional — the app is fully functional without Obsidian.
+Gistlist can write each run's markdown into an Obsidian vault so the notes are editable in the tool you already use for writing. This is entirely optional — the app is fully functional without Obsidian.
 
 If you want it:
 
@@ -163,7 +167,7 @@ If you want it:
 2. In the Setup Wizard (or **Settings → Obsidian**), enable the integration and point it at your vault and a base folder (defaults: `~/Obsidian/My-Vault` and `Meetings`).
 3. Open `Meetings/Dashboard.md` in Obsidian — Dataview renders the run index.
 
-The vault gets `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, `Dashboard.md`, a notes template, and `Config/pipeline.json`. The app treats these as its source of truth for that vault — edit the templates or pipeline config in place and Meeting Notes picks up the changes.
+The vault gets `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, `Dashboard.md`, a notes template, and `Config/pipeline.json`. The app treats these as its source of truth for that vault — edit the templates or pipeline config in place and Gistlist picks up the changes.
 
 ---
 
@@ -176,44 +180,44 @@ To use it, build and symlink from the repo root:
 ```bash
 npm run build
 npm link
-meeting-notes --help
+gistlist --help
 ```
 
-After `npm link`, the `meeting-notes` command is on your `PATH`. You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change the `bin` entry in `package.json`, or move the project directory.
+After `npm link`, the `gistlist` command is on your `PATH`. You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change the `bin` entry in `package.json`, or move the project directory.
 
 ### Commands
 
 | Command | What it does |
 | --- | --- |
-| `meeting-notes init` | First-time setup wizard (CLI alternative to the in-app wizard) |
-| `meeting-notes set-key <claude\|openai>` | Add or rotate an API key in the Keychain |
-| `meeting-notes setup-asr` | Install the local Parakeet ASR engine |
-| `meeting-notes start [-t "Title"]` | Start a recording (title defaults to "Untitled Meeting") |
-| `meeting-notes stop` | Stop the active recording and process it |
-| `meeting-notes status` | Show recording status |
-| `meeting-notes process <audio-file>` | Process an existing audio file |
-| `meeting-notes reprocess <run-path>` | Re-run processing on an existing run |
-| `meeting-notes logs [run-path]` | Show app or run logs |
-| `meeting-notes test-audio` | Test audio capture from configured devices |
-| `meeting-notes prompts list` | List configured pipeline prompts |
-| `meeting-notes prompts path [id]` | Print the on-disk path of a prompt |
-| `meeting-notes prompts new <id>` | Create a new prompt from the default template |
-| `meeting-notes prompts enable\|disable <id>` | Toggle whether a prompt is active |
-| `meeting-notes prompts auto\|manual <id>` | Toggle autorun vs manual-only |
-| `meeting-notes prompts run <id> <run-path>` | Run a single prompt against an existing run |
-| `meeting-notes prompts reset [id]` | Reset a builtin prompt to its shipped default |
-| `meeting-notes config get` | Print the resolved config |
-| `meeting-notes config set-data-path <path>` | Change where runs and app state are stored |
-| `meeting-notes obsidian enable\|disable` | Toggle the Obsidian integration |
-| `meeting-notes obsidian set-vault <vaultPath>` | Point the integration at a vault |
+| `gistlist init` | First-time setup wizard (CLI alternative to the in-app wizard) |
+| `gistlist set-key <claude\|openai>` | Add or rotate an API key in the Keychain |
+| `gistlist setup-asr` | Install the local Parakeet ASR engine |
+| `gistlist start [-t "Title"]` | Start a recording (title defaults to "Untitled Meeting") |
+| `gistlist stop` | Stop the active recording and process it |
+| `gistlist status` | Show recording status |
+| `gistlist process <audio-file>` | Process an existing audio file |
+| `gistlist reprocess <run-path>` | Re-run processing on an existing run |
+| `gistlist logs [run-path]` | Show app or run logs |
+| `gistlist test-audio` | Test audio capture from configured devices |
+| `gistlist prompts list` | List configured pipeline prompts |
+| `gistlist prompts path [id]` | Print the on-disk path of a prompt |
+| `gistlist prompts new <id>` | Create a new prompt from the default template |
+| `gistlist prompts enable\|disable <id>` | Toggle whether a prompt is active |
+| `gistlist prompts auto\|manual <id>` | Toggle autorun vs manual-only |
+| `gistlist prompts run <id> <run-path>` | Run a single prompt against an existing run |
+| `gistlist prompts reset [id]` | Reset a builtin prompt to its shipped default |
+| `gistlist config get` | Print the resolved config |
+| `gistlist config set-data-path <path>` | Change where runs and app state are stored |
+| `gistlist obsidian enable\|disable` | Toggle the Obsidian integration |
+| `gistlist obsidian set-vault <vaultPath>` | Point the integration at a vault |
 
-Run `meeting-notes --help` or `meeting-notes <command> --help` for full options on any command.
+Run `gistlist --help` or `gistlist <command> --help` for full options on any command.
 
 ### Audio testing
 
 ```bash
-meeting-notes test-audio
-meeting-notes test-audio --duration 6000   # 6-second test (default 4s)
+gistlist test-audio
+gistlist test-audio --duration 6000   # 6-second test (default 4s)
 ```
 
 Records a short clip from each configured device, analyzes volume, and reports whether each device is found, capturing audio, and not silent.
@@ -230,42 +234,42 @@ For the full list of test commands and when to use each, see the **Testing** sec
 
 | What | Where |
 | --- | --- |
-| Config | `~/.meeting-notes/config.yaml` |
-| App log | `~/.meeting-notes/app.log` |
-| Parakeet venv | `~/.meeting-notes/parakeet-venv/` |
-| API keys | macOS Keychain, service `meeting-notes` |
+| Config | `~/.gistlist/config.yaml` |
+| App log | `~/.gistlist/app.log` |
+| Parakeet venv | `~/.gistlist/parakeet-venv/` |
+| API keys | macOS Keychain, service `gistlist` |
 | Recordings & notes | `{vault_path}/{base_folder}/Runs/` |
 | Pipeline config | `{vault_path}/{base_folder}/Config/pipeline.json` |
 | Templates | `{vault_path}/{base_folder}/Templates/` |
 | Dashboard | `{vault_path}/{base_folder}/Dashboard.md` |
-| Chat index (FTS + vectors) | `~/.meeting-notes/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
+| Chat index (FTS + vectors) | `~/.gistlist/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
 | Chat threads + messages | Same `meetings.db` (`chat_threads`, `chat_messages`) |
-| Chat system prompt override | `~/.meeting-notes/chat-system-prompt.md` (created only after an edit in Settings) |
+| Chat system prompt override | `~/.gistlist/chat-system-prompt.md` (created only after an edit in Settings) |
 
 ---
 
 ## Troubleshooting
 
-**`meeting-notes: command not found`**
+**`gistlist: command not found`**
 The global symlink isn't in place. From the project directory: `npm run build && npm link`.
 
-**`Config not found at ~/.meeting-notes/config.yaml`**
-You haven't run setup yet. Launch the app and complete the Setup Wizard, or run `meeting-notes init`.
+**`Config not found at ~/.gistlist/config.yaml`**
+You haven't run setup yet. Launch the app and complete the Setup Wizard, or run `gistlist init`.
 
 **`No Anthropic API key found in macOS Keychain`**
-Open Settings in the app and add a key, or run `meeting-notes set-key claude`.
+Open Settings in the app and add a key, or run `gistlist set-key claude`.
 
 **Dashboard is empty in Obsidian**
 Make sure the Dataview plugin is installed and enabled in Obsidian's community plugins.
 
 **Stale behavior after editing code**
-You forgot to rebuild. Run `npm run build`, or leave `npm run dev --workspace @meeting-notes/app` running in a terminal.
+You forgot to rebuild. Run `npm run build`, or leave `npm run dev --workspace @gistlist/app` running in a terminal.
 
 **`better-sqlite3` / `NODE_MODULE_VERSION` mismatch when starting the desktop app**
 The native SQLite module was compiled for plain Node (likely by the test runner) instead of Electron. Rebuild it for the app runtime:
 
 ```bash
-npm run rebuild:native --workspace @meeting-notes/app
+npm run rebuild:native --workspace @gistlist/app
 ```
 
 Notes:
@@ -278,8 +282,8 @@ Notes:
 
 ## License
 
-Meeting Notes is licensed under the [Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2)](./LICENSE). Copyright © 2026 Gistlist, LLC.
+Gistlist is licensed under the [Functional Source License, Version 1.1, ALv2 Future License (FSL-1.1-ALv2)](./LICENSE). Copyright © 2026 Gistlist, LLC.
 
-In short: you can read, use, modify, and redistribute this code for any purpose — **except** building a commercial product or service that competes with Meeting Notes. Internal use, non-commercial research, and education are explicitly allowed. Two years after each release, that code automatically converts to Apache 2.0.
+In short: you can read, use, modify, and redistribute this code for any purpose — **except** building a commercial product or service that competes with Gistlist. Internal use, non-commercial research, and education are explicitly allowed. Two years after each release, that code automatically converts to Apache 2.0.
 
 This is **source-available** (sometimes called "fair source"), not OSI-approved open source.

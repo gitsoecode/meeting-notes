@@ -1,5 +1,5 @@
 import type Database from "better-sqlite3";
-import { createAppLogger } from "@meeting-notes/engine";
+import { createAppLogger } from "@gistlist/engine";
 import { SCHEMA_V1, SCHEMA_V4_CHAT } from "./schema.js";
 
 const appLogger = createAppLogger(false);

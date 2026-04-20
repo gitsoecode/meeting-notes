@@ -47,11 +47,11 @@ export async function installMockApi(page: Page) {
       chatStream: new Set(),
       chatBackfillProgress: new Set(),
     };
-    const stateStorageKey = "__meeting_notes_mock_state__";
-    const promptsStorageKey = "__meeting_notes_prompts__";
+    const stateStorageKey = "__gistlist_mock_state__";
+    const promptsStorageKey = "__gistlist_prompts__";
 
     const config = {
-      data_path: "/Users/test/Meeting Notes",
+      data_path: "/Users/test/Gistlist",
       obsidian_integration: {
         enabled: false,
       },
@@ -62,7 +62,7 @@ export async function installMockApi(page: Page) {
         model_path: "",
       },
       parakeet_mlx: {
-        binary_path: "/Users/test/.meeting-notes/parakeet",
+        binary_path: "/Users/test/.gistlist/parakeet",
         model: "mlx-community/parakeet-tdt-0.6b-v2",
       },
       claude: {
@@ -184,7 +184,7 @@ export async function installMockApi(page: Page) {
         builtin: true,
         model: null,
         temperature: null,
-        source_path: "/Users/test/.meeting-notes/prompts/summary.md",
+        source_path: "/Users/test/.gistlist/prompts/summary.md",
         body: "Produce a concise summary and action items.",
       },
       {
@@ -198,7 +198,7 @@ export async function installMockApi(page: Page) {
         builtin: true,
         model: null,
         temperature: null,
-        source_path: "/Users/test/.meeting-notes/prompts/one-on-one-follow-up.md",
+        source_path: "/Users/test/.gistlist/prompts/one-on-one-follow-up.md",
         body: "Draft a concise 1:1 follow-up with support items and next steps.",
       },
       {
@@ -212,7 +212,7 @@ export async function installMockApi(page: Page) {
         builtin: true,
         model: "qwen3.5:9b",
         temperature: null,
-        source_path: "/Users/test/.meeting-notes/prompts/decision-log.md",
+        source_path: "/Users/test/.gistlist/prompts/decision-log.md",
         body: "List the decisions made in the meeting.",
       },
       {
@@ -226,7 +226,7 @@ export async function installMockApi(page: Page) {
         builtin: false,
         model: "claude-sonnet-4-6",
         temperature: null,
-        source_path: "/Users/test/.meeting-notes/prompts/follow-up-brief.md",
+        source_path: "/Users/test/.gistlist/prompts/follow-up-brief.md",
         body: "Draft a short follow-up with next steps and owners.",
       },
     ];
@@ -423,7 +423,7 @@ export async function installMockApi(page: Page) {
       systemAudioSupported: true,
       python: "/usr/bin/python3",
       pythonVersion: "3.9.6",
-      parakeet: "/Users/test/.meeting-notes/parakeet",
+      parakeet: "/Users/test/.gistlist/parakeet",
       whisper: "/opt/homebrew/bin/whisper-cli",
       ollamaVersion: "0.7.2",
       brewAvailable: true,
@@ -1540,7 +1540,7 @@ export async function installMockApi(page: Page) {
             builtin: false,
             model: null,
             temperature: null,
-            source_path: `/Users/test/.meeting-notes/prompts/${id}.md`,
+            source_path: `/Users/test/.gistlist/prompts/${id}.md`,
             body,
           });
           persistPromptState();
@@ -1577,7 +1577,7 @@ export async function installMockApi(page: Page) {
           }
         },
         async getDir() {
-          return "/Users/test/.meeting-notes/prompts";
+          return "/Users/test/.gistlist/prompts";
         },
         async openInFinder(promptId) {
           recordExternalAction("open-prompt-in-finder", { promptId });
@@ -1674,9 +1674,9 @@ export async function installMockApi(page: Page) {
         },
         async getAppIdentity() {
           return {
-            displayName: "Meeting Notes",
-            tccBundleName: "Meeting Notes",
-            bundlePath: "/Applications/Meeting Notes.app",
+            displayName: "Gistlist",
+            tccBundleName: "Gistlist",
+            bundlePath: "/Applications/Gistlist.app",
             isDev: false,
             isPackaged: true,
           };
@@ -1716,7 +1716,7 @@ export async function installMockApi(page: Page) {
           return `log for ${runFolder}`;
         },
         async appPath() {
-          return "/Users/test/.meeting-notes/app.log";
+          return "/Users/test/.gistlist/app.log";
         },
         async listAppEntries() {
           return clone(appLogEntries);

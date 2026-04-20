@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadConfig, resolveRunsPath, createAppLogger } from "@meeting-notes/engine";
+import { loadConfig, resolveRunsPath, createAppLogger } from "@gistlist/engine";
 import { getStore } from "./store.js";
 import { RUN_AUDIO_DIR, assertPathInsideRoot } from "./run-access.js";
 

@@ -16,7 +16,7 @@ test("isSupportedMediaFileName accepts common meeting recording formats", () => 
 });
 
 test("assertImportMediaPath rejects non-files and unsupported extensions", () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "meeting-notes-media-import-"));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-media-import-"));
   const goodPath = path.join(tmpDir, "zoom.mp4");
   const badPath = path.join(tmpDir, "notes.txt");
   const dirPath = path.join(tmpDir, "folder");

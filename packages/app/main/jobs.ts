@@ -7,7 +7,7 @@ import {
   type PipelineProgressEvent,
   type RunManifest,
   updateRunStatus,
-} from "@meeting-notes/engine";
+} from "@gistlist/engine";
 import type {
   JobKind,
   JobProgress,
