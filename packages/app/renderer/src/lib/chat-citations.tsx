@@ -33,6 +33,11 @@ export function renderCitations(
     const key = c.start_ms != null ? `${c.run_id}:${c.start_ms}` : `${c.run_id}:${c.source}`;
     byKey.set(key, c);
   }
+  // Track which citations were consumed by an inline marker. Anything left
+  // after the main pass is rendered as a "Sources" footer so carried-forward
+  // citations (from a follow-up/reformat turn where the model didn't
+  // re-emit markers) remain visible to the user.
+  const consumed = new Set<ChatCitationDTO>();
 
   const out: React.ReactNode[] = [];
   let lastIndex = 0;
@@ -79,6 +84,7 @@ export function renderCitations(
         </span>,
       );
     } else if (exact.start_ms != null && /^\d+$/.test(ref)) {
+      consumed.add(exact);
       const ms = Number(ref);
       const label = `${exact.run_title_snapshot} · ${msToMmSs(ms)}`;
       out.push(
@@ -90,6 +96,7 @@ export function renderCitations(
         />,
       );
     } else {
+      consumed.add(exact);
       out.push(
         <SourceChip
           key={`cite-chip-${key++}`}
@@ -105,6 +112,45 @@ export function renderCitations(
   }
   const tail = text.slice(lastIndex);
   pushText(tail);
+
+  // Render any stored citations that weren't consumed by an inline marker
+  // as a compact "Sources" footer. This surfaces carried-forward citations
+  // (from reformat / follow-up turns where the model didn't re-emit
+  // markers) without requiring the model to cooperate on every turn.
+  const orphans = citations.filter((c) => !consumed.has(c));
+  if (orphans.length > 0) {
+    out.push(
+      <span
+        key={`cite-sources-label-${key++}`}
+        className="mt-2 mr-1 inline-block text-xs font-medium uppercase tracking-wide text-[var(--text-tertiary)]"
+        data-testid="chat-sources-label"
+      >
+        Sources:
+      </span>,
+    );
+    for (const c of orphans) {
+      if (c.start_ms != null) {
+        const label = `${c.run_title_snapshot} · ${msToMmSs(c.start_ms)}`;
+        out.push(
+          <TimestampPill
+            key={`cite-source-pill-${key++}`}
+            label={label}
+            startMs={c.start_ms}
+            onClick={() => onSeek(c.run_id, c.start_ms!, c.run_title_snapshot)}
+          />,
+        );
+      } else {
+        out.push(
+          <SourceChip
+            key={`cite-source-chip-${key++}`}
+            title={c.run_title_snapshot}
+            source={c.source}
+            onClick={() => onOpen(c.run_id, c.run_title_snapshot, c.source)}
+          />,
+        );
+      }
+    }
+  }
   return out;
 }
 

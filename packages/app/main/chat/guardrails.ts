@@ -1,3 +1,4 @@
+import type { ChatMessage, StoredCitation } from "@gistlist/engine";
 import { parseCitationMarkers } from "./citation-parser.js";
 
 /**
@@ -56,4 +57,69 @@ function countSentences(s: string): number {
   // Very rough — split on terminal punctuation.
   const parts = s.split(/[.!?]+/).map((p) => p.trim()).filter((p) => p.length > 0);
   return parts.length;
+}
+
+/**
+ * Narrow reformat / restate phrasings. Must be explicit — a user saying
+ * "shorter" or "which of those" alone does NOT count here. Broader signals
+ * flow through `isShortReferentialFollowUp`, and both paths still require
+ * the prior-assistant-cited prerequisite before they relax the guardrail.
+ */
+const REFORMAT_PATTERNS: RegExp[] = [
+  /\bcopy[-\s]?past(e|able|eable)\b/i,
+  /\breformat\b/i,
+  /\brewrite\b/i,
+  /\bre-?word\b/i,
+  /\b(make|turn) (it|that|this|the (above|answer|response)) (shorter|longer|cleaner|simpler|into (a )?(bullet|list|table|markdown))/i,
+  /\b(give|show|put) (me |it |that |this )?(in|as|with) (bullets?|bulleted|a (bullet(ed)?\s+)?(list|table)|markdown|plain text|copy[-\s]?paste)/i,
+  /\bsummari[sz]e (that|the above|your (last |previous )?(answer|response))\b/i,
+  /\btl;?dr\b(\s+(of )?(that|the above|your (last |previous )?(answer|response)))?/i,
+];
+
+export function isReformatOrFollowUpQuery(userMessage: string): boolean {
+  return REFORMAT_PATTERNS.some((p) => p.test(userMessage));
+}
+
+/**
+ * Short message anchored on a referential pronoun — almost always refers
+ * back to the prior assistant answer ("which of those...", "why is it like
+ * that", "tell me more about them"). The ≤80 char cap keeps this tight
+ * enough that a genuinely new question doesn't sneak through.
+ */
+export function isShortReferentialFollowUp(userMessage: string): boolean {
+  const trimmed = userMessage.trim();
+  if (!trimmed || trimmed.length > 80) return false;
+  return /\b(that|those|these|it|them)\b/i.test(trimmed);
+}
+
+/**
+ * Walk backward through the thread history to find the most recent
+ * assistant message (not the final entry, which may be the just-added
+ * current user turn). Returns true iff that message's citations array is
+ * non-empty.
+ */
+export function priorAssistantHadCitations(history: ChatMessage[]): boolean {
+  const prior = findPriorAssistantMessage(history);
+  return prior != null && prior.citations.length > 0;
+}
+
+/**
+ * Returns the citations on the most recent prior assistant message, or an
+ * empty array if none exists. Used to carry citations forward on grounded
+ * follow-up turns when the model didn't re-emit markers.
+ */
+export function findPriorAssistantCitations(
+  history: ChatMessage[]
+): StoredCitation[] {
+  const prior = findPriorAssistantMessage(history);
+  return prior?.citations ?? [];
+}
+
+function findPriorAssistantMessage(
+  history: ChatMessage[]
+): ChatMessage | null {
+  for (let i = history.length - 1; i >= 0; i -= 1) {
+    if (history[i].role === "assistant") return history[i];
+  }
+  return null;
 }

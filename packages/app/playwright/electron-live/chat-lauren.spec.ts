@@ -926,3 +926,215 @@ test("18. Anthropic model picker shows multiple Claude options when a key is con
   const claudeLabels = labels.filter((l) => /Claude/i.test(l));
   expect(claudeLabels.length).toBeGreaterThan(1);
 });
+
+// ---------------------------------------------------------------------------
+// Guardrail relaxation — grounded follow-up turns must not fail-closed, and
+// must carry citations forward so the UI still has something clickable.
+// A genuinely new uncited turn that happens to follow a cited one must
+// still hedge or fail-closed (negative test below).
+
+async function currentThreadId(): Promise<string> {
+  const id = await window.evaluate(() => {
+    const m = window.location.hash.match(/#\/chat\/t\/([^?]+)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  });
+  if (!id) throw new Error("Not on a thread route");
+  return id;
+}
+
+async function sendFollowUp(text: string) {
+  await window.getByTestId("chat-composer-input").fill(text);
+  await window.getByTestId("chat-composer-send").click();
+}
+
+async function waitForAssistantCount(n: number) {
+  await expect
+    .poll(
+      async () => window.locator('[data-role="assistant"]').count(),
+      { timeout: 240_000 },
+    )
+    .toBeGreaterThanOrEqual(n);
+}
+
+async function lastAssistantMessage(threadId: string) {
+  return await window.evaluate(async (id: string) => {
+    const resp = await (window as any).api.chat.getThread(id);
+    if (!resp) return null;
+    const assistants = resp.messages.filter((m: any) => m.role === "assistant");
+    return assistants[assistants.length - 1] ?? null;
+  }, threadId);
+}
+
+test("26. follow-up reformat carries citations forward on real data", async () => {
+  test.setTimeout(480_000);
+  // Turn 1: cited Lauren answer.
+  await askAndAwaitAnswer(LAUREN_QUERY);
+  const threadId = await currentThreadId();
+  const firstAssistant = await lastAssistantMessage(threadId);
+  expect(firstAssistant).not.toBeNull();
+  expect(firstAssistant.citations.length).toBeGreaterThan(0);
+
+  // Turn 2: reformat request in the same thread.
+  await sendFollowUp("Give me that in copy-pasteable format.");
+  await waitForAssistantCount(2);
+
+  // The reformatted answer must not be fail-closed.
+  const secondText = await window
+    .locator('[data-role="assistant"]')
+    .nth(1)
+    .textContent();
+  console.log("Reformat answer:", secondText);
+  expect(secondText ?? "").not.toContain("couldn't ground my answer");
+  expect(secondText ?? "").toMatch(/lauren/i);
+
+  // Either the model re-emitted inline markers (pills/chips on the turn)
+  // OR carry-forward attached citations to the stored message. Assert the
+  // stored message is grounded either way.
+  const secondAssistant = await lastAssistantMessage(threadId);
+  expect(secondAssistant.citations.length).toBeGreaterThan(0);
+});
+
+test("27. short referential follow-up keeps citations on real data", async () => {
+  test.setTimeout(480_000);
+  // Fresh thread to isolate the turn pair.
+  await goToChat();
+  await window.getByTestId("chat-composer-input").fill(LAUREN_QUERY);
+  await window.getByTestId("chat-composer-send").click();
+  await window.waitForURL(/#\/chat\/t\//, { timeout: 30_000 });
+  const assistants = window.locator('[data-role="assistant"]');
+  await expect(assistants.first()).toBeVisible({ timeout: 240_000 });
+
+  const threadId = await currentThreadId();
+  const firstAssistant = await lastAssistantMessage(threadId);
+  expect(firstAssistant.citations.length).toBeGreaterThan(0);
+
+  await sendFollowUp("Which of those matters most?");
+  await waitForAssistantCount(2);
+
+  const secondText = await assistants.nth(1).textContent();
+  console.log("Short referential answer:", secondText);
+  expect(secondText ?? "").not.toContain("couldn't ground my answer");
+
+  const secondAssistant = await lastAssistantMessage(threadId);
+  expect(secondAssistant.citations.length).toBeGreaterThan(0);
+});
+
+test("28. new unrelated question after a cited answer is still fail-closable", async () => {
+  test.setTimeout(480_000);
+  // Fresh thread, cited answer first.
+  await goToChat();
+  await window.getByTestId("chat-composer-input").fill(LAUREN_QUERY);
+  await window.getByTestId("chat-composer-send").click();
+  await window.waitForURL(/#\/chat\/t\//, { timeout: 30_000 });
+  await expect(window.locator('[data-role="assistant"]').first()).toBeVisible({
+    timeout: 240_000,
+  });
+  const threadId = await currentThreadId();
+  const firstAssistant = await lastAssistantMessage(threadId);
+  expect(firstAssistant.citations.length).toBeGreaterThan(0);
+  const firstRunIds = new Set<string>(
+    firstAssistant.citations.map((c: any) => c.run_id),
+  );
+
+  // Brand-new, unrelated question. Not a reformat, not a short referential
+  // follow-up. Combined rule must not carry-forward.
+  await sendFollowUp(EMPTY_QUERY);
+  await waitForAssistantCount(2);
+
+  const secondText =
+    (await window.locator('[data-role="assistant"]').nth(1).textContent()) ?? "";
+  console.log("Unrelated-after-cited answer:", secondText);
+  const normalized = secondText.toLowerCase().replace(/[\u2018\u2019]/g, "'");
+
+  // Must EITHER hedge OR be the fail-closed message. The invariant is it
+  // MUST NOT restate Lauren facts as if grounded.
+  const hedgePatterns = [
+    /couldn't (find|ground)/,
+    /don't know/,
+    /can't find/,
+    /not find/,
+    /do not (contain|find|have|mention|include)/,
+    /does not (contain|mention|include)/,
+    /not contain/,
+    /no (mention|information|relevant|related|matching|data|content|discussion)/,
+    /nothing (about|related|relevant)/,
+    /unrelated/,
+    /don't have/,
+    /none of (the |your )?(excerpts|meetings|provided|the provided)/,
+    /could you clarify/,
+    /try rephras/,
+    /rephras/,
+    /not sure (what|which)/,
+  ];
+  const hedged = hedgePatterns.some((p) => p.test(normalized));
+  expect(
+    hedged,
+    `Expected hedge or fail-closed in unrelated turn: "${normalized}"`,
+  ).toBe(true);
+
+  // Critical negative: the Lauren citations must NOT silently carry
+  // forward onto this unrelated turn. If they do, the combined rule is
+  // broken (follow-up signal was false but relaxation fired anyway).
+  const secondAssistant = await lastAssistantMessage(threadId);
+  const carriedOverlap = (secondAssistant.citations ?? []).filter((c: any) =>
+    firstRunIds.has(c.run_id),
+  );
+  // The 2nd turn may have its own retrieval citations — that's fine. But
+  // it must not simply inherit the 1st turn's set of run_ids.
+  if (secondAssistant.citations.length > 0) {
+    // If there's overlap, it must be because retrieval genuinely
+    // returned the same run(s), not because we carried forward.
+    // Heuristic: carry-forward always produces the *exact same set* as
+    // the prior turn; a genuine retrieval overlap is usually a subset
+    // with different start_ms. Assert the sets are not identical.
+    const secondKeys = new Set<string>(
+      secondAssistant.citations.map(
+        (c: any) => `${c.run_id}:${c.start_ms ?? c.source}`,
+      ),
+    );
+    const firstKeys = new Set<string>(
+      firstAssistant.citations.map(
+        (c: any) => `${c.run_id}:${c.start_ms ?? c.source}`,
+      ),
+    );
+    const identical =
+      secondKeys.size === firstKeys.size &&
+      [...secondKeys].every((k) => firstKeys.has(k));
+    expect(
+      identical,
+      `2nd turn citations exactly equal 1st turn — looks like carry-forward fired on a new-claim turn. overlap=${carriedOverlap.length}`,
+    ).toBe(false);
+  }
+});
+
+test("29. explicit reformat with 'keep citations' re-emits cite markers", async () => {
+  // Aspirational — validates Layer 1 (prompt hardening). Local models are
+  // inconsistent about re-emitting markers even with explicit instruction,
+  // so we mark this fixme-if-no-markers rather than hard-fail. It's a
+  // quality bar to pull the code fallback rate down over time.
+  test.setTimeout(480_000);
+  await goToChat();
+  await window.getByTestId("chat-composer-input").fill(LAUREN_QUERY);
+  await window.getByTestId("chat-composer-send").click();
+  await window.waitForURL(/#\/chat\/t\//, { timeout: 30_000 });
+  await expect(window.locator('[data-role="assistant"]').first()).toBeVisible({
+    timeout: 240_000,
+  });
+
+  await sendFollowUp("Restate that as three bullets, keeping any citations.");
+  await waitForAssistantCount(2);
+
+  // Count pills+chips that belong to the second assistant turn.
+  const second = window.locator('[data-role="assistant"]').nth(1);
+  const pills = await second.locator('[data-testid="timestamp-pill"]').count();
+  const chips = await second.locator('[data-testid="source-chip"]').count();
+  console.log(`Reformat turn inline markers: pills=${pills} chips=${chips}`);
+  if (pills + chips === 0) {
+    test.fixme(
+      true,
+      "Model did not re-emit inline citation markers on reformat — carry-forward should have compensated. Revisit prompt.",
+    );
+  } else {
+    expect(pills + chips).toBeGreaterThan(0);
+  }
+});

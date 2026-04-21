@@ -21,8 +21,12 @@ import {
   EMPTY_RESULT_MESSAGE,
   FAIL_CLOSED_MESSAGE,
   META_CANNED_RESPONSE,
+  findPriorAssistantCitations,
   hasCitations,
   isMetaQuery,
+  isReformatOrFollowUpQuery,
+  isShortReferentialFollowUp,
+  priorAssistantHadCitations,
   requiresCitation,
 } from "./guardrails.js";
 import { buildStoredCitations, stripInvalidCitations } from "./citation-parser.js";
@@ -226,12 +230,38 @@ export async function sendMessage(
   // 5. Guardrails.
   let cleaned = stripInvalidCitations(raw, searchResults);
   const { citations } = buildStoredCitations(cleaned, searchResults);
+  let finalCitations = citations;
 
   if (requiresCitation(cleaned) && !hasCitations(cleaned)) {
-    cleaned = FAIL_CLOSED_MESSAGE;
+    // Combined rule: only relax fail-closed when the current turn looks
+    // like a follow-up/reformat AND the immediately-prior assistant turn
+    // was itself cited. Either signal on its own is insufficient — we
+    // must not allow an uncited new-claim turn to slip through just
+    // because the thread once had a cited answer.
+    const isFollowUp =
+      isReformatOrFollowUpQuery(req.userMessage) ||
+      isShortReferentialFollowUp(req.userMessage);
+    const priorCited = priorAssistantHadCitations(history);
+
+    if (isFollowUp && priorCited) {
+      // Carry forward the prior assistant turn's citations. Text is left
+      // as-is — the renderer shows carried citations as a "Sources"
+      // footer when there are no inline [[cite:...]] markers to anchor.
+      finalCitations = findPriorAssistantCitations(history);
+      appLogger.info("chat guardrail: citation carry-forward", {
+        thread_id: thread.thread_id,
+        carried: finalCitations.length,
+        reason: isReformatOrFollowUpQuery(req.userMessage)
+          ? "reformat"
+          : "short-referential",
+      });
+    } else {
+      cleaned = FAIL_CLOSED_MESSAGE;
+      finalCitations = [];
+    }
   }
 
-  const saved = addMessage(thread.thread_id, "assistant", cleaned, citations);
+  const saved = addMessage(thread.thread_id, "assistant", cleaned, finalCitations);
 
   // If this was the first turn and the thread is still titled "New thread",
   // upgrade the title from the user message prefix.
@@ -250,7 +280,7 @@ export async function sendMessage(
     message_id: saved.message_id,
     thread_id: thread.thread_id,
     content: cleaned,
-    citations,
+    citations: finalCitations,
   } satisfies ChatStreamEvent);
 
   return {
@@ -258,7 +288,7 @@ export async function sendMessage(
     user_message_id: userMsg.message_id,
     assistant_message_id: saved.message_id,
     content: cleaned,
-    citations,
+    citations: finalCitations,
   };
 }
 
@@ -321,7 +351,7 @@ function buildSynthesisUserMessage(
     blocks.push(r.text);
     blocks.push("");
   }
-  blocks.push("Instructions: answer the user's question using only the excerpts above. Cite every factual claim with the `cite=` token shown next to the excerpt you used. If the excerpts don't answer the question, say so and suggest rephrasing.");
+  blocks.push("Instructions: answer the user's question using only the excerpts above. Cite every factual claim with the `cite=` token shown next to the excerpt you used. If this turn reformats, summarizes, shortens, bulletizes, or otherwise transforms your prior answer, re-emit the same citation markers that supported the original facts — never drop citations just because the turn is a restatement. If the excerpts don't answer the question, say so and suggest rephrasing.");
   return blocks.join("\n");
 }
 
