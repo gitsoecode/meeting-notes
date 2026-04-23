@@ -21,6 +21,23 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
+function ensureBetterSqliteForNode() {
+  console.log("[bundle] ensuring better-sqlite3 is built for the current Node ABI");
+  const helper = path.resolve(
+    fileURLToPath(import.meta.url),
+    "../../../app/scripts/ensure-better-sqlite3.mjs"
+  );
+  const result = execSync(`node "${helper}"`, { stdio: "inherit" });
+  // Side-effect warning so the user knows they need to flip back before
+  // running the Electron app. AGENTS.md documents this dance for tests too.
+  console.log(
+    "[bundle] note: better-sqlite3 is now in Node-ABI form. To run the\n" +
+      "         Electron app again, run:\n" +
+      "           npm run rebuild:native --workspace @gistlist/app"
+  );
+  return result;
+}
+
 function hasAddonUnder(dir) {
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
@@ -62,6 +79,13 @@ const SQLITE_VEC_PACKAGES = [
 ];
 
 async function main() {
+  // Claude Desktop's bundled Node uses a different ABI than Electron. If
+  // the user (or a prior CI step) last ran `electron-rebuild`, the
+  // better-sqlite3 binary on disk is unloadable inside Claude Desktop's
+  // Node and the .mcpb will crash on startup with NODE_MODULE_VERSION
+  // mismatch. Force a Node-ABI rebuild before copying.
+  ensureBetterSqliteForNode();
+
   console.log("[bundle] cleaning pack-staging/");
   if (existsSync(STAGING)) rmSync(STAGING, { recursive: true, force: true });
   mkdirSync(STAGING_NM, { recursive: true });
