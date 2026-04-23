@@ -15,18 +15,32 @@ import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 
 const SERVER_NAME = "gistlist";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.2";
+
+function trace(msg: string): void {
+  // Breadcrumbs to Claude Desktop's MCP log via stderr. Stdout is reserved
+  // for JSON-RPC over stdio so anything that prints there corrupts the
+  // protocol and the host disconnects without explanation.
+  try {
+    process.stderr.write(`[gistlist-mcp] ${msg}\n`);
+  } catch {
+    // ignore — never let logging crash startup
+  }
+}
 
 async function main(): Promise<void> {
+  trace(`starting (node ${process.versions.node}, abi ${process.versions.modules}, electron=${process.versions.electron ?? "no"})`);
+  trace(
+    `env: GISTLIST_CONFIG_DIR=${process.env.GISTLIST_CONFIG_DIR ?? "<unset>"} OLLAMA_BASE_URL=${process.env.OLLAMA_BASE_URL ?? "<unset>"}`
+  );
+
   const config = resolveConfig();
+  trace(`config resolved: configDir=${config.configDir} dbPath=${config.dbPath} runsRoot=${config.runsRoot}`);
 
   const dbHandle = await openMeetingsDb(config.dbPath);
+  trace(`db opened (vecAvailable=${dbHandle.vecAvailable})`);
   if (dbHandle.vecLoadError) {
-    // Surface to stderr so Claude Desktop's logs capture it. Stdout is
-    // reserved for the JSON-RPC stream over stdio.
-    process.stderr.write(
-      `[gistlist-mcp] sqlite-vec load failed (${dbHandle.vecLoadError}); falling back to FTS-only retrieval.\n`
-    );
+    trace(`sqlite-vec load failed (${dbHandle.vecLoadError}); falling back to FTS-only retrieval`);
   }
 
   const server = new McpServer(
@@ -54,11 +68,13 @@ async function main(): Promise<void> {
     ollamaBaseUrl: config.ollamaBaseUrl,
     runsRoot: config.runsRoot,
   });
+  trace(`tools registered`);
 
   const { stopPolling } = registerResources(server, {
     db: dbHandle.db,
     runsRoot: config.runsRoot,
   });
+  trace(`resources registered`);
 
   const transport = new StdioServerTransport();
 
@@ -81,10 +97,22 @@ async function main(): Promise<void> {
   process.on("exit", cleanup);
 
   await server.connect(transport);
+  trace(`connected to stdio transport — waiting for client`);
 }
 
+// Catch unhandled errors at every level so they hit Claude Desktop's MCP
+// log via stderr instead of dying silently.
+process.on("uncaughtException", (err) => {
+  trace(`uncaughtException: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
+  process.exit(1);
+});
+process.on("unhandledRejection", (reason) => {
+  trace(`unhandledRejection: ${reason instanceof Error ? reason.stack ?? reason.message : String(reason)}`);
+  process.exit(1);
+});
+
 main().catch((err) => {
-  const message = err instanceof Error ? err.message : String(err);
-  process.stderr.write(`[gistlist-mcp] fatal: ${message}\n`);
+  const message = err instanceof Error ? err.stack ?? err.message : String(err);
+  trace(`fatal: ${message}`);
   process.exit(1);
 });

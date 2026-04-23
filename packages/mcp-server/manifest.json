@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "gistlist",
   "display_name": "Gistlist",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Lets Claude find and read meetings from your Mac's own Gistlist library, using your Claude subscription.",
   "long_description": "Gistlist is a local-first meeting workspace. This extension lets Claude find and read meetings from your Mac's own library. Discovery uses your local SQLite + sqlite-vec hybrid index; the full transcripts are handed to Claude so the model can reason over them.\n\nThe extension itself makes no outbound network calls beyond your local Ollama instance, which is used for search embeddings. Meeting content you ask about travels to Anthropic's API as part of the Claude conversation, the same way any text you type into Claude does; that's governed by your own Anthropic privacy settings.\n\nIf Ollama isn't running, retrieval degrades cleanly to keyword search. The Gistlist app does not need to be running for Claude to query your meetings.",
   "author": {
