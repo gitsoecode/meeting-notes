@@ -925,6 +925,9 @@ test("18. Anthropic model picker shows multiple Claude options when a key is con
   console.log("Composer picker items:", labels);
   const claudeLabels = labels.filter((l) => /Claude/i.test(l));
   expect(claudeLabels.length).toBeGreaterThan(1);
+  // Close the Radix dropdown — otherwise its portal overlay intercepts
+  // pointer events for the next serial test.
+  await window.keyboard.press("Escape");
 });
 
 // ---------------------------------------------------------------------------

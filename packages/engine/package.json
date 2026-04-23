@@ -11,13 +11,25 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./core/*.js": {
+      "types": "./dist/core/*.d.ts",
+      "default": "./dist/core/*.js"
+    },
     "./core/*": {
       "types": "./dist/core/*.d.ts",
       "default": "./dist/core/*.js"
     },
+    "./adapters/*.js": {
+      "types": "./dist/adapters/*.d.ts",
+      "default": "./dist/adapters/*.js"
+    },
     "./adapters/*": {
       "types": "./dist/adapters/*.d.ts",
       "default": "./dist/adapters/*.js"
+    },
+    "./logging/*.js": {
+      "types": "./dist/logging/*.d.ts",
+      "default": "./dist/logging/*.js"
     },
     "./logging/*": {
       "types": "./dist/logging/*.d.ts",
@@ -39,7 +51,9 @@
     "yaml": "^2.7.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.0.0",
+    "better-sqlite3": "^12.8.0",
     "typescript": "^5.8.0"
   }
 }

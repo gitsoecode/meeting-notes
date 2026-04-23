@@ -136,6 +136,16 @@ export {
 export { chunkTranscript, chunkMarkdown } from "./core/chat-index/chunk.js";
 export { embedViaOllama, createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "./core/chat-index/embed.js";
 export { parseTranscriptMarkdown } from "./core/chat-index/parse-transcript-md.js";
+export {
+  searchMeetings,
+  getMeetingSummaryByRunId,
+  getTranscriptWindow,
+  listMeetings,
+  type SearchOptions,
+  type MeetingSummary,
+  type TranscriptWindow,
+  type MeetingListRow,
+} from "./core/chat-index/retrieve.js";
 export type {
   ChunkInput,
   ChunkKind,

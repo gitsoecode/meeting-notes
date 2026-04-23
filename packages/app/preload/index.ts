@@ -181,6 +181,10 @@ const api: GistlistApi = {
   obsidian: {
     detectVaults: () => ipcRenderer.invoke("obsidian:detect-vaults"),
   },
+  integrations: {
+    getMcpStatus: () => ipcRenderer.invoke("integrations:get-mcp-status"),
+    installMcpForClaude: () => ipcRenderer.invoke("integrations:install-mcp-claude"),
+  },
   chatLauncher: {
     detectApps: () => ipcRenderer.invoke("chatLauncher:detect-apps"),
     launch: (req: LaunchChatRequest) => ipcRenderer.invoke("chatLauncher:launch", req),

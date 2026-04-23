@@ -32,17 +32,23 @@ const requiredBinaries = [
     setup:
       "The native microphone capture helper is built from packages/app/native/mic-capture.swift. Run `npm run build:mic-capture` (or a full `npm run build`) before packaging. Without it the engine falls back to ffmpeg's AVFoundation demuxer, which drops ~10–12% of samples on USB mics.",
   },
+  {
+    name: "Gistlist.mcpb",
+    file: path.join(repoRoot, "packages", "mcp-server", "dist", "Gistlist.mcpb"),
+    setup:
+      "Run `npm run build:mcp --workspace @gistlist/app` (which runs `npm run pack:mcpb --workspace @gistlist/mcp-server`) to produce the Claude Desktop extension bundle. Without it, the in-app 'Install Gistlist for Claude Desktop' button has nothing to open.",
+  },
 ];
 
 const missing = [];
 
 for (const binary of requiredBinaries) {
   try {
-    // Entitlements plist just needs to exist; native binaries must also be
-    // executable.
-    const mode = binary.name.endsWith("entitlements")
-      ? fs.constants.R_OK
-      : fs.constants.X_OK;
+    // Executables need X_OK; data files (entitlements plist, .mcpb archive)
+    // just need to exist and be readable.
+    const needsExecute =
+      !binary.name.endsWith("entitlements") && !binary.file.endsWith(".mcpb");
+    const mode = needsExecute ? fs.constants.X_OK : fs.constants.R_OK;
     fs.accessSync(binary.file, mode);
   } catch {
     missing.push(binary);

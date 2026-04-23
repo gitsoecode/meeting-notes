@@ -1785,6 +1785,21 @@ export async function installMockApi(page: Page) {
           return [];
         },
       },
+      integrations: {
+        async getMcpStatus() {
+          return {
+            mcpbPath: "/mock/Gistlist.mcpb",
+            mcpbExists: true,
+            meetingsIndexed: 7,
+            ollamaRunning: true,
+            claudeExtensionDetected: "no",
+          };
+        },
+        async installMcpForClaude() {
+          recordExternalAction("install-mcp-claude", {});
+          return { ok: true };
+        },
+      },
       chat: (() => {
         const threads = [];
         const messagesByThread = new Map();

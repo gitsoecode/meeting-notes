@@ -16,7 +16,8 @@
     "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
-    "package:mac": "npm run build && npm run check:bundle && electron-builder --mac --config.directories.output=release",
+    "package:mac": "npm run build && npm run build:mcp && npm run check:bundle && electron-builder --mac --config.directories.output=release",
+    "build:mcp": "npm run pack:mcpb --workspace @gistlist/mcp-server",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
     "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @gistlist/engine && npm run build:main && node --test test/*.test.mjs",
@@ -103,6 +104,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "../mcp-server/dist/Gistlist.mcpb",
+        "to": "mcp/Gistlist.mcpb"
       }
     ],
     "mac": {

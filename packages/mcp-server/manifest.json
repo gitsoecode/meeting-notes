@@ -1,0 +1,63 @@
+{
+  "manifest_version": "0.3",
+  "name": "gistlist",
+  "display_name": "Gistlist",
+  "version": "0.1.0",
+  "description": "Query your local Gistlist meetings — full transcripts, summaries, prep, and notes — from inside Claude. Nothing leaves your machine.",
+  "long_description": "Gistlist is a local-first meeting workspace. This extension lets Claude search and read your meetings from your own Mac — no cloud, no upload, no account. Discovery uses your local SQLite + sqlite-vec hybrid retrieval index; reasoning happens in Claude with the full transcripts in context.\n\nThe extension makes no outbound network calls beyond your local Ollama instance (used for semantic search embeddings). If Ollama isn't running, retrieval gracefully degrades to keyword search only. The Gistlist app does not need to be running for Claude to query your meetings.",
+  "author": {
+    "name": "Gistlist, LLC",
+    "email": "support@gistlist.app"
+  },
+  "license": "FSL-1.1-ALv2",
+  "server": {
+    "type": "node",
+    "entry_point": "server.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server.js"],
+      "env": {
+        "GISTLIST_CONFIG_DIR": "${user_config.gistlist_config_dir}",
+        "OLLAMA_BASE_URL": "${user_config.ollama_url}",
+        "NODE_PATH": "${__dirname}/node_modules"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "list_recent_meetings",
+      "description": "Lists meetings filtered by participant, date range, or status."
+    },
+    {
+      "name": "search_meetings",
+      "description": "Hybrid keyword + semantic search across the user's meetings."
+    },
+    {
+      "name": "get_meeting",
+      "description": "Returns the full markdown body for one meeting."
+    }
+  ],
+  "user_config": {
+    "gistlist_config_dir": {
+      "type": "directory",
+      "title": "Gistlist config directory",
+      "description": "The folder Gistlist uses for its database and config. Defaults to ~/.gistlist.",
+      "default": "${HOME}/.gistlist",
+      "required": false
+    },
+    "ollama_url": {
+      "type": "string",
+      "title": "Ollama base URL",
+      "description": "Local Ollama endpoint used for semantic search embeddings. Leave at the default unless you've changed Ollama's port.",
+      "default": "http://127.0.0.1:11434",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin"],
+    "runtimes": {
+      "node": ">=20.0.0"
+    }
+  }
+}

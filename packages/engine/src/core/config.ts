@@ -144,6 +144,11 @@ const DEFAULT_CONFIG: AppConfig = {
 };
 
 export function getConfigDir(): string {
+  // GISTLIST_CONFIG_DIR lets alternate consumers (the MCP server, tests)
+  // point the engine at a different config root without branching. The
+  // Electron app never sets this, so its behavior is unchanged.
+  const envDir = process.env.GISTLIST_CONFIG_DIR;
+  if (envDir && envDir.trim().length > 0) return envDir;
   return path.join(os.homedir(), ".gistlist");
 }
 

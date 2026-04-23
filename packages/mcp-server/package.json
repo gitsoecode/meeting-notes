@@ -1,0 +1,37 @@
+{
+  "name": "@gistlist/mcp-server",
+  "version": "0.1.0",
+  "description": "Gistlist MCP server — exposes local meeting retrieval to Claude Desktop over stdio",
+  "private": true,
+  "type": "module",
+  "license": "SEE LICENSE IN LICENSE",
+  "main": "./dist/server.js",
+  "bin": {
+    "gistlist-mcp": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/server.js",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "bundle": "node scripts/bundle.mjs",
+    "pack:mcpb": "npm run build && npm run bundle && mcpb pack pack-staging dist/Gistlist.mcpb"
+  },
+  "dependencies": {
+    "@gistlist/engine": "*",
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "better-sqlite3": "^12.8.0",
+    "sqlite-vec": "^0.1.9",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@anthropic-ai/mcpb": "^2.1.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.8.0"
+  },
+  "optionalDependencies": {
+    "sqlite-vec-darwin-x64": "0.1.9"
+  }
+}

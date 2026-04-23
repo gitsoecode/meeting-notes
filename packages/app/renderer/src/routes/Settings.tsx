@@ -259,6 +259,7 @@ export function Settings({ config, onChange }: SettingsProps) {
           <TabsTrigger value="models">Models</TabsTrigger>
           <TabsTrigger value="audio">Audio</TabsTrigger>
           <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="integrations">Integrations</TabsTrigger>
           <TabsTrigger value="storage">Storage</TabsTrigger>
           <TabsTrigger value="system">Other</TabsTrigger>
         </TabsList>
@@ -800,6 +801,10 @@ export function Settings({ config, onChange }: SettingsProps) {
 
         <TabsContent value="chat" className="max-w-2xl space-y-5 outline-none">
           <ChatSettingsSection />
+        </TabsContent>
+
+        <TabsContent value="integrations" className="max-w-2xl space-y-5 outline-none">
+          <IntegrationsSection />
         </TabsContent>
       </Tabs>
 
@@ -1346,6 +1351,168 @@ function EmbedModelSection() {
           {error}
         </div>
       )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Integrations — Claude Desktop MCP extension install + live status.
+// ---------------------------------------------------------------------------
+
+function IntegrationsSection() {
+  const [status, setStatus] = useState<import("../../../shared/ipc").McpIntegrationStatus | null>(
+    null
+  );
+  const [installing, setInstalling] = useState(false);
+  const [installError, setInstallError] = useState<string | null>(null);
+  const [installedOk, setInstalledOk] = useState(false);
+
+  const refreshStatus = async () => {
+    try {
+      const s = await api.integrations.getMcpStatus();
+      setStatus(s);
+    } catch {
+      // Swallow — renderer can still render last-known state.
+    }
+  };
+
+  useEffect(() => {
+    void refreshStatus();
+    // Poll every 10s while this tab is visible so Ollama / install state
+    // updates as the user takes action in Claude Desktop.
+    const id = setInterval(refreshStatus, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const handleInstall = async () => {
+    setInstallError(null);
+    setInstalledOk(false);
+    setInstalling(true);
+    try {
+      const result = await api.integrations.installMcpForClaude();
+      if (!result.ok) {
+        setInstallError(result.error ?? "Couldn't open Gistlist.mcpb.");
+      } else {
+        setInstalledOk(true);
+      }
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstalling(false);
+      // Trigger a status refresh so the "Detected" line can update once the
+      // user completes the install in Claude Desktop.
+      void refreshStatus();
+    }
+  };
+
+  const ollamaLabel = status?.ollamaRunning
+    ? "Ollama running — semantic search available"
+    : "Ollama not running — keyword search only";
+
+  const extensionLabel = (() => {
+    switch (status?.claudeExtensionDetected) {
+      case "yes":
+        return "Detected in Claude Desktop";
+      case "no":
+        return "Not detected in Claude Desktop yet";
+      default:
+        return "Detection unavailable on this platform";
+    }
+  })();
+
+  const meetingsLabel =
+    status?.meetingsIndexed == null
+      ? "Meetings database not yet created — record a meeting first"
+      : `${status.meetingsIndexed} meeting${status.meetingsIndexed === 1 ? "" : "s"} indexed`;
+
+  return (
+    <section className="space-y-5" data-testid="integrations-section">
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">
+          Claude Desktop
+        </h3>
+        <p className="text-sm leading-6 text-[var(--text-secondary)]">
+          Install the Gistlist extension in Claude Desktop and query your meetings
+          directly from any Claude conversation. Your meetings never leave your
+          machine — Claude spawns Gistlist on demand and reads them locally.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        <Button
+          onClick={handleInstall}
+          disabled={installing || !status?.mcpbExists}
+          data-testid="integrations-install-mcp"
+        >
+          {installing ? (
+            <>
+              <Spinner className="mr-2 h-4 w-4" />
+              Opening Claude Desktop…
+            </>
+          ) : (
+            "Install Gistlist for Claude Desktop"
+          )}
+        </Button>
+        {!status?.mcpbExists && (
+          <p className="text-xs text-[var(--text-secondary)]" data-testid="integrations-mcpb-missing">
+            Gistlist.mcpb wasn't found inside the app bundle — try reinstalling Gistlist.
+          </p>
+        )}
+        {installError && (
+          <div
+            className="rounded-md border border-[var(--error)] bg-[var(--error-bg,transparent)] p-3 text-sm text-[var(--error)]"
+            data-testid="integrations-install-error"
+          >
+            {installError}{" "}
+            <a
+              className="underline"
+              href="https://gistlist.app/docs/claude-desktop-setup"
+              target="_blank"
+              rel="noreferrer"
+            >
+              See setup guide →
+            </a>
+          </div>
+        )}
+        {installedOk && !installError && (
+          <p className="text-xs text-[var(--text-secondary)]" data-testid="integrations-opened">
+            Opened in Claude Desktop. Click <strong>Install</strong> there, then come
+            back — we'll confirm below once it's detected.
+          </p>
+        )}
+      </div>
+
+      <Separator />
+
+      <div className="space-y-2" data-testid="integrations-status">
+        <h4 className="text-sm font-medium text-[var(--text-primary)]">Status</h4>
+        <ul className="space-y-1 text-sm text-[var(--text-secondary)]">
+          <li data-testid="integrations-status-extension">
+            <span className="font-medium text-[var(--text-primary)]">Extension:</span>{" "}
+            {extensionLabel}
+          </li>
+          <li data-testid="integrations-status-ollama">
+            <span className="font-medium text-[var(--text-primary)]">Semantic search:</span>{" "}
+            {ollamaLabel}
+          </li>
+          <li data-testid="integrations-status-db">
+            <span className="font-medium text-[var(--text-primary)]">Library:</span>{" "}
+            {meetingsLabel}
+          </li>
+        </ul>
+      </div>
+
+      <div className="text-xs text-[var(--text-secondary)]">
+        <a
+          className="underline"
+          href="https://gistlist.app/docs/claude-desktop-setup"
+          target="_blank"
+          rel="noreferrer"
+          data-testid="integrations-docs-link"
+        >
+          Setup guide & troubleshooting →
+        </a>
+      </div>
     </section>
   );
 }

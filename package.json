@@ -8,14 +8,15 @@
   "workspaces": [
     "packages/engine",
     "packages/cli",
-    "packages/app"
+    "packages/app",
+    "packages/mcp-server"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
     "build:engine": "npm run build --workspace @gistlist/engine",
     "build:cli": "npm run build --workspace @gistlist/cli",
     "build:app": "npm run build --workspace @gistlist/app",
-    "test": "node packages/app/scripts/ensure-better-sqlite3.mjs && npm run build && node --test packages/engine/test/*.test.mjs packages/app/test/*.test.mjs",
+    "test": "node packages/app/scripts/ensure-better-sqlite3.mjs && npm run build && node --test packages/engine/test/*.test.mjs packages/app/test/*.test.mjs packages/mcp-server/test/*.test.mjs",
     "dev:app": "npm run dev --workspace @gistlist/app",
     "start": "npm run start --workspace @gistlist/cli"
   },

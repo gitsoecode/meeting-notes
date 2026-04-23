@@ -610,6 +610,24 @@ export interface InitConfigRequest {
  * The API surface exposed to the renderer via contextBridge.
  * Keep this in sync with `preload/index.ts` and `main/ipc.ts`.
  */
+export interface McpIntegrationStatus {
+  /** Bundled Gistlist.mcpb path (for the install row). */
+  mcpbPath: string | null;
+  mcpbExists: boolean;
+  /** Count of meetings in meetings.db; null when the DB hasn't been created yet. */
+  meetingsIndexed: number | null;
+  /** Live Ollama check — affects whether semantic search will work from the MCP server. */
+  ollamaRunning: boolean;
+  /** Best-effort detection of the Gistlist extension in Claude Desktop's config. */
+  claudeExtensionDetected: "yes" | "no" | "unknown";
+}
+
+export interface McpInstallResult {
+  ok: boolean;
+  /** Set on failure — surfaces to the UI toast. */
+  error?: string;
+}
+
 export interface GistlistApi {
   // Config
   config: {
@@ -851,6 +869,11 @@ export interface GistlistApi {
   // Obsidian vault detection (scans ~/Obsidian and ~/Documents)
   obsidian: {
     detectVaults: () => Promise<DetectedVault[]>;
+  };
+  // Integrations tab — currently just Claude Desktop via bundled .mcpb extension.
+  integrations: {
+    getMcpStatus: () => Promise<McpIntegrationStatus>;
+    installMcpForClaude: () => Promise<McpInstallResult>;
   };
   // Events (subscribe)
   on: {
