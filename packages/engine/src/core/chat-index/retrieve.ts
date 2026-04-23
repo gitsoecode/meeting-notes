@@ -24,6 +24,23 @@ export interface SearchOptions extends SearchFilters {
    * loader. Optional.
    */
   awaitVec?: () => Promise<void>;
+  /**
+   * Optional callback invoked after retrieval with the actual execution
+   * shape — distinguishes "vec loaded but embedder failed → fts-only" from
+   * "hybrid ran cleanly". Consumers use this to report honest retrieval_mode
+   * back to the caller (the MCP server surfaces it to Claude so degraded
+   * recall doesn't silently masquerade as hybrid).
+   */
+  onRetrievalTrace?: (trace: RetrievalTrace) => void;
+}
+
+export interface RetrievalTrace {
+  /** True iff opts.isVecAvailable() returned true. */
+  vecAvailable: boolean;
+  /** True iff the embedder was called and returned a usable vector. */
+  embedderRan: boolean;
+  /** True iff the vec SQL leg actually returned at least one row. */
+  vecLegRan: boolean;
 }
 
 /**
@@ -44,14 +61,25 @@ export async function searchMeetings(
   const ftsRanked = runFtsLeg(db, query);
 
   let vecRanked: Array<{ chunk_id: number; rank: number }> = [];
+  let embedderRan = false;
   if (vecAvailable && opts.queryEmbedder) {
     try {
       const qVec = await opts.queryEmbedder(query);
-      if (qVec) vecRanked = runVecLeg(db, qVec);
+      if (qVec) {
+        embedderRan = true;
+        vecRanked = runVecLeg(db, qVec);
+      }
     } catch {
       // Embedder failure (Ollama down, model unavailable) → quiet FTS-only.
       vecRanked = [];
     }
+  }
+  if (opts.onRetrievalTrace) {
+    opts.onRetrievalTrace({
+      vecAvailable,
+      embedderRan,
+      vecLegRan: vecRanked.length > 0,
+    });
   }
 
   // RRF merge.
@@ -366,7 +394,15 @@ export function listMeetings(
       }
       if (filters.participant) {
         const needle = filters.participant.toLowerCase();
-        if (!r.participants.some((p) => p.toLowerCase().includes(needle))) return false;
+        // Match structured participants first; fall back to the meeting
+        // title when the participants table is empty for a run (common on
+        // auto-recorded meetings). Mirrors searchMeetings's passesFilters —
+        // the two discovery paths must agree on the same filter semantics.
+        const hitParticipant = r.participants.some((p) =>
+          p.toLowerCase().includes(needle)
+        );
+        const hitTitle = r.run_title.toLowerCase().includes(needle);
+        if (!hitParticipant && !hitTitle) return false;
       }
       return true;
     })

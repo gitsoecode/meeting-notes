@@ -111,11 +111,21 @@ export function assembleMeetingBody(
   opts: AssembleOptions
 ): MeetingBody {
   if (!isPathWithin(opts.runsRoot, row.folder_path)) {
-    // Refuse to read content outside the configured runs root. The same
-    // guardrail the app enforces (run-access.ts) — preserves the local
-    // path-validation contract from the MCP layer.
+    // Refuse to read content outside the configured runs root. Mirrors the
+    // lexical check in packages/app/main/run-access.ts:assertPathInsideRoot.
+    // Known-deferred: neither guard expands symlinks — a symlinked folder
+    // inside the runs root could still escape. Track as v2 (holistic fix
+    // in both run-access.ts and here so they stay consistent).
     throw new Error(
       `Run folder ${row.folder_path} is outside the configured runs root ${opts.runsRoot}.`
+    );
+  }
+  // Verify this is actually a run folder (has index.md) — matches the app's
+  // canonical resolveRunFolderPath guard, which rejects stale/malicious DB
+  // rows pointing at arbitrary directories within the runs root.
+  if (!fs.existsSync(path.join(row.folder_path, "index.md"))) {
+    throw new Error(
+      `Run folder ${row.folder_path} is invalid or no longer exists.`
     );
   }
   const sections = opts.sections ?? DEFAULT_SECTION_ORDER;

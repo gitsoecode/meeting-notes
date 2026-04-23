@@ -89,6 +89,12 @@ function makeFixture() {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-mcp-test-"));
   const runFolder = path.join(tmpRoot, "RUN_LAUREN");
   fs.mkdirSync(runFolder, { recursive: true });
+  // index.md is required by the path guard (mirrors the app's canonical
+  // resolveRunFolderPath, which refuses to operate on folders without one).
+  fs.writeFileSync(
+    path.join(runFolder, "index.md"),
+    "---\ntitle: Catch up with Lauren\n---\n"
+  );
   fs.writeFileSync(
     path.join(runFolder, "transcript.md"),
     "## Transcript\n\n[00:00] Me: Pricing strategy talk.\n[00:30] Lauren: We should discount further.\n"
@@ -291,6 +297,7 @@ test("MCP: get_meeting refuses run folders outside the configured runs root", as
   // Insert a second run pointing OUTSIDE the runsRoot — simulates a stale
   // DB entry or a malicious record. The path-validation guard must refuse.
   const outsideFolder = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-outside-"));
+  fs.writeFileSync(path.join(outsideFolder, "index.md"), "---\n---\n");
   fs.writeFileSync(path.join(outsideFolder, "transcript.md"), "leak");
   fixture.db
     .prepare(

@@ -16,6 +16,7 @@ import { z } from "zod";
 import {
   searchMeetings as engineSearchMeetings,
   listMeetings as engineListMeetings,
+  type RetrievalTrace,
 } from "@gistlist/engine/core/chat-index/retrieve.js";
 import {
   createOllamaEmbedder,
@@ -254,6 +255,14 @@ function registerSearchMeetings(server: McpServer, ctx: ToolContext): void {
         }
       };
 
+      // Default the trace to "vec unavailable" so TS narrows properly in the
+      // mode-picking chain below; the callback updates it synchronously from
+      // inside engineSearchMeetings before control returns here.
+      const trace: RetrievalTrace = {
+        vecAvailable: false,
+        embedderRan: false,
+        vecLegRan: false,
+      };
       const results = await engineSearchMeetings(ctx.db, args.query, {
         limit: args.limit ?? SEARCH_DEFAULT_LIMIT,
         status: args.status,
@@ -261,11 +270,25 @@ function registerSearchMeetings(server: McpServer, ctx: ToolContext): void {
         date_range: dateRangeFromArgs(args.date_from, args.date_to),
         queryEmbedder,
         isVecAvailable: ctx.isVecAvailable,
+        onRetrievalTrace: (t) => {
+          trace.vecAvailable = t.vecAvailable;
+          trace.embedderRan = t.embedderRan;
+          trace.vecLegRan = t.vecLegRan;
+        },
       });
+
+      // Honest retrieval_mode: "hybrid" only when both legs had a chance to
+      // contribute. If vec is loaded but Ollama/embedder failed (or returned
+      // nothing), flag it so Claude can compensate for degraded recall
+      // instead of silently trusting an FTS-only result labeled "hybrid".
+      let retrievalMode: "hybrid" | "fts_only" | "fts_only_embedder_failed";
+      if (!trace.vecAvailable) retrievalMode = "fts_only";
+      else if (!trace.embedderRan) retrievalMode = "fts_only_embedder_failed";
+      else retrievalMode = "hybrid";
 
       const payload = {
         query_echo: args.query,
-        retrieval_mode: ctx.isVecAvailable() ? "hybrid" : "fts_only",
+        retrieval_mode: retrievalMode,
         results: results.map((r) => ({
           run_id: r.run_id,
           title: r.run_title,

@@ -16,9 +16,25 @@
  */
 import { build } from "esbuild";
 import { execSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+
+function hasAddonUnder(dir) {
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isFile() && entry.name.endsWith(".node")) return true;
+      if (entry.isDirectory()) {
+        if (hasAddonUnder(path.join(dir, entry.name))) return true;
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return false;
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = path.resolve(__dirname, "..");
@@ -26,7 +42,17 @@ const REPO_ROOT = path.resolve(PKG_ROOT, "../..");
 const STAGING = path.join(PKG_ROOT, "pack-staging");
 const STAGING_NM = path.join(STAGING, "node_modules");
 
-const NATIVE_MODULES = ["better-sqlite3"];
+// `better-sqlite3/lib/database.js` does `require('bindings')` which in turn
+// requires `file-uri-to-path`. Both live at the hoisted repo-root node_modules
+// in this monorepo and would otherwise be missing from the bundle at runtime,
+// crashing the .mcpb on first load. Keep this list explicit rather than
+// walking package.jsons so the bundle script fails loudly if future updates
+// introduce a new runtime dep.
+const NATIVE_MODULES = [
+  "better-sqlite3",
+  "bindings",
+  "file-uri-to-path",
+];
 const SQLITE_VEC_PACKAGES = [
   "sqlite-vec",
   // Platform variants — only copy the ones that actually exist in the local
@@ -101,10 +127,29 @@ const COPY_FILTERS = {
     if (top === "src") return false; // C++ binding source
     if (rel === "binding.gyp") return false;
     if (top === "build") {
-      // Only the runtime binary itself + the directory chain that contains it.
+      // Keep the Release tree and any .node binary under it. Glob-based
+      // instead of a hardcoded filename so upstream prebuild changes
+      // (`prebuilds/`, renamed binary) are less likely to silently drop
+      // the addon from the bundle.
       if (rel === "build") return true;
       if (rel === path.join("build", "Release")) return true;
-      if (rel === path.join("build", "Release", "better_sqlite3.node")) return true;
+      const relParts = rel.split(path.sep);
+      if (relParts[1] !== "Release") return false;
+      // Inside Release/, keep the binary; drop intermediates.
+      if (rel.endsWith(".node")) return true;
+      // Directories leading to .node files are kept; leaf non-.node files
+      // (e.g. .deps manifests, .o object files) are dropped.
+      try {
+        const abs = path.join(src, rel);
+        if (fs.statSync(abs).isDirectory()) {
+          // Only descend into directories that contain a .node somewhere
+          // beneath them, so we don't carry the entire Release/ intermediate
+          // tree. Cheap linear walk — the tree is small.
+          return hasAddonUnder(abs);
+        }
+      } catch {
+        // best-effort
+      }
       return false;
     }
     return true;

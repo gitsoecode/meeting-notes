@@ -2,8 +2,8 @@
 
 **Status:** Draft for review. Not yet started.
 **Owner:** Jesse
-**Last updated:** 2026-04-22
-**Revision:** v2.2 — second-round agent review fixes: stronger list fingerprint, schema-accurate return shapes, macOS-only scope matching app, toast on install failure.
+**Last updated:** 2026-04-23
+**Revision:** v2.3 — post-commit review fixes: bundle missing `bindings` + `file-uri-to-path`; `listMeetings` title fallback to match `searchMeetings`; honest `retrieval_mode` labeling when embedder fails; `index.md` presence check in meeting-body path guard; `detectClaudeExtension` reads `manifest.json` rather than folder name; `.mcpb` filter glob-friendly for future `.node` paths; Playwright error-path coverage for install failure.
 
 ## Goal
 
@@ -385,6 +385,26 @@ The `test:e2e:electron` gate in Phase 1 is the one that catches retrieval regres
 Pass through [`docs/private_plans/privacy-posture-analysis.md`](../private_plans/privacy-posture-analysis.md) before launch to confirm no regression.
 
 ---
+
+## Review feedback disposition (post-commit)
+
+**Fixed in v2.3:**
+- Bundle was missing `bindings` + `file-uri-to-path` (required by `better-sqlite3/lib/database.js`). Would have crashed the `.mcpb` on load. Added both to `NATIVE_MODULES` in `scripts/bundle.mjs`.
+- `listMeetings` didn't implement the participant → title fallback its tool description promised. `searchMeetings` had it. Lifted the same pattern into `listMeetings`.
+- `search_meetings` labeled results as `retrieval_mode: "hybrid"` whenever vec was loaded, even if Ollama/embedder failed (silently masking degraded recall). Engine now emits an optional `RetrievalTrace` callback; MCP reports `hybrid`, `fts_only`, or `fts_only_embedder_failed` based on what actually ran.
+- Meeting-body path guard matched the app's lexical check but didn't verify `index.md` presence (which the app's `resolveRunFolderPath` does). Added the check so stale/malicious DB rows pointing at arbitrary subdirs of the runs root get rejected.
+- `detectClaudeExtension` matched extension folder names against `/gistlist/i`, but Claude Desktop unpacks to id-based folder names (e.g. `ant.dir.ant.anthropic.filesystem`) that don't contain the display name. Rewrote to read `manifest.json` inside each candidate and match on `name === "gistlist"` — authoritative rather than heuristic.
+- `.mcpb` filter hardcoded `build/Release/better_sqlite3.node`; replaced with a recursive `.node`-glob walk so upstream prebuild-path changes don't silently drop the addon.
+- Playwright error-path coverage for install failure (previously only the success branch was tested). New test in `integrations.spec.ts` exercises the error-toast render via a mock-api test-hook flag.
+
+**Explicitly deferred to v2 (with rationale):**
+- **Symlink-escape in path guard.** Both the MCP server's `assembleMeetingBody` and the app's `resolveRunFolderPath` use lexical `path.resolve`/`path.relative` only — neither expands symlinks. Fix should be holistic (both files at once) so they stay consistent, and needs thought about TOCTOU windows. Tracked separately.
+- **Engine sub-path import fragility.** MCP server imports from `@gistlist/engine/core/chat-index/retrieve.js` specifically to avoid pulling in `@napi-rs/keyring` via the engine barrel. If a future retrieve.ts addition imports something native, the bundle breaks at pack time (esbuild errors loudly). The proper fix is a dedicated `@gistlist/retrieval` sub-package; v2 refactor.
+- **Test 26 carry-forward flake.** Pre-existing product gap in the interrogative-response branch of `requiresCitation` — separate task already spawned.
+- **listChanged "delete + add within 5s + same count + same max(updated_at)" edge case.** Accepted in the plan; revisit if dogfooding surfaces it.
+
+**Reviewer claim rejected:**
+- One reviewer flagged test 26 as a stream-timing race in `askAndAwaitAnswer` (waits for `[data-role="assistant"]` before the message completes). This is incorrect — per [chat-architecture.md](../private_plans/chat-architecture.md), `[data-role="assistant-live"]` is the streaming bubble; `[data-role="assistant"]` is the persisted, post-completion message. The actual cause is the carry-forward gap already spawned as a follow-up task.
 
 ## Open questions
 

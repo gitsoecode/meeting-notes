@@ -232,6 +232,52 @@ test("listMeetings filters by participant", () => {
   assert.equal(rows[0].run_id, "RUN_PAST");
 });
 
+test("listMeetings participant filter falls back to title match", () => {
+  // RUN_UPCOMING has title 'Quarterly review with Bob'; if we remove Bob
+  // from the participants table, the title fallback should still surface it.
+  const db = seedDb();
+  db.exec("DELETE FROM run_participants WHERE run_id = 'RUN_UPCOMING'");
+  const rows = listMeetings(db, { participant: "Bob" }, 10);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].run_id, "RUN_UPCOMING");
+});
+
+test("searchMeetings emits an accurate retrieval trace (vec loaded, embedder failed)", async () => {
+  const db = seedDb();
+  let traceSeen = null;
+  await searchMeetings(db, "pricing", {
+    limit: 10,
+    isVecAvailable: () => true,
+    // Embedder returns null → the vec leg must NOT run; trace must flag it.
+    queryEmbedder: async () => null,
+    onRetrievalTrace: (t) => {
+      traceSeen = t;
+    },
+  });
+  assert.ok(traceSeen);
+  assert.equal(traceSeen.vecAvailable, true);
+  assert.equal(traceSeen.embedderRan, false);
+  assert.equal(traceSeen.vecLegRan, false);
+});
+
+test("searchMeetings trace reports embedderRan when embedder returns a vector", async () => {
+  const db = seedDb();
+  let traceSeen = null;
+  await searchMeetings(db, "pricing", {
+    limit: 10,
+    isVecAvailable: () => true,
+    queryEmbedder: async () => new Array(768).fill(0.1),
+    onRetrievalTrace: (t) => {
+      traceSeen = t;
+    },
+  });
+  assert.equal(traceSeen.vecAvailable, true);
+  assert.equal(traceSeen.embedderRan, true);
+  // vecLegRan may be false here — the fixture DB has no chat_chunks_vec
+  // table (no sqlite-vec load), so the SQL query throws and is swallowed.
+  // The important signal is that embedderRan separates "tried" from "ran".
+});
+
 test("getTranscriptWindow returns chunks overlapping the window", () => {
   const db = seedDb();
   const w = getTranscriptWindow(db, "RUN_PAST", 0, 60_000);

@@ -44,9 +44,11 @@ function resolveMcpbPath(): string | null {
 async function detectClaudeExtension(): Promise<"yes" | "no" | "unknown"> {
   // Claude Desktop stores installed extensions under:
   //   macOS: ~/Library/Application Support/Claude/Claude Extensions/<id>/
-  // The directory contains extension metadata. If our extension id folder
-  // is present, it's installed. Best-effort only — surface "unknown" for
-  // any other situation rather than a false negative.
+  // Observed id shape on this machine is namespaced / hashed (e.g.
+  //   ant.dir.ant.anthropic.filesystem), not the display name — so we can't
+  // rely on the folder name containing "gistlist". The authoritative signal
+  // is the `name` field inside each extension's manifest.json. Best-effort:
+  // any error or missing dir → "unknown" / "no" rather than a false positive.
   if (process.platform !== "darwin") return "unknown";
   const extDir = path.join(
     os.homedir(),
@@ -58,10 +60,22 @@ async function detectClaudeExtension(): Promise<"yes" | "no" | "unknown"> {
   try {
     if (!fs.existsSync(extDir)) return "no";
     const entries = fs.readdirSync(extDir, { withFileTypes: true });
-    const found = entries.some(
-      (e) => e.isDirectory() && /gistlist/i.test(e.name)
-    );
-    return found ? "yes" : "no";
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const manifestPath = path.join(extDir, entry.name, "manifest.json");
+      try {
+        if (!fs.existsSync(manifestPath)) continue;
+        const raw = fs.readFileSync(manifestPath, "utf-8");
+        const parsed = JSON.parse(raw) as { name?: unknown };
+        if (typeof parsed.name === "string" && parsed.name.toLowerCase() === "gistlist") {
+          return "yes";
+        }
+      } catch {
+        // Skip unreadable / malformed manifests; don't let one bad entry
+        // short-circuit detection for the rest.
+      }
+    }
+    return "no";
   } catch {
     return "unknown";
   }

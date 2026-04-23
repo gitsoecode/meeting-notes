@@ -1797,6 +1797,17 @@ export async function installMockApi(page: Page) {
         },
         async installMcpForClaude() {
           recordExternalAction("install-mcp-claude", {});
+          // Test-hook: when a spec sets __MOCK_INSTALL_MCP_FAIL__ via
+          // page.addInitScript, return the shape main/integrations.ts produces
+          // when shell.openPath can't find a registered handler. Lets the
+          // spec exercise the error-toast branch without rebuilding the app.
+          if ((window as any).__MOCK_INSTALL_MCP_FAIL__) {
+            return {
+              ok: false,
+              error:
+                "Couldn't open Gistlist.mcpb in Claude Desktop. See setup guide.",
+            };
+          }
           return { ok: true };
         },
       },
