@@ -228,6 +228,18 @@ code {
   color: var(--text-secondary);
 }
 
+.markdown-view mark.markdown-find-match {
+  background: #fef08a;
+  color: var(--text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.markdown-view mark.markdown-find-match--active {
+  background: var(--accent);
+  color: var(--text-inverse);
+}
+
 button.ui-switch {
   display: inline-flex;
   align-items: center;

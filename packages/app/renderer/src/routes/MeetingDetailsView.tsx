@@ -12,6 +12,7 @@ import {
 } from "../components/PipelineStatus";
 import { TranscriptView, type TranscriptViewHandle } from "../components/TranscriptView";
 import { TranscriptSearchBar } from "../components/TranscriptSearchBar";
+import { MarkdownFindBar } from "../components/MarkdownFindBar";
 import { InlinePlyrAudio, PlaybackInlineHost } from "../components/MeetingAudioPlayer";
 import type { EntryMatch } from "../../../shared/transcript-search";
 import { Button } from "../components/ui/button";
@@ -282,6 +283,8 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
   const [matches, setMatches] = useState<EntryMatch[]>([]);
   const [currentMatchIndex, setCurrentMatchIndex] = useState<number | null>(null);
   const transcriptViewRef = useRef<TranscriptViewHandle | null>(null);
+  const summaryMarkdownRef = useRef<HTMLDivElement | null>(null);
+  const analysisMarkdownRef = useRef<HTMLDivElement | null>(null);
 
   const combinedAudioAvailable = combinedAudioFileName != null;
 
@@ -336,10 +339,16 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
           ) : hasSummaryContent ? (
             <div className="flex min-h-0 flex-1 flex-col gap-4">
               {pipelineStatusContent}
+              <MarkdownFindBar
+                contentRef={summaryMarkdownRef}
+                contentKey={summaryContent}
+                shortcutActive={activeTabId === "summary"}
+              />
               <div className="relative flex min-h-0 flex-1 flex-col rounded-md border border-[var(--border-default)] bg-white">
                 <div className="flex-1 min-h-0 overflow-y-auto p-5 md:p-6">
                   {summaryContent ? (
                     <MarkdownView
+                      ref={summaryMarkdownRef}
                       source={summaryContent}
                       className="markdown-view"
                     />
@@ -444,8 +453,20 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
                     </div>
                     {pipelineStatusContent}
                     {activePrompt.hasOutput ? (
-                      <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 md:p-6">
-                        <MarkdownView source={promptContent} className="markdown-view" />
+                      <div className="flex flex-col gap-3">
+                        <MarkdownFindBar
+                          key={activePrompt.id}
+                          contentRef={analysisMarkdownRef}
+                          contentKey={`${activePrompt.id}:${promptContent}`}
+                          shortcutActive={activeTabId === "analysis"}
+                        />
+                        <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 md:p-6">
+                          <MarkdownView
+                            ref={analysisMarkdownRef}
+                            source={promptContent}
+                            className="markdown-view"
+                          />
+                        </div>
                       </div>
                     ) : (
                       <EmptyTabContent message="This prompt has not produced output for this meeting yet." />

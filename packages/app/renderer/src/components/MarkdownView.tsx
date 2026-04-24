@@ -1,3 +1,4 @@
+import { forwardRef } from "react";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import { stripFrontmatter } from "../lib/utils";
@@ -54,22 +55,25 @@ export interface MarkdownViewProps {
   onWikilinkClick?: (name: string) => void;
 }
 
-export function MarkdownView({ source, className, onWikilinkClick }: MarkdownViewProps) {
-  const html = renderCached(source || "");
+export const MarkdownView = forwardRef<HTMLDivElement, MarkdownViewProps>(
+  function MarkdownView({ source, className, onWikilinkClick }, ref) {
+    const html = renderCached(source || "");
 
-  return (
-    <div
-      className={`markdown-view ${className ?? ""}`}
-      dangerouslySetInnerHTML={{ __html: html }}
-      onClick={(e) => {
-        const target = e.target as HTMLElement;
-        const link = target.closest("[data-wikilink]") as HTMLElement | null;
-        if (link) {
-          e.preventDefault();
-          const name = link.getAttribute("data-wikilink");
-          if (name && onWikilinkClick) onWikilinkClick(name);
-        }
-      }}
-    />
-  );
-}
+    return (
+      <div
+        ref={ref}
+        className={`markdown-view ${className ?? ""}`}
+        dangerouslySetInnerHTML={{ __html: html }}
+        onClick={(e) => {
+          const target = e.target as HTMLElement;
+          const link = target.closest("[data-wikilink]") as HTMLElement | null;
+          if (link) {
+            e.preventDefault();
+            const name = link.getAttribute("data-wikilink");
+            if (name && onWikilinkClick) onWikilinkClick(name);
+          }
+        }}
+      />
+    );
+  },
+);
