@@ -184,6 +184,10 @@ function registerListRecentMeetings(server: McpServer, ctx: ToolContext): void {
         "Use this for structured questions about who you met with or when —",
         "no semantic search is needed for 'meetings with X' or 'meetings last week'.",
         "",
+        "Each meeting includes a pre-built markdown `link` field; paste it",
+        "verbatim whenever you mention that meeting so the user can click",
+        "through to open it in Gistlist.",
+        "",
         "For questions about how something changed over time, list the relevant meetings first,",
         "then call `get_meeting(run_id)` on each in chronological order and narrate the change",
         "across them. The full transcripts are where the answer lives — the metadata returned",
@@ -209,7 +213,11 @@ function registerListRecentMeetings(server: McpServer, ctx: ToolContext): void {
           date: m.run_date,
           status: m.run_status,
           participants: m.participants,
-          resource_uri: `meeting://${m.run_id}`,
+          // Pre-built markdown link opening the whole meeting in Gistlist.
+          // Same shape as search_meetings; see formatCitationLink for why
+          // we go through an https redirect instead of emitting gistlist://
+          // directly.
+          link: formatCitationLink(m.run_id, m.run_title, null, "transcript"),
         })),
       };
       return {
@@ -228,14 +236,18 @@ function registerSearchMeetings(server: McpServer, ctx: ToolContext): void {
       title: "Search meeting content",
       description: [
         "Searches meeting content using hybrid keyword + semantic retrieval.",
-        "Returns the top candidate meetings with brief snippets and stable",
-        "[[cite:run_id:start_ms]] anchors.",
+        "Returns the top candidate meetings with brief snippets and a pre-",
+        "built markdown `link` per hit that opens the Gistlist app at the",
+        "exact transcript moment when clicked.",
         "",
         "IMPORTANT: the snippets are for verifying relevance, NOT for answering.",
         "To actually answer the user's question, call `get_meeting(run_id)` on the",
         "top candidates and reason from the full transcript. For questions spanning",
         "multiple meetings (e.g. 'how did our thinking on X change'), call",
         "`get_meeting` on several relevant meetings in chronological order.",
+        "",
+        "Paste the `link` field VERBATIM whenever you reference a moment in your",
+        "reply — it is already a complete markdown link. Do not rewrite it.",
       ].join("\n"),
       inputSchema: searchInputSchema,
     },
@@ -299,11 +311,13 @@ function registerSearchMeetings(server: McpServer, ctx: ToolContext): void {
           speaker: r.speaker,
           start_ms: r.start_ms,
           snippet: clampSnippet(r.snippet),
-          citation:
-            r.start_ms != null
-              ? `[[cite:${r.run_id}:${r.start_ms}]]`
-              : `[[cite:${r.run_id}:${r.kind}]]`,
-          resource_uri: `meeting://${r.run_id}`,
+          // Pre-built markdown link — Claude should paste this verbatim
+          // when citing the hit. The URL bounces through an https redirect
+          // to the `gistlist://` scheme the app registers, so it's clickable
+          // in every chat UI (Claude sanitizes non-http schemes on render).
+          // Named `link` (not `citation` or `resource_uri`) so Claude picks
+          // this single field for user-facing references.
+          link: formatCitationLink(r.run_id, r.run_title, r.start_ms, r.kind),
         })),
       };
 
@@ -377,6 +391,105 @@ function registerGetMeeting(server: McpServer, ctx: ToolContext): void {
 function clampSnippet(s: string): string {
   if (s.length <= SEARCH_SNIPPET_MAX_CHARS) return s;
   return s.slice(0, SEARCH_SNIPPET_MAX_CHARS) + "…";
+}
+
+/**
+ * Build a markdown link that, when clicked, opens this hit inside the
+ * Gistlist app. The link goes through an `https://` redirector page
+ * (hosted at gistlist.app/open) which then bounces to `gistlist://`.
+ *
+ * Why not emit the custom scheme directly: LLMs — Claude in particular —
+ * are trained to treat non-standard URL schemes as potentially unsafe and
+ * will frequently paraphrase, truncate, or silently drop them from replies.
+ * Markdown renderers in chat UIs add a second layer by sanitizing hrefs
+ * against an https-heavy allowlist. Using `https://` with a short redirect
+ * page sidesteps both layers — the LLM happily echoes the link verbatim
+ * and every renderer treats it as a normal web link.
+ *
+ * Override the base URL via `GISTLIST_OPEN_URL_BASE` for local testing
+ * (e.g. `http://localhost:3000/open`).
+ *
+ * Examples:
+ *   [Foo team sync · 12:34](https://gistlist.app/open?m=abc-123&t=754000)
+ *   [Foo team sync · summary](https://gistlist.app/open?m=abc-123&s=summary)
+ */
+const DEFAULT_OPEN_URL_BASE = "https://gistlist.app/open";
+
+function openUrlBase(): string {
+  const override = process.env.GISTLIST_OPEN_URL_BASE;
+  if (override && override.trim().length > 0) return override.trim();
+  return DEFAULT_OPEN_URL_BASE;
+}
+
+function formatCitationLink(
+  runId: string,
+  runTitle: string | null | undefined,
+  startMs: number | null | undefined,
+  kind: string,
+): string {
+  const title = (runTitle ?? "").trim();
+  const titlePart = title.length > 0 ? title : "Meeting";
+  const base = openUrlBase();
+  const params = new URLSearchParams();
+  params.set("m", runId);
+  if (startMs != null && Number.isFinite(startMs)) {
+    params.set("t", String(startMs));
+    // 🎙 is the standard visual for transcript moments across the UI —
+    // matches TimestampPill's mic icon in the in-app chat. Keeping the glyph
+    // identical helps users who hop between Claude Desktop and the app
+    // recognize citations as the same primitive.
+    const label = `🎙 ${titlePart} · ${formatHms(startMs)}`;
+    return `[${escapeLinkText(label)}](${base}?${params.toString()})`;
+  }
+  const source = normalizeSource(kind);
+  params.set("s", source);
+  const label = `${sourceEmoji(source)} ${titlePart} · ${source}`;
+  return `[${escapeLinkText(label)}](${base}?${params.toString()})`;
+}
+
+/**
+ * Source glyphs mirror what the in-app SourceChip uses, so citations read
+ * consistently whether the user is in Gistlist's own chat or reading a
+ * reply from Claude Desktop.
+ */
+function sourceEmoji(source: "transcript" | "summary" | "prep" | "notes"): string {
+  switch (source) {
+    case "transcript":
+      return "🎙";
+    case "summary":
+      return "🗒";
+    case "notes":
+      return "📝";
+    case "prep":
+      return "📋";
+  }
+}
+
+/**
+ * `kind` from retrieval can be any of the transcript/summary/prep/notes
+ * labels the engine uses. The Gistlist app's deep-link handler only
+ * understands those four; anything else becomes "transcript" (the safest
+ * landing view).
+ */
+function normalizeSource(kind: string): "transcript" | "summary" | "prep" | "notes" {
+  if (kind === "summary" || kind === "prep" || kind === "notes") return kind;
+  return "transcript";
+}
+
+function formatHms(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = totalSeconds % 60;
+  if (h > 0) {
+    return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+/** Escape `]` and `\` so we don't prematurely close the link's label. */
+function escapeLinkText(s: string): string {
+  return s.replace(/([\\\]])/g, "\\$1");
 }
 
 function dateRangeFromArgs(

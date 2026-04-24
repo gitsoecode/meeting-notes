@@ -15,7 +15,20 @@ export interface RecordingStatus {
 
 export type AppActionEvent =
   | { type: "open-new-meeting"; source: "shortcut" | "tray" }
-  | { type: "toggle-recording"; source: "shortcut" | "tray" };
+  | { type: "toggle-recording"; source: "shortcut" | "tray" }
+  | {
+      /**
+       * Fired by the main process when the app is activated via a
+       * `gistlist://meeting/<run_id>?...` deep link — typically a user
+       * clicking a citation from Claude Desktop. Routed through the same
+       * flow as in-app chat chips (`handleOpenMeetingFromChat`).
+       */
+      type: "open-meeting";
+      source: "deep-link";
+      runId: string;
+      startMs: number | null;
+      citationSource: "transcript" | "summary" | "prep" | "notes" | null;
+    };
 
 export type AppLogLevel = "debug" | "info" | "warn" | "error";
 
@@ -886,6 +899,12 @@ export interface GistlistApi {
     getMcpStatus: () => Promise<McpIntegrationStatus>;
     installMcpForClaude: () => Promise<McpInstallResult>;
     uninstallMcpForClaude: () => Promise<McpInstallResult>;
+  };
+  // gistlist:// deep-link subscription handshake (see main/deep-link.ts).
+  deepLink: {
+    /** Signal the main process that the renderer is ready to receive
+     *  `open-meeting` app actions. Call after subscribing to appAction. */
+    ready: () => void;
   };
   // Events (subscribe)
   on: {

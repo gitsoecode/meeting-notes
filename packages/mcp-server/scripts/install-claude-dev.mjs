@@ -59,14 +59,28 @@ const existed = Object.prototype.hasOwnProperty.call(
   "gistlist-dev"
 );
 
+// If `--local-redirect` (or GISTLIST_OPEN_URL_BASE already in env) is set,
+// point citation URLs at the local redirect server so click-through works
+// end-to-end without the marketing site being deployed. Default is the
+// production https URL, which 404s until gistlist.app/open is live.
+const wantsLocalRedirect = process.argv.includes("--local-redirect");
+const openUrlBase = process.env.GISTLIST_OPEN_URL_BASE
+  ? process.env.GISTLIST_OPEN_URL_BASE
+  : wantsLocalRedirect
+    ? "http://localhost:3939/open"
+    : null;
+
+const env = {
+  ELECTRON_RUN_AS_NODE: "1",
+  GISTLIST_CONFIG_DIR: path.join(os.homedir(), ".gistlist"),
+  OLLAMA_BASE_URL: "http://127.0.0.1:11434",
+};
+if (openUrlBase) env.GISTLIST_OPEN_URL_BASE = openUrlBase;
+
 config.mcpServers["gistlist-dev"] = {
   command: ELECTRON_BIN,
   args: [SERVER_JS],
-  env: {
-    ELECTRON_RUN_AS_NODE: "1",
-    GISTLIST_CONFIG_DIR: path.join(os.homedir(), ".gistlist"),
-    OLLAMA_BASE_URL: "http://127.0.0.1:11434",
-  },
+  env,
 };
 
 writeConfig(config);
@@ -76,6 +90,22 @@ const removedLegacy = removeLegacyMcpb();
 console.log(
   `[install-claude-dev] ${existed ? "updated" : "added"} "gistlist-dev" entry in ${CLAUDE_CONFIG_PATH}`
 );
+if (openUrlBase) {
+  console.log(`[install-claude-dev] citation links will point at ${openUrlBase}`);
+} else {
+  console.log(
+    `[install-claude-dev] citation links will point at https://gistlist.app/open (default).`
+  );
+  console.log(
+    `[install-claude-dev]   — will 404 until the marketing site deploys open-redirect.html`
+  );
+  console.log(
+    `[install-claude-dev]   — for end-to-end click testing run \`npm run dev:redirect\` in another terminal,`
+  );
+  console.log(
+    `[install-claude-dev]     then re-run this with --local-redirect`
+  );
+}
 if (removedLegacy) {
   console.log(
     `[install-claude-dev] removed legacy .mcpb install at ${LEGACY_MCPB_DIR}`

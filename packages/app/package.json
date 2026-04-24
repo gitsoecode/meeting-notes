@@ -111,6 +111,12 @@
         "to": "mcp-server"
       }
     ],
+    "protocols": [
+      {
+        "name": "Gistlist",
+        "schemes": ["gistlist"]
+      }
+    ],
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",

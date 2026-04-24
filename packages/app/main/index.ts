@@ -34,6 +34,7 @@ import { isEmptyDatabase } from "./db/migrate.js";
 import { seedDbFromFilesystem } from "./db/seed.js";
 import { registerWindowContextMenu } from "./context-menu.js";
 import { handleStructuredAppLog } from "./activity-monitor.js";
+import { registerGistlistProtocol } from "./deep-link.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,6 +90,12 @@ protocol.registerSchemesAsPrivileged([
     },
   },
 ]);
+
+// Register `gistlist://` as a URL scheme so citations from Claude Desktop
+// (and any other markdown renderer) can deep-link into specific meetings.
+// setAsDefaultProtocolClient + open-url handler must be wired before
+// whenReady() so a cold launch via deep link doesn't drop the URL.
+registerGistlistProtocol();
 
 let mainWindow: BrowserWindow | null = null;
 const appLogger = createAppLogger(false);

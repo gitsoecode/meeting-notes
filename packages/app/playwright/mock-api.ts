@@ -1828,6 +1828,12 @@ export async function installMockApi(page: Page) {
           },
         };
       })(),
+      deepLink: {
+        // No-op in the mocked browser environment — there's no main process
+        // to signal. Exposed so the renderer's `api.deepLink.ready()` call
+        // on App mount doesn't throw.
+        ready: () => {},
+      },
       chat: (() => {
         const threads = [];
         const messagesByThread = new Map();

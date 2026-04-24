@@ -186,6 +186,13 @@ const api: GistlistApi = {
     installMcpForClaude: () => ipcRenderer.invoke("integrations:install-mcp-claude"),
     uninstallMcpForClaude: () => ipcRenderer.invoke("integrations:uninstall-mcp-claude"),
   },
+  deepLink: {
+    // Signals the main process that the renderer's `appAction`
+    // subscription is live. Main buffers gistlist:// URLs received during
+    // cold launch and flushes them on this signal so no deep link is
+    // dropped to an unattached listener.
+    ready: () => ipcRenderer.send("deep-link:ready"),
+  },
   chatLauncher: {
     detectApps: () => ipcRenderer.invoke("chatLauncher:detect-apps"),
     launch: (req: LaunchChatRequest) => ipcRenderer.invoke("chatLauncher:launch", req),

@@ -16,7 +16,9 @@
     "start": "node dist/server.js",
     "test": "npm run build && node --test test/*.test.mjs",
     "install:claude-dev": "npm run build && node scripts/install-claude-dev.mjs",
-    "uninstall:claude-dev": "node scripts/uninstall-claude-dev.mjs"
+    "install:claude-dev:local-redirect": "npm run build && node scripts/install-claude-dev.mjs --local-redirect",
+    "uninstall:claude-dev": "node scripts/uninstall-claude-dev.mjs",
+    "dev:redirect": "node scripts/dev-redirect-server.mjs"
   },
   "dependencies": {
     "@gistlist/engine": "*",

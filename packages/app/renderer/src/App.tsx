@@ -268,10 +268,70 @@ export function App() {
     };
   }, []);
 
+  const handleOpenMeetingFromChat = useCallback(
+    async (
+      runId: string,
+      startMs: number | null,
+      source?: "transcript" | "summary" | "prep" | "notes",
+    ) => {
+      try {
+        const all = await api.runs.list();
+        const row = all.find((r) => r.run_id === runId);
+        if (!row) return;
+        // Map the citation source to the right meeting view + tab.
+        //   - transcript / summary: Details view, corresponding tab.
+        //   - prep / notes: Workspace view, where those surfaces live.
+        //   - a seek-ms always wins and forces Details → Transcript
+        //     (seek-on-mount logic in MeetingShell handles the audio).
+        let view: MeetingView = "details";
+        let initialTabId: DetailsTabKind | undefined;
+        if (startMs != null) {
+          view = "details";
+          initialTabId = "transcript";
+        } else if (source === "prep" || source === "notes") {
+          view = "workspace";
+          initialTabId = undefined;
+        } else if (source === "summary") {
+          view = "details";
+          initialTabId = "summary";
+        } else if (source === "transcript") {
+          view = "details";
+          initialTabId = "transcript";
+        } else {
+          view = "details";
+          initialTabId = "metadata";
+        }
+        navigate({
+          name: "meeting",
+          runFolder: row.folder_path,
+          view,
+          initialSeekMs: startMs ?? undefined,
+          initialTabId,
+        });
+      } catch (err) {
+        console.error("Open meeting from chat failed", err);
+      }
+    },
+    [navigate],
+  );
+
   useEffect(() => {
     const unsub = api.on.appAction(async (event) => {
       if (event.type === "open-new-meeting") {
         navigate({ name: "record" });
+        return;
+      }
+
+      if (event.type === "open-meeting") {
+        // Fired by the main process when a `gistlist://` deep link is opened
+        // (e.g. the user clicks a citation in Claude Desktop). Routes through
+        // the same helper in-app chat chips use, so the resulting audio-seek
+        // / view selection behavior is identical.
+        await handleOpenMeetingFromChat(
+          event.runId,
+          event.startMs,
+          event.citationSource ?? undefined,
+        );
         return;
       }
 
@@ -286,8 +346,12 @@ export function App() {
         navigate({ name: "meeting", runFolder: result.run_folder });
       }
     });
+    // Tell main the subscription is live so it can flush any pending
+    // `gistlist://` URLs received during a cold-launch window. Safe to call
+    // multiple times — main just re-flushes (empty queue on the second call).
+    api.deepLink.ready();
     return () => unsub();
-  }, [navigate]);
+  }, [navigate, handleOpenMeetingFromChat]);
 
   useEffect(() => {
     const target = window as typeof window & {
@@ -393,53 +457,6 @@ export function App() {
         return undefined;
     }
   }, [route.name]);
-
-  const handleOpenMeetingFromChat = useCallback(
-    async (
-      runId: string,
-      startMs: number | null,
-      source?: "transcript" | "summary" | "prep" | "notes",
-    ) => {
-      try {
-        const all = await api.runs.list();
-        const row = all.find((r) => r.run_id === runId);
-        if (!row) return;
-        // Map the citation source to the right meeting view + tab.
-        //   - transcript / summary: Details view, corresponding tab.
-        //   - prep / notes: Workspace view, where those surfaces live.
-        //   - a seek-ms always wins and forces Details → Transcript
-        //     (seek-on-mount logic in MeetingShell handles the audio).
-        let view: MeetingView = "details";
-        let initialTabId: DetailsTabKind | undefined;
-        if (startMs != null) {
-          view = "details";
-          initialTabId = "transcript";
-        } else if (source === "prep" || source === "notes") {
-          view = "workspace";
-          initialTabId = undefined;
-        } else if (source === "summary") {
-          view = "details";
-          initialTabId = "summary";
-        } else if (source === "transcript") {
-          view = "details";
-          initialTabId = "transcript";
-        } else {
-          view = "details";
-          initialTabId = "metadata";
-        }
-        navigate({
-          name: "meeting",
-          runFolder: row.folder_path,
-          view,
-          initialSeekMs: startMs ?? undefined,
-          initialTabId,
-        });
-      } catch (err) {
-        console.error("Open meeting from chat failed", err);
-      }
-    },
-    [navigate],
-  );
 
   if (config === undefined) {
     return (
