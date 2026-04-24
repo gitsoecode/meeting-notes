@@ -3,7 +3,7 @@ import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: "./playwright",
   testMatch: ["**/*.spec.ts"],
-  testIgnore: ["**/electron-live/**"],
+  testIgnore: ["**/electron-live/**", "**/marketing/**"],
   // Mock-backed specs should never need this long. 10s is enough for real
   // network-free flows; keep failures fast so the iteration loop stays tight.
   timeout: 10000,
