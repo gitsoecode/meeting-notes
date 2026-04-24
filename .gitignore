@@ -2,7 +2,7 @@ node_modules/
 dist/
 *.tsbuildinfo
 .DS_Store
-.claude/settings.local.json
+.claude/
 docs/private_plans/
 
 # Build & test artifacts
