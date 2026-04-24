@@ -20,13 +20,14 @@ export type AppActionEvent =
       /**
        * Fired by the main process when the app is activated via a
        * `gistlist://meeting/<run_id>?...` deep link — typically a user
-       * clicking a citation from Claude Desktop. Routed through the same
-       * flow as in-app chat chips (`handleOpenMeetingFromChat`).
+       * clicking a citation from Claude Desktop. Routed through the
+       * renderer's `handleOpenMeetingFromDeepLink` helper.
        */
       type: "open-meeting";
       source: "deep-link";
       runId: string;
       startMs: number | null;
+      /** The section of the meeting the external citation pointed at. */
       citationSource: "transcript" | "summary" | "prep" | "notes" | null;
     };
 
@@ -441,98 +442,14 @@ export interface PickedMediaFile {
   name: string;
 }
 
-// ---- Chat Assistant (retrieval-grounded) ----
+// ---- Meeting index (FTS + sqlite-vec corpus the MCP server reads) ----
 
-export type ChatCitationSource = "transcript" | "summary" | "prep" | "notes";
-
-export interface ChatCitationDTO {
-  run_id: string;
-  source: ChatCitationSource;
-  start_ms: number | null;
-  end_ms: number | null;
-  run_title_snapshot: string;
-  run_date_snapshot: string;
-}
-
-export interface ChatThreadDTO {
-  thread_id: string;
-  title: string;
-  created_at: string;
-  updated_at: string;
-  model_id: string | null;
-}
-
-export interface ChatMessageDTO {
-  message_id: string;
-  thread_id: string;
-  role: "user" | "assistant";
-  content: string;
-  citations: ChatCitationDTO[];
-  created_at: string;
-}
-
-export interface ChatSendFilters {
-  /** Substring-matched against participant first_name / last_name / email. */
-  participant?: string;
-  /** ISO date range (inclusive). */
-  date_range?: { from: string; to: string };
-  /** Restrict to past-only or upcoming-only meetings. */
-  status?: "past" | "upcoming" | "any";
-}
-
-export interface ChatSendRequest {
-  threadId?: string;
-  userMessage: string;
-  modelOverride?: string;
-  /** Retrieval filters applied when searching the meeting index. */
-  filters?: ChatSendFilters;
-}
-
-export interface ParticipantDTO {
-  participant_id: number;
-  first_name: string | null;
-  last_name: string | null;
-  email: string | null;
-  /** Derived display label: "First Last" | "First" | email | "Unknown". */
-  label: string;
-  /** Number of runs this participant appears in. Helps rank them. */
-  run_count: number;
-}
-
-export interface ChatSendResult {
-  thread_id: string;
-  user_message_id: string;
-  assistant_message_id: string;
-  content: string;
-  citations: ChatCitationDTO[];
-}
-
-export type ChatStreamEvent =
-  | { type: "messageStart"; thread_id: string; message_id: string }
-  | { type: "status"; label: string }
-  | { type: "token"; chunk: string }
-  | {
-      type: "messageComplete";
-      message_id: string;
-      thread_id: string;
-      content: string;
-      citations: ChatCitationDTO[];
-    }
-  | { type: "threadTitle"; thread_id: string; title: string }
-  | { type: "error"; error: string };
-
-export interface ChatBackfillProgressDTO {
+export interface MeetingIndexProgressDTO {
   state: "idle" | "running" | "paused" | "complete" | "error";
   total: number;
   completed: number;
   currentRunFolder: string | null;
   errors: number;
-}
-
-export interface ChatSettingsDTO {
-  system_prompt: string;
-  default_system_prompt: string;
-  default_model: string | null;
 }
 
 // ---- Chat Launcher ----
@@ -855,29 +772,16 @@ export interface GistlistApi {
     detectApps: () => Promise<ChatAppInfo[]>;
     launch: (req: LaunchChatRequest) => Promise<LaunchChatResult>;
   };
-  // Chat Assistant
-  chat: {
-    send: (req: ChatSendRequest) => Promise<ChatSendResult>;
-    listThreads: () => Promise<ChatThreadDTO[]>;
-    getThread: (threadId: string) => Promise<{
-      thread: ChatThreadDTO;
-      messages: ChatMessageDTO[];
-    } | null>;
-    renameThread: (threadId: string, title: string) => Promise<void>;
-    deleteThread: (threadId: string) => Promise<void>;
-    setThreadModel: (threadId: string, modelId: string | null) => Promise<void>;
-    getSettings: () => Promise<ChatSettingsDTO>;
-    saveSystemPrompt: (body: string) => Promise<void>;
-    resetSystemPrompt: () => Promise<void>;
-    backfillStart: () => Promise<ChatBackfillProgressDTO>;
-    backfillStatus: () => Promise<ChatBackfillProgressDTO>;
+  // Meeting index (the corpus the MCP server reads; still needs renderer
+  // controls for re-index + embed-model install).
+  meetingIndex: {
+    backfillStart: () => Promise<MeetingIndexProgressDTO>;
+    backfillStatus: () => Promise<MeetingIndexProgressDTO>;
     /** Best-effort hint for the UI "N meetings need indexing" message. */
     backfillCountPending: () => Promise<number>;
-    /** List known participants across all runs, sorted by run_count desc. */
-    listParticipants: () => Promise<ParticipantDTO[]>;
-    /** Check whether the chat embedding model is installed via Ollama. */
+    /** Check whether the embedding model is installed via Ollama. */
     embedModelStatus: () => Promise<{ model: string; installed: boolean }>;
-    /** Start a pull of the chat embedding model. Progress streams via setupLlmLog. */
+    /** Start a pull of the embedding model. Progress streams via setupLlmLog. */
     installEmbedModel: () => Promise<void>;
   };
   // Deps check
@@ -919,8 +823,7 @@ export interface GistlistApi {
     logEntry: (cb: (entry: AppLogEntry) => void) => () => void;
     processUpdate: (cb: (process: ActivityProcess) => void) => () => void;
     audioMonitorLevels: (cb: (snapshot: AudioMonitorSnapshot) => void) => () => void;
-    chatStream: (cb: (event: ChatStreamEvent) => void) => () => void;
-    chatBackfillProgress: (cb: (progress: ChatBackfillProgressDTO) => void) => () => void;
+    meetingIndexBackfillProgress: (cb: (progress: MeetingIndexProgressDTO) => void) => () => void;
   };
 }
 

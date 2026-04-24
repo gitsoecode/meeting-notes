@@ -1,4 +1,13 @@
-/** SQLite schema v1 for Gistlist. */
+/**
+ * SQLite schema for Gistlist. Current user_version: 5.
+ * Migration history (see `./migrate.ts`):
+ *   v1 — initial tables (runs, meeting_prep, prompt_outputs, chat_chunks*, chat_threads, chat_messages, ...)
+ *   v2 — add `model` to prompt_outputs
+ *   v3 — add `updated_at` to runs + index
+ *   v4 — chat_chunks_vec virtual table + chat_index_meta
+ *   v5 — drop chat_threads + chat_messages (in-app Chat surface deprecated 2026-04;
+ *        Claude Desktop via MCP is the new chat surface)
+ */
 export const SCHEMA_V1 = `
 CREATE TABLE IF NOT EXISTS runs (
   run_id           TEXT PRIMARY KEY,
@@ -160,27 +169,6 @@ CREATE TABLE IF NOT EXISTS chat_index_meta (
   value TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS chat_threads (
-  thread_id   TEXT PRIMARY KEY,
-  title       TEXT NOT NULL,
-  created_at  TEXT NOT NULL,
-  updated_at  TEXT NOT NULL,
-  model_id    TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_chat_threads_updated ON chat_threads(updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS chat_messages (
-  message_id   TEXT PRIMARY KEY,
-  thread_id    TEXT NOT NULL,
-  role         TEXT NOT NULL,
-  content      TEXT NOT NULL,
-  citations    TEXT,
-  created_at   TEXT NOT NULL,
-  FOREIGN KEY (thread_id) REFERENCES chat_threads(thread_id) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages(thread_id, created_at);
 `;
 
 /**

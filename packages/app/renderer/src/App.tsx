@@ -8,7 +8,6 @@ import { PromptsEditor } from "./routes/PromptsEditor";
 import { Settings } from "./routes/Settings";
 import { SetupWizard } from "./routes/SetupWizard";
 import { ActivityView } from "./routes/ActivityView";
-import { ChatView, type ChatSubview } from "./routes/ChatView";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { GistlistMark } from "./components/GistlistMark";
 import { AppSidebar } from "./components/AppSidebar";
@@ -33,13 +32,12 @@ type Route =
       runFolder: string;
       view?: MeetingView;
       initialSeekMs?: number;
-      /** Pre-selected inner tab (Details view) when opening via a chat citation. */
+      /** Pre-selected inner tab (Details view) when opening via a deep link from an MCP citation. */
       initialTabId?: DetailsTabKind;
     }
   | { name: "prompts"; promptId?: string }
   | { name: "settings" }
-  | { name: "activity" }
-  | { name: "chat"; subview?: ChatSubview };
+  | { name: "activity" };
 
 function routeToHash(route: Route): string {
   switch (route.name) {
@@ -64,11 +62,6 @@ function routeToHash(route: Route): string {
       return "#/settings";
     case "activity":
       return "#/activity";
-    case "chat": {
-      if (!route.subview || route.subview.kind === "empty") return "#/chat";
-      if (route.subview.kind === "all-threads") return "#/chat/all";
-      return `#/chat/t/${encodeURIComponent(route.subview.threadId)}`;
-    }
   }
 }
 
@@ -140,16 +133,6 @@ function routeFromHash(hash: string): Route | null {
       return { name: "settings" };
     case "activity":
       return { name: "activity" };
-    case "chat": {
-      if (!tail) return { name: "chat", subview: { kind: "empty" } };
-      if (tail === "all") return { name: "chat", subview: { kind: "all-threads" } };
-      if (tail === "t" && extra)
-        return {
-          name: "chat",
-          subview: { kind: "thread", threadId: decodeURIComponent(extra) },
-        };
-      return { name: "chat", subview: { kind: "empty" } };
-    }
     default:
       return null;
   }
@@ -268,7 +251,7 @@ export function App() {
     };
   }, []);
 
-  const handleOpenMeetingFromChat = useCallback(
+  const handleOpenMeetingFromDeepLink = useCallback(
     async (
       runId: string,
       startMs: number | null,
@@ -309,7 +292,7 @@ export function App() {
           initialTabId,
         });
       } catch (err) {
-        console.error("Open meeting from chat failed", err);
+        console.error("Open meeting from deep link failed", err);
       }
     },
     [navigate],
@@ -324,10 +307,10 @@ export function App() {
 
       if (event.type === "open-meeting") {
         // Fired by the main process when a `gistlist://` deep link is opened
-        // (e.g. the user clicks a citation in Claude Desktop). Routes through
-        // the same helper in-app chat chips use, so the resulting audio-seek
-        // / view selection behavior is identical.
-        await handleOpenMeetingFromChat(
+        // (e.g. the user clicks a citation in Claude Desktop routed through
+        // the MCP server). Maps the citation source to the correct meeting
+        // view + tab and triggers audio seek if a timestamp was included.
+        await handleOpenMeetingFromDeepLink(
           event.runId,
           event.startMs,
           event.citationSource ?? undefined,
@@ -351,7 +334,7 @@ export function App() {
     // multiple times — main just re-flushes (empty queue on the second call).
     api.deepLink.ready();
     return () => unsub();
-  }, [navigate, handleOpenMeetingFromChat]);
+  }, [navigate, handleOpenMeetingFromDeepLink]);
 
   useEffect(() => {
     const target = window as typeof window & {
@@ -440,8 +423,6 @@ export function App() {
         return "Settings";
       case "activity":
         return "Activity";
-      case "chat":
-        return "Chat";
     }
   }, [route.name]);
 
@@ -560,15 +541,6 @@ export function App() {
               />
             )}
             {route.name === "activity" && <ActivityView />}
-            {route.name === "chat" && (
-              <ChatView
-                subview={route.subview ?? { kind: "empty" }}
-                onSubviewChange={(sv) =>
-                  navigate({ name: "chat", subview: sv }, { replace: true })
-                }
-                onOpenMeetingAt={handleOpenMeetingFromChat}
-              />
-            )}
           </main>
         </SidebarInset>
       </SidebarMain>

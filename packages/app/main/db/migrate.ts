@@ -42,6 +42,21 @@ export function migrate(db: Database.Database): void {
     db.pragma("user_version = 4");
     appLogger.info("Database migration v4 applied");
   }
+
+  if (version < 5) {
+    // v5: the in-app Chat surface was deprecated in favor of Claude Desktop
+    // via MCP. Drop its thread/message tables. The `chat_chunks*` and
+    // `chat_index_meta` tables stay — they back MCP's semantic search.
+    appLogger.info(
+      "Applying database migration v5 (drop chat_threads/chat_messages; in-app chat deprecated)"
+    );
+    db.exec(`
+      DROP TABLE IF EXISTS chat_messages;
+      DROP TABLE IF EXISTS chat_threads;
+    `);
+    db.pragma("user_version = 5");
+    appLogger.info("Database migration v5 applied");
+  }
 }
 
 export function isEmptyDatabase(db: Database.Database): boolean {

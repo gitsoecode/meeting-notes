@@ -86,12 +86,12 @@ open "/Applications/Gistlist.app/Contents/Resources/mcp/Gistlist.mcpb"
 
 - Confirm Gistlist has at least one recorded and processed meeting.
 - In Gistlist's Settings → Integrations, the **Library** status row should say "N meetings indexed" with N > 0.
-- If the count is 0 even though you have meetings, open Gistlist's chat once — the indexing runs in the background and the chat surface kicks off the backfill if needed.
+- If the count is 0 even though you have meetings, open Gistlist's Settings → Meeting index and click "Re-run indexing" — new meetings are indexed automatically at capture time, but the button will backfill any pre-existing runs.
 
 ### Searches feel weak / Claude misses obvious matches
 
 - Check Settings → Integrations → **Semantic search** status. If it says "Ollama not running — keyword search only," start Ollama (`ollama serve`).
-- Confirm Ollama has the `nomic-embed-text` model pulled. Settings → Chat → Embedding model should report it as installed; if not, the page has a one-click install.
+- Confirm Ollama has the `nomic-embed-text` model pulled. Settings → Meeting index → Embedding model should report it as installed; if not, the page has a one-click install.
 
 ### Manual install (advanced)
 

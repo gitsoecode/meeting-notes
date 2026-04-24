@@ -44,8 +44,7 @@ export async function installMockApi(page: Page) {
       logEntry: new Set(),
       processUpdate: new Set(),
       audioMonitorLevels: new Set(),
-      chatStream: new Set(),
-      chatBackfillProgress: new Set(),
+      meetingIndexBackfillProgress: new Set(),
     };
     const stateStorageKey = "__gistlist_mock_state__";
     const promptsStorageKey = "__gistlist_prompts__";
@@ -1834,164 +1833,35 @@ export async function installMockApi(page: Page) {
         // on App mount doesn't throw.
         ready: () => {},
       },
-      chat: (() => {
-        const threads = [];
-        const messagesByThread = new Map();
-        let backfill = {
-          state: "complete",
-          total: 0,
-          completed: 0,
-          currentRunFolder: null,
-          errors: 0,
-        };
-        const DEFAULT_SYSTEM_PROMPT = "You are a meeting assistant.";
-        let systemPrompt = DEFAULT_SYSTEM_PROMPT;
-        return {
-          async listThreads() {
-            return clone(threads);
-          },
-          async getThread(threadId) {
-            const t = threads.find((x) => x.thread_id === threadId);
-            if (!t) return null;
-            const msgs = messagesByThread.get(threadId) ?? [];
-            return { thread: clone(t), messages: clone(msgs) };
-          },
-          async renameThread(threadId, title) {
-            const t = threads.find((x) => x.thread_id === threadId);
-            if (t) t.title = title;
-          },
-          async deleteThread(threadId) {
-            const idx = threads.findIndex((x) => x.thread_id === threadId);
-            if (idx >= 0) threads.splice(idx, 1);
-            messagesByThread.delete(threadId);
-          },
-          async setThreadModel(threadId, modelId) {
-            const t = threads.find((x) => x.thread_id === threadId);
-            if (t) t.model_id = modelId;
-          },
-          async getSettings() {
-            return {
-              system_prompt: systemPrompt,
-              default_system_prompt: DEFAULT_SYSTEM_PROMPT,
-              default_model: "qwen3.5:9b",
-            };
-          },
-          async saveSystemPrompt(body) {
-            systemPrompt = body;
-          },
-          async resetSystemPrompt() {
-            systemPrompt = DEFAULT_SYSTEM_PROMPT;
-          },
-          async backfillStart() {
-            return clone(backfill);
-          },
-          async backfillStatus() {
-            return clone(backfill);
-          },
-          async backfillCountPending() {
-            return 0;
-          },
-          async listParticipants() {
-            return [
-              {
-                participant_id: 1,
-                first_name: "Lauren",
-                last_name: "Dai",
-                email: null,
-                label: "Lauren Dai",
-                run_count: 3,
-              },
-              {
-                participant_id: 2,
-                first_name: "Jay",
-                last_name: "Shah",
-                email: null,
-                label: "Jay Shah",
-                run_count: 2,
-              },
-            ];
-          },
-          async embedModelStatus() {
-            return { model: "nomic-embed-text", installed: true };
-          },
-          async installEmbedModel() {
-            return;
-          },
-          async send(req) {
-            const now = new Date().toISOString();
-            let threadId = req.threadId;
-            if (!threadId) {
-              threadId = `thread-${Date.now()}`;
-              threads.unshift({
-                thread_id: threadId,
-                title: req.userMessage.slice(0, 40),
-                created_at: now,
-                updated_at: now,
-                model_id: null,
-              });
-              messagesByThread.set(threadId, []);
-            }
-            const userMsg = {
-              message_id: `msg-${Date.now()}-u`,
-              thread_id: threadId,
-              role: "user",
-              content: req.userMessage,
-              citations: [],
-              created_at: now,
-            };
-            const needle = req.userMessage.toLowerCase();
-            const pricingLike = /(pricing|rate|cost|fee)/.test(needle);
-            const lauren = /(lauren)/.test(needle);
-            let assistantContent;
-            let citations = [];
-            if (lauren || pricingLike) {
-              citations = [
-                {
-                  run_id: "RUN_LAUREN",
-                  source: "transcript",
-                  start_ms: 150000,
-                  end_ms: 160000,
-                  run_title_snapshot: "Catch up with Lauren",
-                  run_date_snapshot: "2026-02-10",
-                },
-              ];
-              assistantContent = `You talked with Lauren about pricing on Feb 10. [[cite:RUN_LAUREN:150000]]`;
-            } else {
-              assistantContent = "I couldn't find anything about that in your meetings.";
-            }
-            const assistantMsg = {
-              message_id: `msg-${Date.now()}-a`,
-              thread_id: threadId,
-              role: "assistant",
-              content: assistantContent,
-              citations,
-              created_at: new Date().toISOString(),
-            };
-            const all = messagesByThread.get(threadId) ?? [];
-            all.push(userMsg, assistantMsg);
-            messagesByThread.set(threadId, all);
-            const thread = threads.find((x) => x.thread_id === threadId);
-            if (thread) {
-              thread.updated_at = assistantMsg.created_at;
-            }
-            // Simulate a background stream event for the UI.
-            setTimeout(() => emit("chatStream", {
-              type: "messageComplete",
-              thread_id: threadId,
-              message_id: assistantMsg.message_id,
-              content: assistantContent,
-              citations,
-            }), 10);
-            return {
-              thread_id: threadId,
-              user_message_id: userMsg.message_id,
-              assistant_message_id: assistantMsg.message_id,
-              content: assistantContent,
-              citations,
-            };
-          },
-        };
-      })(),
+      meetingIndex: {
+        async backfillStart() {
+          return {
+            state: "complete",
+            total: 0,
+            completed: 0,
+            currentRunFolder: null,
+            errors: 0,
+          };
+        },
+        async backfillStatus() {
+          return {
+            state: "complete",
+            total: 0,
+            completed: 0,
+            currentRunFolder: null,
+            errors: 0,
+          };
+        },
+        async backfillCountPending() {
+          return 0;
+        },
+        async embedModelStatus() {
+          return { model: "nomic-embed-text", installed: true };
+        },
+        async installEmbedModel() {
+          return;
+        },
+      },
       on: {
         recordingStatus(cb) {
           return subscribe("recordingStatus", cb);
@@ -2026,11 +1896,8 @@ export async function installMockApi(page: Page) {
         audioMonitorLevels(cb) {
           return subscribe("audioMonitorLevels", cb);
         },
-        chatStream(cb) {
-          return subscribe("chatStream", cb);
-        },
-        chatBackfillProgress(cb) {
-          return subscribe("chatBackfillProgress", cb);
+        meetingIndexBackfillProgress(cb) {
+          return subscribe("meetingIndexBackfillProgress", cb);
         },
       },
     };

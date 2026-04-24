@@ -9,13 +9,15 @@ Gistlist is a local-first desktop meeting workspace for solo power users. The pr
 - `packages/app`
   Electron desktop app, preload bridge, IPC layer, renderer flows, and app-specific tests.
 - `packages/app/main/chat-index/`
-  SQLite-backed retrieval for the chat assistant: chunking, Ollama embeddings, hybrid FTS+vector search with RRF merge, backfill state machine.
-- `packages/app/main/chat/`
-  Chat retrieval-assistant loop, citation parser, guardrails (meta regex, citation-worthiness fail-closed, cited-run whitelist), thread CRUD, chat IPC.
+  Writer side of the meeting-index corpus read by the MCP server: post-process chunking hooks, Ollama embeddings, FTS+sqlite-vec schema owner, backfill state machine. (No retrieval loop lives here anymore — the in-app Chat surface was deprecated in favor of Claude Desktop + MCP in 2026-04.)
+- `packages/app/main/meeting-index/`
+  IPC surface (`meeting-index:*`) that exposes backfill and embed-model controls to the renderer's Settings and SetupWizard.
+- `packages/mcp-server/`
+  Stdio MCP server spawned by Claude Desktop. Read-only over `meetings.db`; bypasses app/main and imports the retrieval primitives directly from `@gistlist/engine`. This is the chat surface now.
 - `packages/engine`
   Shared core for config, recording, transcription, prompt loading, run processing, and filesystem layout.
 - `packages/engine/src/core/chat-index/`
-  Pure (no-DB) chat-index primitives: speaker-turn chunker, markdown chunker, transcript.md parser, Ollama `/api/embed` client, shared types.
+  Pure (no-DB) meeting-index primitives: speaker-turn chunker, markdown chunker, transcript.md parser, Ollama `/api/embed` client, retrieval (`searchMeetings`, `listMeetings`), shared types. Consumed by both the app-side writer and the MCP server.
 - `packages/cli`
   Node CLI wrapper around the engine for setup, recording, and maintenance workflows.
 - `docs/`
@@ -47,7 +49,7 @@ Gistlist is a local-first desktop meeting workspace for solo power users. The pr
   2. targeted Playwright specs for the changed area
   3. `npm run test:e2e --workspace @gistlist/app`
   4. `npm test`
-  5. `npm run test:e2e:electron --workspace @gistlist/app` — **only when the change touches chat retrieval, indexing, citation playback, SetupWizard flows, or other Electron-main-process behavior that mocks can't prove.** Boots the real packaged main process, the real `meetings.db`, and talks to the user's live Ollama daemon + local library. Takes several minutes; skips cleanly if Ollama isn't reachable. See `docs/private_plans/testing-playbook.md` for the three-tier stack.
+  5. `npm run test:e2e:electron --workspace @gistlist/app` — **only when the change touches meeting-index writes (chunking/embedding), deep-link handling, citation playback, SetupWizard flows, or other Electron-main-process behavior that mocks can't prove.** Boots the real packaged main process, the real `meetings.db`, and talks to the user's live Ollama daemon + local library. Takes several minutes; skips cleanly if Ollama isn't reachable. See `docs/private_plans/testing-playbook.md` for the three-tier stack.
   6. `npm run rebuild:native --workspace @gistlist/app` — **always run this after tests finish** so the Electron app can start. Tests rebuild `better-sqlite3` for Node.js; this restores it for Electron.
 - For UI changes, the default testing bar is action completeness, not route render:
   - cover visible buttons, menus, tabs, dropdowns, row actions, bulk actions, and modal confirm/cancel paths on affected pages
@@ -73,7 +75,7 @@ Quick reference. See "How To Work In This Repo" above for the policy around when
 | `npm run test:e2e --workspace @gistlist/app` | Full mock-backed Playwright suite (desktop + narrow viewport projects). Does **not** cover Electron main-process behavior — that lives in `test:e2e:electron`. Required before completing any task. |
 | `npm run test:e2e:focus --workspace @gistlist/app -- specs/<area>.spec.ts` | Iteration loop. 8s timeout, 4 workers, desktop-only, line reporter. |
 | `npm run test:e2e:fast --workspace @gistlist/app` | "Is the whole surface broken?" — bails after 5 failures. |
-| `npm run test:e2e:electron --workspace @gistlist/app` | Live-Electron suite. Only when touching chat retrieval, indexing, citation playback, SetupWizard flows, or other main-process behavior mocks can't prove. Needs a running Ollama. |
+| `npm run test:e2e:electron --workspace @gistlist/app` | Live-Electron suite. Only when touching meeting-index writes, deep-link handling, citation playback, SetupWizard flows, or other main-process behavior mocks can't prove. Needs a running Ollama. |
 | `npm run rebuild:native --workspace @gistlist/app` | Run **after** `npm test` to restore the Electron-targeted `better-sqlite3` binary. |
 
 ## Native Module Rebuild (better-sqlite3)
@@ -95,7 +97,7 @@ Quick reference. See "How To Work In This Repo" above for the policy around when
 - [`docs/private_plans/naming-and-migration.md`](docs/private_plans/naming-and-migration.md) — Record of the 2026-04-19 rename from Meeting Notes to Gistlist, including migration steps for a live install. Read before changing CLI names, config paths, or keychain service strings.
 - [`docs/private_plans/testing-playbook.md`](docs/private_plans/testing-playbook.md) — Three-tier testing stack, action-completeness standard, fixture conventions. Read before changing app flows, Playwright fixtures, page objects, IPC-backed UI, or run-lifecycle behavior.
 - [`docs/private_plans/smoke-flow.md`](docs/private_plans/smoke-flow.md) — Manual QA checklist. Run before shipping changes to recording, processing, prompts, import, settings, or quit behavior.
-- [`docs/private_plans/chat-architecture.md`](docs/private_plans/chat-architecture.md) — Why Chat is shaped the way it is (layered engine/main split, retrieval loop, guardrails). Read before refactoring chat retrieval, chunking, embedding, or citation playback.
+- [`docs/private_plans/chat-architecture.md`](docs/private_plans/chat-architecture.md) — Why the meeting-index is shaped the way it is (writer path, FTS+vec schema, backfill, engine retrieval primitives consumed by MCP). Read before refactoring chunking, embedding, or citation playback. The in-app Chat UI described in earlier versions was removed in 2026-04 — the surface now lives in Claude Desktop via MCP.
 - [`docs/private_plans/privacy-posture-analysis.md`](docs/private_plans/privacy-posture-analysis.md) — Complete outbound-network audit and defensible privacy claims. Read before changing any code that makes a network call or writing privacy-facing copy.
 - [`docs/private_plans/DMG-bundling-and-update-system.md`](docs/private_plans/DMG-bundling-and-update-system.md) — Dependency inventory and packaging/update story. Read before changing `package:mac`, bundled binaries, or `check-bundled-binaries.mjs`.
 

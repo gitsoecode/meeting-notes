@@ -48,7 +48,7 @@ import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-m
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware, isSystemAudioSupported } from "./system.js";
-import { registerChatIpc } from "./chat/ipc.js";
+import { registerMeetingIndexIpc } from "./meeting-index/ipc.js";
 import {
   getMcpStatus,
   installMcpForClaude,
@@ -1809,8 +1809,8 @@ export function registerIpcHandlers(): void {
     return detectHardware();
   });
 
-  // ---- chat assistant ----
-  registerChatIpc();
+  // ---- meeting index (FTS + sqlite-vec corpus the MCP server reads) ----
+  registerMeetingIndexIpc();
 
   // Create an app logger on first registration — gives us structured
   // startup logs in ~/.gistlist/app.log.

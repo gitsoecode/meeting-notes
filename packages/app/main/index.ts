@@ -40,31 +40,33 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Pull the chat embedding model (`nomic-embed-text`) if it isn't already
- * installed. Best-effort: silent on failure, non-blocking. The chat feature
- * degrades to FTS-only when embeddings are unavailable, so this is a
- * quality-of-life improvement rather than a correctness requirement.
+ * Pull the meeting-index embedding model (`nomic-embed-text`) if it isn't
+ * already installed. Best-effort: silent on failure, non-blocking. The
+ * index is consumed by the MCP server, which degrades to FTS-only when
+ * embeddings are unavailable — so this is a quality-of-life improvement
+ * rather than a correctness requirement.
  */
-async function ensureChatEmbeddingModel(config: AppConfig): Promise<void> {
+async function ensureMeetingIndexEmbeddingModel(config: AppConfig): Promise<void> {
   try {
     const installed = await listOllamaModels(config.ollama.base_url);
     const have = installed.some(
       (m) => m.name === DEFAULT_EMBEDDING_MODEL || m.name.startsWith(`${DEFAULT_EMBEDDING_MODEL}:`)
     );
     if (have) return;
-    appLoggerRef?.info("Pulling chat embedding model in background", {
+    appLoggerRef?.info("Pulling meeting-index embedding model in background", {
       detail: DEFAULT_EMBEDDING_MODEL,
     });
     await pullOllamaModel(DEFAULT_EMBEDDING_MODEL, {
       baseUrl: config.ollama.base_url,
     });
-    appLoggerRef?.info("Chat embedding model pulled", {
+    appLoggerRef?.info("Meeting-index embedding model pulled", {
       detail: DEFAULT_EMBEDDING_MODEL,
     });
   } catch (err) {
-    appLoggerRef?.warn("ensureChatEmbeddingModel failed; chat will run FTS-only until resolved", {
-      detail: err instanceof Error ? err.message : String(err),
-    });
+    appLoggerRef?.warn(
+      "ensureMeetingIndexEmbeddingModel failed; meeting-index search will run FTS-only until resolved",
+      { detail: err instanceof Error ? err.message : String(err) },
+    );
   }
 }
 
@@ -251,9 +253,10 @@ app.whenReady().then(async () => {
         // Logged to ~/.gistlist/ollama.log; nothing more to do here.
       });
     }
-    // Ensure the chat embedding model is present. Small (~274MB); pulled
-    // silently in the background so first-chat works without setup steps.
-    void ensureChatEmbeddingModel(config).catch(() => {
+    // Ensure the meeting-index embedding model is present. Small (~274MB);
+    // pulled silently in the background so semantic search via MCP works
+    // without any setup steps from the user.
+    void ensureMeetingIndexEmbeddingModel(config).catch(() => {
       // Logged below; non-fatal.
     });
   } catch {

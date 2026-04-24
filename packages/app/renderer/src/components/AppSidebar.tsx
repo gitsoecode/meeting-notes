@@ -5,7 +5,6 @@ import {
   FileUp,
   FolderOpen,
   LayoutDashboard,
-  MessageCircle,
   MessageSquareText,
   NotebookPen,
   PlusCircle,
@@ -35,7 +34,7 @@ import {
 import { Spinner } from "./ui/spinner";
 
 interface AppSidebarProps {
-  activeNav: "record" | "meetings" | "chat" | "prompts" | "settings" | "activity";
+  activeNav: "record" | "meetings" | "prompts" | "settings" | "activity";
   onNavigate: (route: AppSidebarProps["activeNav"]) => void;
   onStartNow: () => void;
   onCreateDraft: () => void;
@@ -46,7 +45,6 @@ interface AppSidebarProps {
 const mainItems = [
   { id: "record" as const, label: "Home", icon: LayoutDashboard },
   { id: "meetings" as const, label: "Meetings", icon: AudioLines },
-  { id: "chat" as const, label: "Chat", icon: MessageCircle },
   { id: "prompts" as const, label: "Prompt Library", icon: MessageSquareText },
 ];
 

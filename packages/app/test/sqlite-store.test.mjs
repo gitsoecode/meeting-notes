@@ -46,7 +46,7 @@ test("migrate creates all tables and sets user_version", () => {
   migrate(db);
 
   const version = db.pragma("user_version", { simple: true });
-  assert.equal(version, 4);
+  assert.equal(version, 5);
 
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
@@ -60,6 +60,9 @@ test("migrate creates all tables and sets user_version", () => {
   assert.ok(tables.includes("run_participants"));
   assert.ok(tables.includes("attachments"));
   assert.ok(tables.includes("recording_segments"));
+  // v5 dropped these two — they must be gone after migrate().
+  assert.ok(!tables.includes("chat_threads"));
+  assert.ok(!tables.includes("chat_messages"));
   db.close();
 });
 

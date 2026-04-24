@@ -13,7 +13,7 @@ No account. No cloud sync. No telemetry.
 - **Recording.** Mic + system audio, with pause/resume, live audio meters, and recovery for runs interrupted by quit or crash.
 - **Transcription.** Fully local via Parakeet MLX (Apple Silicon) or whisper.cpp, or cloud via OpenAI. Swap providers in Settings.
 - **Prompt pipeline.** One default summary plus any number of user-defined prompts that run in parallel over the transcript. Outputs stream with live per-section progress.
-- **Chat.** Ask questions across every meeting in your library. Retrieval-grounded answers with click-to-seek audio citations, per-thread model switching, and a participant filter.
+- **Ask questions across your meetings.** Gistlist ships an MCP server that Claude Desktop spawns locally. Ask Claude anything about your library and it returns retrieval-grounded answers with click-to-seek audio citations — clicking a citation opens Gistlist at the exact transcript moment. See [docs/mcp-setup.md](docs/mcp-setup.md).
 - **Meeting prep.** A pre-meeting notes surface for staging context and prompts before a call.
 - **LLM provider.** Claude (cloud), OpenAI (cloud), or Ollama (fully local). Ollama is bundled in packaged macOS builds — no separate install required. Individual prompts can override the global provider, so you can mix (e.g. local for most prompts, Claude for one specific summary).
 - **Obsidian (optional).** Writes editable markdown into a vault, with a Dataview-powered dashboard for browsing runs.
@@ -122,38 +122,32 @@ Transcription is a separate path. Gistlist uses **Parakeet** (Apple Silicon MLX)
 
 ---
 
-## Chat
+## Asking questions across your meetings (Claude Desktop + MCP)
 
-The **Chat** tab lets you ask questions across every meeting in your library. It does retrieval-grounded search over your transcripts, summaries, and prep notes, and surfaces answers with clickable citations — each citation jumps to the exact moment in the meeting and plays the audio from there.
+Gistlist ships an MCP server — a small stdio subprocess that Claude Desktop spawns locally. Once installed, you can ask Claude anything about your library ("what did Lauren say about pricing last month?", "summarize my 1:1s with Alex this quarter") and it returns retrieval-grounded answers with clickable audio citations.
 
-The assistant is **read-only**: it can't edit, delete, or rename anything. Each thread is isolated (no cross-thread memory).
+- **Install:** Settings → Integrations → Claude Desktop. One click; Gistlist writes the Claude Desktop config. Restart Claude.
+- **Private by default:** the MCP server is read-only over your local `meetings.db` and only talks to Ollama at `localhost:11434` for semantic search. No outbound network.
+- **Citations:** every reply contains links of the form `https://gistlist.app/open?m=...&t=...` — clicking one opens Gistlist at the exact transcript moment.
 
-### What it needs
+What it needs to retrieve well:
 
 - The same Ollama daemon Gistlist already uses for local LLMs.
-- A chat model (defaults to whatever you picked in Setup — e.g. `qwen3.5:9b`). You can switch per thread.
-- The **`nomic-embed-text`** embedding model (~274 MB). Pulled automatically on first launch and also surfaced in **Settings → Chat → Chat embedding model**.
+- The **`nomic-embed-text`** embedding model (~274 MB). Pulled automatically on first launch and also surfaced in **Settings → Meeting index → Meeting-index embedding model**.
 
-If `sqlite-vec` (the native extension that powers vector search) fails to load — or if the embedding model isn't installed — Chat degrades to keyword search only. It doesn't crash. You'll lose paraphrase recall (asking about "rates" won't hit a transcript that said "pricing") but literal matches still work.
+If `sqlite-vec` (the native extension that powers vector search) fails to load — or if the embedding model isn't installed — MCP degrades to keyword search only. It doesn't crash. You'll lose paraphrase recall (asking about "rates" won't hit a transcript that said "pricing") but literal matches still work.
 
 ### How indexing works
 
 - Every completed or reprocessed meeting is indexed immediately into an FTS5 + vector index inside `~/.gistlist/meetings.db`.
-- Pre-existing meetings are indexed in the background the first time you open Chat (or from **Settings → Chat → Re-run indexing**). Under 5 meetings indexes silently; up to 50 shows an unobtrusive progress strip; 50+ shows an explicit Start/Later card.
+- Pre-existing meetings are indexed in the background via **Settings → Meeting index → Re-run indexing**.
 
-### Settings → Chat
+### Settings → Meeting index
 
-- **Chat embedding model** — status + Install button
-- **System prompt** — full editor with Save / Reset to default. Controls how the assistant behaves; the default is tuned to cite sparingly, prefer transcript citations over summary/prep/notes, and refuse to fabricate.
-- **Re-run indexing** — rebuilds the chat index over every meeting.
+- **Meeting-index embedding model** — status + Install button
+- **Re-run indexing** — rebuilds the index over every meeting.
 
-### Switching models
-
-Pick a per-thread model from the composer's model label or from the thread's kebab menu. Installed Ollama tags, Anthropic, and OpenAI models appear in grouped sections (cloud models only if the matching API key is set in Keychain).
-
-### Filter by participant
-
-The composer has a small `Filter` button that takes a participant name. Known participants are suggested from the `run_participants` table when populated; otherwise it falls back to matching the name against meeting titles (so "Lauren" finds the "Lauren Dai catchup" run even if no participants were auto-extracted).
+See [docs/mcp-setup.md](docs/mcp-setup.md) for detailed setup, troubleshooting, and the manual-config fallback.
 
 ---
 
@@ -173,7 +167,7 @@ The vault gets `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, `Das
 
 ## CLI (advanced / secondary)
 
-> The CLI lags behind the desktop app and doesn't support Chat, meeting prep, or live prompt streaming. New users should use the desktop app. The CLI is here for scripting, headless environments, and a few maintenance commands that aren't surfaced in the UI yet.
+> The CLI lags behind the desktop app and doesn't support meeting prep, live prompt streaming, or the Claude Desktop MCP integration. New users should use the desktop app. The CLI is here for scripting, headless environments, and a few maintenance commands that aren't surfaced in the UI yet.
 
 To use it, build and symlink from the repo root:
 
@@ -242,9 +236,7 @@ For the full list of test commands and when to use each, see the **Testing** sec
 | Pipeline config | `{vault_path}/{base_folder}/Config/pipeline.json` |
 | Templates | `{vault_path}/{base_folder}/Templates/` |
 | Dashboard | `{vault_path}/{base_folder}/Dashboard.md` |
-| Chat index (FTS + vectors) | `~/.gistlist/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
-| Chat threads + messages | Same `meetings.db` (`chat_threads`, `chat_messages`) |
-| Chat system prompt override | `~/.gistlist/chat-system-prompt.md` (created only after an edit in Settings) |
+| Meeting index (FTS + vectors) | `~/.gistlist/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
 
 ---
 

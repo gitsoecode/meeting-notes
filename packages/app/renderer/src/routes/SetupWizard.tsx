@@ -140,7 +140,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         .check()
         .then((res) => setInstalledLocalModels(res.installedModels))
         .catch(() => setInstalledLocalModels([]));
-      api.chat
+      api.meetingIndex
         .embedModelStatus()
         .then((s) => setEmbedAlreadyInstalled(!!s.installed))
         .catch(() => setEmbedAlreadyInstalled(false));
@@ -321,14 +321,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       // Embeddings are always local (Ollama + nomic-embed-text) regardless
       // of which LLM provider the user picked. Only pull if the user
       // opted in on step 3 and the model isn't already installed. Failure
-      // is non-fatal — chat degrades to FTS-only without it.
+      // is non-fatal — meeting-index search degrades to FTS-only without it.
       if (enableSemanticSearch && !embedAlreadyInstalled) {
         setEmbedProgress({ pct: 0 });
         const unsub = api.on.setupLlmProgress((p) =>
           setEmbedProgress({ pct: p.pct })
         );
         try {
-          await api.chat.installEmbedModel();
+          await api.meetingIndex.installEmbedModel();
         } catch (err) {
           console.warn("embedding model pull during setup failed", err);
         } finally {
@@ -721,10 +721,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 {embedAlreadyInstalled ? (
                   <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
                     <div className="text-sm font-medium text-[var(--text-primary)]">
-                      Semantic search in Chat
+                      Semantic meeting search
                     </div>
                     <div className="mt-1 text-sm text-[var(--text-secondary)]">
-                      The local embedding model is already installed — semantic search is ready.
+                      The local embedding model is already installed — semantic search is ready for Claude Desktop via MCP.
                     </div>
                   </div>
                 ) : (
@@ -732,8 +732,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     id="wizard-enable-semantic-search"
                     checked={enableSemanticSearch}
                     onCheckedChange={setEnableSemanticSearch}
-                    title="Enable semantic search in Chat (~274 MB download)"
-                    description="Lets Chat find transcripts by meaning, not just keywords (e.g. asking about “rates” will hit a transcript that said “pricing”). Runs locally — your transcripts never leave your machine. You can change this later in Settings."
+                    title="Enable semantic meeting search (~274 MB download)"
+                    description="Lets Claude Desktop (via MCP) find your transcripts by meaning, not just keywords (e.g. asking about “rates” will hit a transcript that said “pricing”). Runs locally — your transcripts never leave your machine. You can change this later in Settings."
                   />
                 )}
               </div>
@@ -891,8 +891,9 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     />
                   </div>
                   <p className="text-xs text-[var(--text-secondary)]">
-                    Powers semantic search in Chat. Runs locally — your
-                    transcripts never leave your machine.
+                    Powers semantic meeting search (used by Claude Desktop
+                    via MCP). Runs locally — your transcripts never leave
+                    your machine.
                   </p>
                 </div>
               )}

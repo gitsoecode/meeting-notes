@@ -43,7 +43,7 @@ Ship a Claude Desktop Extension (`.mcpb`) that lets users query their own local 
 
 ## Load-bearing insight #1: reuse the retrieval stack
 
-Gistlist already has a production-grade meeting retrieval system: SQLite + FTS5 + `sqlite-vec` + RRF merge + stable `(run_id, start_ms)` citations, used by the in-app Chat assistant. See [`docs/private_plans/chat-architecture.md`](../private_plans/chat-architecture.md).
+Gistlist has a production-grade meeting retrieval system: SQLite + FTS5 + `sqlite-vec` + RRF merge + stable `(run_id, start_ms)` citations. Originally built for the in-app Chat assistant; that assistant was deprecated in 2026-04 in favor of Claude Desktop via this MCP server. The retrieval primitives are unchanged — the app still writes the index; MCP now owns the only read path. See [`docs/private_plans/chat-architecture.md`](../private_plans/chat-architecture.md).
 
 The MCP server is **a second consumer of the same retrieval core**, not a parallel implementation. The original "markdown + frontmatter + gray-matter" proposal would discard FTS+vec hybrid retrieval and ship a weaker alternative — explicitly rejected.
 
