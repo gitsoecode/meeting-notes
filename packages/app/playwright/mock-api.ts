@@ -1785,32 +1785,49 @@ export async function installMockApi(page: Page) {
           return [];
         },
       },
-      integrations: {
-        async getMcpStatus() {
-          return {
-            mcpbPath: "/mock/Gistlist.mcpb",
-            mcpbExists: true,
-            meetingsIndexed: 7,
-            ollamaRunning: true,
-            claudeExtensionDetected: "no",
-          };
-        },
-        async installMcpForClaude() {
-          recordExternalAction("install-mcp-claude", {});
-          // Test-hook: when a spec sets __MOCK_INSTALL_MCP_FAIL__ via
-          // page.addInitScript, return the shape main/integrations.ts produces
-          // when shell.openPath can't find a registered handler. Lets the
-          // spec exercise the error-toast branch without rebuilding the app.
-          if ((window as any).__MOCK_INSTALL_MCP_FAIL__) {
+      integrations: (() => {
+        // Keep a tiny piece of mock state so install/uninstall roundtrip and
+        // the UI can reflect the change without rebuilding the app.
+        let configInstalled = false;
+        return {
+          async getMcpStatus() {
             return {
-              ok: false,
-              error:
-                "Couldn't open Gistlist.mcpb in Claude Desktop. See setup guide.",
+              serverJsPath: "/mock/Gistlist.app/Contents/Resources/mcp-server/server.js",
+              serverJsExists: true,
+              configInstalled,
+              configReadError: null,
+              claudeConfigPath:
+                "/mock/Library/Application Support/Claude/claude_desktop_config.json",
+              claudeDesktopInstalled: "yes",
+              meetingsIndexed: 7,
+              ollamaRunning: true,
             };
-          }
-          return { ok: true };
-        },
-      },
+          },
+          async installMcpForClaude() {
+            recordExternalAction("install-mcp-claude", {});
+            // Test-hook: when a spec sets __MOCK_INSTALL_MCP_FAIL__ via
+            // page.addInitScript, return the shape main/integrations.ts
+            // produces on a JSON-parse or write failure. Lets the spec
+            // exercise the error-toast branch without rebuilding the app.
+            if ((window as any).__MOCK_INSTALL_MCP_FAIL__) {
+              return {
+                ok: false,
+                error:
+                  "Claude Desktop config at /mock/path is not valid JSON. Fix or delete it and try again.",
+              };
+            }
+            const updated = configInstalled;
+            configInstalled = true;
+            return { ok: true, updated, legacyRemoved: false };
+          },
+          async uninstallMcpForClaude() {
+            recordExternalAction("uninstall-mcp-claude", {});
+            const updated = configInstalled;
+            configInstalled = false;
+            return { ok: true, updated, legacyRemoved: false };
+          },
+        };
+      })(),
       chat: (() => {
         const threads = [];
         const messagesByThread = new Map();

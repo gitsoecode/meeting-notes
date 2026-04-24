@@ -33,10 +33,27 @@ const requiredBinaries = [
       "The native microphone capture helper is built from packages/app/native/mic-capture.swift. Run `npm run build:mic-capture` (or a full `npm run build`) before packaging. Without it the engine falls back to ffmpeg's AVFoundation demuxer, which drops ~10–12% of samples on USB mics.",
   },
   {
-    name: "Gistlist.mcpb",
-    file: path.join(repoRoot, "packages", "mcp-server", "dist", "Gistlist.mcpb"),
+    name: "mcp-server bundle",
+    file: path.join(repoRoot, "packages", "mcp-server", "dist", "packaged", "server.js"),
     setup:
-      "Run `npm run build:mcp --workspace @gistlist/app` (which runs `npm run pack:mcpb --workspace @gistlist/mcp-server`) to produce the Claude Desktop extension bundle. Without it, the in-app 'Install Gistlist for Claude Desktop' button has nothing to open.",
+      "Run `npm run build:mcp --workspace @gistlist/app` (which runs `npm run build:packaged --workspace @gistlist/mcp-server`) to produce the bundled MCP server. Without it, the in-app 'Install Gistlist for Claude Desktop' button has nothing to point at.",
+  },
+  {
+    name: "mcp-server better-sqlite3 addon",
+    file: path.join(
+      repoRoot,
+      "packages",
+      "mcp-server",
+      "dist",
+      "packaged",
+      "node_modules",
+      "better-sqlite3",
+      "build",
+      "Release",
+      "better_sqlite3.node"
+    ),
+    setup:
+      "Ensure `npm run rebuild:native --workspace @gistlist/app` has run against Electron's ABI, then re-run `npm run build:mcp` so the native addon is staged alongside the bundle.",
   },
 ];
 
@@ -44,10 +61,12 @@ const missing = [];
 
 for (const binary of requiredBinaries) {
   try {
-    // Executables need X_OK; data files (entitlements plist, .mcpb archive)
-    // just need to exist and be readable.
+    // Executables need X_OK; data files (entitlements plist, server.js bundle,
+    // native addons loaded via dlopen) just need to exist and be readable.
     const needsExecute =
-      !binary.name.endsWith("entitlements") && !binary.file.endsWith(".mcpb");
+      !binary.name.endsWith("entitlements") &&
+      !binary.file.endsWith(".js") &&
+      !binary.file.endsWith(".node");
     const mode = needsExecute ? fs.constants.X_OK : fs.constants.R_OK;
     fs.accessSync(binary.file, mode);
   } catch {

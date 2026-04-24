@@ -17,7 +17,10 @@ test.describe("Settings → Integrations", () => {
 
     // Live status indicators populate from the mocked status.
     await expect(page.getByTestId("integrations-status-extension")).toContainText(
-      /Not detected|Detected|Detection unavailable/
+      /Installed|Not installed|unreadable/
+    );
+    await expect(page.getByTestId("integrations-status-claude-desktop")).toContainText(
+      /Claude Desktop/
     );
     await expect(page.getByTestId("integrations-status-ollama")).toContainText(
       /Ollama/
@@ -32,14 +35,32 @@ test.describe("Settings → Integrations", () => {
     await expect(docsLink).toHaveAttribute("href", /claude-desktop-setup/);
   });
 
-  test("clicking install fires the IPC and shows the success hint", async ({
+  test("clicking install fires the IPC, shows the restart hint, and reveals Uninstall", async ({
     page,
   }) => {
     await page.getByTestId("integrations-install-mcp").click();
-    // Mock returns ok → the "come back — we'll confirm" hint renders.
+    // Mock returns ok → the restart hint renders.
     await expect(page.getByTestId("integrations-opened")).toBeVisible({
       timeout: 5000,
     });
+    // After install, the button relabels and an Uninstall button appears.
+    await expect(page.getByTestId("integrations-install-mcp")).toContainText(
+      /Reinstall/i
+    );
+    await expect(page.getByTestId("integrations-uninstall-mcp")).toBeVisible();
+  });
+
+  test("uninstall removes the entry and hides the Uninstall button", async ({
+    page,
+  }) => {
+    // Install first so the uninstall affordance is present.
+    await page.getByTestId("integrations-install-mcp").click();
+    await expect(page.getByTestId("integrations-uninstall-mcp")).toBeVisible();
+    await page.getByTestId("integrations-uninstall-mcp").click();
+    await expect(page.getByTestId("integrations-uninstalled")).toBeVisible({
+      timeout: 5000,
+    });
+    await expect(page.getByTestId("integrations-uninstall-mcp")).toHaveCount(0);
   });
 });
 
@@ -60,7 +81,7 @@ test.describe("Settings → Integrations (install error path)", () => {
     await page.getByTestId("integrations-install-mcp").click();
     const errBox = page.getByTestId("integrations-install-error");
     await expect(errBox).toBeVisible({ timeout: 5000 });
-    await expect(errBox).toContainText(/Couldn't open Gistlist\.mcpb/);
+    await expect(errBox).toContainText(/not valid JSON/);
     await expect(errBox.getByRole("link", { name: /setup guide/i })).toBeVisible();
     // The success hint must NOT be shown on the failure branch.
     await expect(page.getByTestId("integrations-opened")).toHaveCount(0);

@@ -1363,9 +1363,9 @@ function IntegrationsSection() {
   const [status, setStatus] = useState<import("../../../shared/ipc").McpIntegrationStatus | null>(
     null
   );
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
-  const [installedOk, setInstalledOk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [lastAction, setLastAction] = useState<"installed" | "uninstalled" | null>(null);
 
   const refreshStatus = async () => {
     try {
@@ -1378,29 +1378,44 @@ function IntegrationsSection() {
 
   useEffect(() => {
     void refreshStatus();
-    // Poll every 10s while this tab is visible so Ollama / install state
-    // updates as the user takes action in Claude Desktop.
     const id = setInterval(refreshStatus, 10_000);
     return () => clearInterval(id);
   }, []);
 
   const handleInstall = async () => {
-    setInstallError(null);
-    setInstalledOk(false);
-    setInstalling(true);
+    setActionError(null);
+    setLastAction(null);
+    setBusy(true);
     try {
       const result = await api.integrations.installMcpForClaude();
       if (!result.ok) {
-        setInstallError(result.error ?? "Couldn't open Gistlist.mcpb.");
+        setActionError(result.error ?? "Couldn't write Claude Desktop config.");
       } else {
-        setInstalledOk(true);
+        setLastAction("installed");
       }
     } catch (err) {
-      setInstallError(err instanceof Error ? err.message : String(err));
+      setActionError(err instanceof Error ? err.message : String(err));
     } finally {
-      setInstalling(false);
-      // Trigger a status refresh so the "Detected" line can update once the
-      // user completes the install in Claude Desktop.
+      setBusy(false);
+      void refreshStatus();
+    }
+  };
+
+  const handleUninstall = async () => {
+    setActionError(null);
+    setLastAction(null);
+    setBusy(true);
+    try {
+      const result = await api.integrations.uninstallMcpForClaude();
+      if (!result.ok) {
+        setActionError(result.error ?? "Couldn't update Claude Desktop config.");
+      } else {
+        setLastAction("uninstalled");
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
       void refreshStatus();
     }
   };
@@ -1409,21 +1424,33 @@ function IntegrationsSection() {
     ? "Ollama running — semantic search available"
     : "Ollama not running — keyword search only";
 
-  const extensionLabel = (() => {
-    switch (status?.claudeExtensionDetected) {
+  const claudeDesktopLabel = (() => {
+    switch (status?.claudeDesktopInstalled) {
       case "yes":
-        return "Detected in Claude Desktop";
+        return "Claude Desktop detected";
       case "no":
-        return "Not detected in Claude Desktop yet";
+        return "Claude Desktop not found — install it from claude.ai/download first";
       default:
-        return "Detection unavailable on this platform";
+        return "Claude Desktop detection unavailable on this platform";
     }
+  })();
+
+  const configLabel = (() => {
+    if (status?.configReadError) {
+      return `Config file is unreadable: ${status.configReadError}`;
+    }
+    return status?.configInstalled
+      ? "Installed — restart Claude Desktop to pick up changes"
+      : "Not installed";
   })();
 
   const meetingsLabel =
     status?.meetingsIndexed == null
       ? "Meetings database not yet created — record a meeting first"
       : `${status.meetingsIndexed} meeting${status.meetingsIndexed === 1 ? "" : "s"} indexed`;
+
+  const installDisabled =
+    busy || !status?.serverJsExists || Boolean(status?.configReadError);
 
   return (
     <section className="space-y-5" data-testid="integrations-section">
@@ -1432,55 +1459,86 @@ function IntegrationsSection() {
           Claude Desktop
         </h3>
         <p className="text-sm leading-6 text-[var(--text-secondary)]">
-          Install the Gistlist extension in Claude Desktop and query your meetings
-          directly from any Claude conversation. Your meetings never leave your
-          machine — Claude spawns Gistlist on demand and reads them locally.
+          Connect Gistlist to Claude Desktop and query your meetings directly
+          from any Claude conversation. Install writes a <code>gistlist</code>{" "}
+          entry into Claude Desktop's config so it can spawn Gistlist on demand
+          and read your meetings locally.
         </p>
       </div>
 
-      <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
         <Button
           onClick={handleInstall}
-          disabled={installing || !status?.mcpbExists}
+          disabled={installDisabled}
           data-testid="integrations-install-mcp"
         >
-          {installing ? (
+          {busy && lastAction !== "uninstalled" ? (
             <>
               <Spinner className="mr-2 h-4 w-4" />
-              Opening Claude Desktop…
+              Writing config…
             </>
+          ) : status?.configInstalled ? (
+            "Reinstall Gistlist for Claude Desktop"
           ) : (
             "Install Gistlist for Claude Desktop"
           )}
         </Button>
-        {!status?.mcpbExists && (
-          <p className="text-xs text-[var(--text-secondary)]" data-testid="integrations-mcpb-missing">
-            Gistlist.mcpb wasn't found inside the app bundle — try reinstalling Gistlist.
-          </p>
-        )}
-        {installError && (
-          <div
-            className="rounded-md border border-[var(--error)] bg-[var(--error-bg,transparent)] p-3 text-sm text-[var(--error)]"
-            data-testid="integrations-install-error"
+        {status?.configInstalled && (
+          <Button
+            variant="secondary"
+            onClick={handleUninstall}
+            disabled={busy}
+            data-testid="integrations-uninstall-mcp"
           >
-            {installError}{" "}
-            <a
-              className="underline"
-              href="https://gistlist.app/docs/claude-desktop-setup"
-              target="_blank"
-              rel="noreferrer"
-            >
-              See setup guide →
-            </a>
-          </div>
-        )}
-        {installedOk && !installError && (
-          <p className="text-xs text-[var(--text-secondary)]" data-testid="integrations-opened">
-            Opened in Claude Desktop. Click <strong>Install</strong> there, then come
-            back — we'll confirm below once it's detected.
-          </p>
+            Uninstall
+          </Button>
         )}
       </div>
+
+      {!status?.serverJsExists && (
+        <p
+          className="text-xs text-[var(--text-secondary)]"
+          data-testid="integrations-server-missing"
+        >
+          Gistlist's bundled MCP server wasn't found at{" "}
+          <code>{status?.serverJsPath}</code>. Try reinstalling Gistlist.
+        </p>
+      )}
+
+      {actionError && (
+        <div
+          className="rounded-md border border-[var(--error)] bg-[var(--error-bg,transparent)] p-3 text-sm text-[var(--error)]"
+          data-testid="integrations-install-error"
+        >
+          {actionError}{" "}
+          <a
+            className="underline"
+            href="https://gistlist.app/docs/claude-desktop-setup"
+            target="_blank"
+            rel="noreferrer"
+          >
+            See setup guide →
+          </a>
+        </div>
+      )}
+
+      {lastAction === "installed" && !actionError && (
+        <p
+          className="text-xs text-[var(--text-secondary)]"
+          data-testid="integrations-opened"
+        >
+          Wrote the config entry. <strong>Restart Claude Desktop</strong>, then
+          ask it <em>"list my recent meetings"</em> to test.
+        </p>
+      )}
+      {lastAction === "uninstalled" && !actionError && (
+        <p
+          className="text-xs text-[var(--text-secondary)]"
+          data-testid="integrations-uninstalled"
+        >
+          Removed the config entry. Restart Claude Desktop to drop the server.
+        </p>
+      )}
 
       <Separator />
 
@@ -1488,8 +1546,12 @@ function IntegrationsSection() {
         <h4 className="text-sm font-medium text-[var(--text-primary)]">Status</h4>
         <ul className="space-y-1 text-sm text-[var(--text-secondary)]">
           <li data-testid="integrations-status-extension">
-            <span className="font-medium text-[var(--text-primary)]">Extension:</span>{" "}
-            {extensionLabel}
+            <span className="font-medium text-[var(--text-primary)]">Integration:</span>{" "}
+            {configLabel}
+          </li>
+          <li data-testid="integrations-status-claude-desktop">
+            <span className="font-medium text-[var(--text-primary)]">Claude Desktop:</span>{" "}
+            {claudeDesktopLabel}
           </li>
           <li data-testid="integrations-status-ollama">
             <span className="font-medium text-[var(--text-primary)]">Semantic search:</span>{" "}

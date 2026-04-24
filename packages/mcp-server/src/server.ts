@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Gistlist MCP server. Spawned by Claude Desktop over stdio. Read-only
+ * Gistlist MCP server. Spawned by Claude Desktop as an external stdio
+ * subprocess of the Gistlist app (either directly via `npm run install:claude-dev`
+ * in dev or via Settings → Integrations in the packaged app). Read-only
  * access to the user's local meetings.db and runs root. Talks to Ollama
  * on localhost when present (semantic search); otherwise falls back to
  * FTS-only retrieval.
@@ -15,12 +17,11 @@ import { registerTools } from "./tools.js";
 import { registerResources } from "./resources.js";
 
 const SERVER_NAME = "gistlist";
-const SERVER_VERSION = "0.1.2";
+const SERVER_VERSION = "0.2.0";
 
 function trace(msg: string): void {
-  // Breadcrumbs to Claude Desktop's MCP log via stderr. Stdout is reserved
-  // for JSON-RPC over stdio so anything that prints there corrupts the
-  // protocol and the host disconnects without explanation.
+  // Stdout is reserved for JSON-RPC over stdio, so diagnostics go to stderr.
+  // Claude Desktop tees the spawned child's stderr into its MCP log.
   try {
     process.stderr.write(`[gistlist-mcp] ${msg}\n`);
   } catch {

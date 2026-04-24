@@ -1,7 +1,8 @@
 /**
  * Resolves the Gistlist config dir from `GISTLIST_CONFIG_DIR` (set by the
- * MCPB user_config) and exposes derived paths. Falls back to the engine's
- * default `~/.gistlist/`.
+ * Gistlist app's claude_desktop_config.json install flow, or by the
+ * `install:claude-dev` script in dev) and exposes derived paths. Falls back
+ * to the engine's default `~/.gistlist/`.
  */
 import path from "node:path";
 import os from "node:os";
@@ -28,8 +29,8 @@ export function resolveConfig(): ResolvedConfig {
   if (!fs.existsSync(path.join(configDir, "config.yaml"))) {
     throw new Error(
       `Gistlist config not found at ${configDir}. ` +
-        `Open Gistlist once to initialize, then verify the "gistlist_config_dir" ` +
-        `value in Claude Desktop → Settings → Extensions → Gistlist.`
+        `Open Gistlist once to initialize, then re-run Settings → Integrations → ` +
+        `Install Gistlist for Claude Desktop (or "npm run install:claude-dev" in the repo).`
     );
   }
 
@@ -51,12 +52,24 @@ export function resolveConfig(): ResolvedConfig {
 
 function resolveConfigDir(): string {
   const envDir = process.env.GISTLIST_CONFIG_DIR;
-  if (envDir && envDir.trim().length > 0) return expandTilde(envDir.trim());
+  if (envDir && envDir.trim().length > 0) return expandPlaceholders(envDir.trim());
   return path.join(os.homedir(), ".gistlist");
 }
 
-function expandTilde(p: string): string {
-  if (p === "~") return os.homedir();
-  if (p.startsWith("~/")) return path.join(os.homedir(), p.slice(2));
-  return p;
+/**
+ * Expand `~`, `${HOME}`, `$HOME`, and `${USER_HOME}` placeholders in a path.
+ *
+ * Defense in depth: the app-side installer resolves the home directory before
+ * writing claude_desktop_config.json, so in practice env values arrive fully
+ * expanded. We keep this in case a user hand-edits the config to use a
+ * placeholder, or an older install left a literal `${HOME}` behind.
+ */
+function expandPlaceholders(p: string): string {
+  let result = p;
+  if (result === "~") return os.homedir();
+  if (result.startsWith("~/")) result = path.join(os.homedir(), result.slice(2));
+  // Replace ${HOME}, $HOME, and ${USER_HOME} (case-insensitive on the var
+  // name) anywhere in the string.
+  result = result.replace(/\$\{HOME\}|\$HOME(?![A-Z_])|\$\{USER_HOME\}/gi, os.homedir());
+  return result;
 }

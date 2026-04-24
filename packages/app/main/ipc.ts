@@ -49,7 +49,11 @@ import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware, isSystemAudioSupported } from "./system.js";
 import { registerChatIpc } from "./chat/ipc.js";
-import { getMcpStatus, installMcpForClaude } from "./integrations.js";
+import {
+  getMcpStatus,
+  installMcpForClaude,
+  uninstallMcpForClaude,
+} from "./integrations.js";
 import { indexRun as chatIndexRun } from "./chat-index/index-run.js";
 import { createOllamaEmbedder, DEFAULT_EMBEDDING_MODEL } from "@gistlist/engine";
 import type {
@@ -1476,6 +1480,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("integrations:install-mcp-claude", async () => {
     return installMcpForClaude();
+  });
+
+  ipcMain.handle("integrations:uninstall-mcp-claude", async () => {
+    return uninstallMcpForClaude();
   });
 
   // ---- Chat Launcher ----

@@ -611,19 +611,29 @@ export interface InitConfigRequest {
  * Keep this in sync with `preload/index.ts` and `main/ipc.ts`.
  */
 export interface McpIntegrationStatus {
-  /** Bundled Gistlist.mcpb path (for the install row). */
-  mcpbPath: string | null;
-  mcpbExists: boolean;
+  /** Path to the bundled MCP server entrypoint (for diagnostics / install row). */
+  serverJsPath: string;
+  serverJsExists: boolean;
+  /** True when `mcpServers.gistlist` is present in Claude Desktop's config. */
+  configInstalled: boolean;
+  /** Surfaced to the UI when the config file is unreadable/malformed. */
+  configReadError: string | null;
+  /** Absolute path to Claude Desktop's config file (for error messages / docs). */
+  claudeConfigPath: string;
+  /** Best-effort check for whether Claude Desktop is installed at all. */
+  claudeDesktopInstalled: "yes" | "no" | "unknown";
   /** Count of meetings in meetings.db; null when the DB hasn't been created yet. */
   meetingsIndexed: number | null;
   /** Live Ollama check — affects whether semantic search will work from the MCP server. */
   ollamaRunning: boolean;
-  /** Best-effort detection of the Gistlist extension in Claude Desktop's config. */
-  claudeExtensionDetected: "yes" | "no" | "unknown";
 }
 
 export interface McpInstallResult {
   ok: boolean;
+  /** True when an existing entry was overwritten / removed (vs. first-time add). */
+  updated?: boolean;
+  /** True when a legacy `.mcpb` install was cleaned up as part of the flow. */
+  legacyRemoved?: boolean;
   /** Set on failure — surfaces to the UI toast. */
   error?: string;
 }
@@ -870,10 +880,12 @@ export interface GistlistApi {
   obsidian: {
     detectVaults: () => Promise<DetectedVault[]>;
   };
-  // Integrations tab — currently just Claude Desktop via bundled .mcpb extension.
+  // Integrations tab — Claude Desktop MCP server (written into
+  // claude_desktop_config.json, see main/integrations.ts).
   integrations: {
     getMcpStatus: () => Promise<McpIntegrationStatus>;
     installMcpForClaude: () => Promise<McpInstallResult>;
+    uninstallMcpForClaude: () => Promise<McpInstallResult>;
   };
   // Events (subscribe)
   on: {

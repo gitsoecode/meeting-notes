@@ -184,6 +184,7 @@ const api: GistlistApi = {
   integrations: {
     getMcpStatus: () => ipcRenderer.invoke("integrations:get-mcp-status"),
     installMcpForClaude: () => ipcRenderer.invoke("integrations:install-mcp-claude"),
+    uninstallMcpForClaude: () => ipcRenderer.invoke("integrations:uninstall-mcp-claude"),
   },
   chatLauncher: {
     detectApps: () => ipcRenderer.invoke("chatLauncher:detect-apps"),
