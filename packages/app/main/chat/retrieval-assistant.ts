@@ -232,33 +232,31 @@ export async function sendMessage(
   const { citations } = buildStoredCitations(cleaned, searchResults);
   let finalCitations = citations;
 
-  if (requiresCitation(cleaned) && !hasCitations(cleaned)) {
-    // Combined rule: only relax fail-closed when the current turn looks
-    // like a follow-up/reformat AND the immediately-prior assistant turn
-    // was itself cited. Either signal on its own is insufficient — we
-    // must not allow an uncited new-claim turn to slip through just
-    // because the thread once had a cited answer.
-    const isFollowUp =
-      isReformatOrFollowUpQuery(req.userMessage) ||
-      isShortReferentialFollowUp(req.userMessage);
-    const priorCited = priorAssistantHadCitations(history);
+  const isFollowUp =
+    isReformatOrFollowUpQuery(req.userMessage) ||
+    isShortReferentialFollowUp(req.userMessage);
+  const priorCited = priorAssistantHadCitations(history);
 
-    if (isFollowUp && priorCited) {
-      // Carry forward the prior assistant turn's citations. Text is left
-      // as-is — the renderer shows carried citations as a "Sources"
-      // footer when there are no inline [[cite:...]] markers to anchor.
-      finalCitations = findPriorAssistantCitations(history);
-      appLogger.info("chat guardrail: citation carry-forward", {
-        thread_id: thread.thread_id,
-        carried: finalCitations.length,
-        reason: isReformatOrFollowUpQuery(req.userMessage)
-          ? "reformat"
-          : "short-referential",
-      });
-    } else {
-      cleaned = FAIL_CLOSED_MESSAGE;
-      finalCitations = [];
-    }
+  if (isFollowUp && priorCited && !hasCitations(cleaned)) {
+    // Carry forward the prior assistant turn's citations whenever the
+    // current turn is a follow-up/reformat over a previously-cited answer
+    // and the model didn't re-emit inline markers. Fires regardless of
+    // whether the response is declarative or a clarifying question —
+    // requiresCitation() skips interrogatives, but an uncited clarifier
+    // on a grounded follow-up should still surface the prior sources.
+    finalCitations = findPriorAssistantCitations(history);
+    appLogger.info("chat guardrail: citation carry-forward", {
+      thread_id: thread.thread_id,
+      carried: finalCitations.length,
+      reason: isReformatOrFollowUpQuery(req.userMessage)
+        ? "reformat"
+        : "short-referential",
+    });
+  } else if (requiresCitation(cleaned) && !hasCitations(cleaned)) {
+    // Multi-sentence declarative with no citations and no follow-up
+    // relaxation — swap for the hedge so we never emit ungrounded claims.
+    cleaned = FAIL_CLOSED_MESSAGE;
+    finalCitations = [];
   }
 
   const saved = addMessage(thread.thread_id, "assistant", cleaned, finalCitations);
