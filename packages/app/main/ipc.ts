@@ -45,6 +45,7 @@ import {
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { resolveBin } from "./bundled.js";
+import { installTool } from "./installers/install-tool.js";
 import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
@@ -1353,84 +1354,69 @@ export function registerIpcHandlers(): void {
     });
   });
 
-  // ---- dep install (brew wrapper) ----
+  // ---- dep install (direct download + verify, no Homebrew) ----
   //
-  // The Parakeet installer already streams logs via setup-asr:log. This
-  // mirrors that pattern for ffmpeg + BlackHole via Homebrew so the wizard
-  // can offer one-click installs without ever dropping the user into a
-  // terminal. We deliberately don't try to install Homebrew itself — that
-  // requires interactive sudo and an internet redirect dance that's
-  // much safer to hand off to the user.
+  // Replaces the prior brew wrapper. The wizard buttons call here for
+  // ffmpeg / ollama / whisper-cli; we look up the manifest entry,
+  // stream the URL through hash + signature + verify-exec checks, and
+  // atomic-rename into <userData>/bin. No Terminal, no Homebrew,
+  // no interactive sudo.
+  //
+  // `deps:check-brew` stays as a stub returning true so the existing
+  // wizard renderer doesn't show the "Homebrew not installed" card.
+  // Phase 3's wizard rewrite removes both this stub and the renderer
+  // call site entirely.
   ipcMain.handle("deps:check-brew", async (): Promise<boolean> => {
-    const brew = await whichCmd("brew");
-    return brew !== null;
+    return true;
   });
 
   ipcMain.handle(
     "deps:install",
     async (_e, target: DepsInstallTarget): Promise<DepsInstallResult> => {
-      const brew = await whichCmd("brew");
-      if (!brew) {
-        return { ok: false, brewMissing: true };
-      }
+      broadcastToAll("deps-install:log", `→ installing ${target}`);
 
-      const args =
-        target === "ffmpeg"
-          ? ["install", "ffmpeg"]
-          : ["install", "whisper-cpp"];
-
-      broadcastToAll("deps-install:log", `$ brew ${args.join(" ")}`);
-
-      return await new Promise<DepsInstallResult>((resolve) => {
-        const child = spawn(brew, args, {
-          env: { ...process.env },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        trackChildProcess(child, {
-          type: "brew-install",
-          label: target === "ffmpeg" ? "Installing ffmpeg" : "Installing whisper-cpp",
-          command: `${brew} ${args.join(" ")}`,
-        });
-
-        const streamLines = (chunk: Buffer) => {
-          const text = chunk.toString("utf-8");
-          for (const line of text.split(/\r?\n/)) {
-            if (line.trim() !== "") {
-              broadcastToAll("deps-install:log", line);
-            }
-          }
-        };
-        child.stdout?.on("data", streamLines);
-        child.stderr?.on("data", streamLines);
-
-        child.on("error", (err) => {
-          createAppLogger(false).error("Dependency install failed", {
-            processType: "brew-install",
-            pid: child.pid,
-            detail: target,
-            message: err.message,
-          });
-          resolve({ ok: false, error: err.message });
-        });
-        child.on("exit", (code) => {
-          if (code === 0) {
-            createAppLogger(false).info("Dependency install completed", {
-              processType: "brew-install",
-              pid: child.pid,
-              detail: target,
-            });
-            broadcastToAll("deps-install:log", `✓ ${target} installed`);
-            resolve({ ok: true });
+      const result = await installTool({
+        tool: target,
+        onProgress: (event: InstallerProgressEvent) => {
+          // Stream progress to two channels:
+          //  - installer-progress: structured payload (Phase 3 wizard
+          //    surfaces bytesDone/bytesTotal in a progress bar)
+          //  - deps-install:log: human-readable line stream (wizard
+          //    log panel — same UX as the brew wrapper used to drive)
+          broadcastToAll("installer-progress", event);
+          if (event.phase === "download" && event.bytesDone !== undefined) {
+            const total = event.bytesTotal
+              ? ` / ${humanBytes(event.bytesTotal)}`
+              : "";
+            broadcastToAll(
+              "deps-install:log",
+              `  ${event.phase}: ${humanBytes(event.bytesDone)}${total}`
+            );
+          } else if (event.phase === "failed") {
+            broadcastToAll(
+              "deps-install:log",
+              `✘ ${target} install failed: ${event.error ?? "unknown"}`
+            );
           } else {
-            createAppLogger(false).error("Dependency install exited with error", {
-              processType: "brew-install",
-              pid: child.pid,
-              detail: target,
-            });
-            resolve({ ok: false, error: `brew exited with code ${code}` });
+            broadcastToAll("deps-install:log", `  ${event.phase}…`);
           }
-        });
+        },
       });
+
+      if (result.ok) {
+        broadcastToAll("deps-install:log", `✓ ${target} installed`);
+        createAppLogger(false).info("Dependency install completed", {
+          processType: "wizard-install",
+          detail: target,
+        });
+        return { ok: true };
+      }
+      createAppLogger(false).error("Dependency install failed", {
+        processType: "wizard-install",
+        detail: target,
+        message: result.error,
+      });
+      return { ok: false, error: result.error, failedPhase: result.phase };
     }
   );
 
@@ -1868,4 +1854,12 @@ async function whichCmd(cmd: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Render a byte count for human-readable progress logs. */
+function humanBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

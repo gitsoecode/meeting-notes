@@ -266,6 +266,11 @@ function resolveExtractedBinary(entry: ToolManifestEntry): string {
   return path.join(extractDirFor(entry), entry.binaryPathInArchive);
 }
 
+/** Where preserve-tree installs land. Sibling of the canonical `<tool>` symlink. */
+function runtimeDirFor(entry: ToolManifestEntry): string {
+  return path.join(binDir(), `${entry.tool}-runtime`);
+}
+
 /**
  * Top-level installer. Returns ok|failure, never throws.
  * onProgress fires for each phase transition (and during download for byte-level updates).
@@ -290,8 +295,10 @@ export async function downloadAndStage(
     phase: InstallerPhase,
     error: string
   ): DownloadAndStageResult => {
-    // Always clean up: stage dir for this tool is purged on any failure.
-    // binDir() is left untouched on failure paths up to atomic rename.
+    // Always clean up stage dir on failure. binDir() is left untouched
+    // for any failure that happens *before* atomic rename; failures
+    // after the rename (verify-exec) are handled inline below — we
+    // remove the broken binary so the resolver can't see it.
     rmSilent(stageFileFor(entry));
     rmSilent(extractDirFor(entry));
     emit({ tool: entry.tool, phase: "failed", error });
@@ -299,10 +306,18 @@ export async function downloadAndStage(
   };
 
   // 0. Pre-clean any stale state from a prior (possibly failed) attempt.
+  // For preserve-tree tools, also clear any prior runtime dir + symlink so
+  // re-installs aren't held back by a corrupt previous attempt.
   ensureDir(downloadStageDir());
   ensureDir(binDir());
   rmSilent(stageFileFor(entry));
   rmSilent(extractDirFor(entry));
+  if (entry.installLayout === "preserve-tree") {
+    rmSilent(runtimeDirFor(entry));
+    // Remove a stale symlink from a prior install. fs.rm with force:true
+    // handles symlinks the same as files.
+    rmSilent(path.join(binDir(), entry.tool));
+  }
 
   // 1. Download
   emit({ tool: entry.tool, phase: "download", bytesDone: 0 });
@@ -368,15 +383,40 @@ export async function downloadAndStage(
   }
 
   // 5. Atomic rename into binDir() — same volume, POSIX-atomic.
+  // Two layouts:
+  //   single-binary: just move the executable.
+  //   preserve-tree: move the whole extraction tree, then symlink the
+  //                  canonical <binDir>/<tool> at the bin inside.
   const finalPath = path.join(binDir(), entry.tool);
   try {
-    // chmod +x before move so the resolver always sees an executable.
-    fs.chmodSync(extractedPath, 0o755);
-    // rmSilent any prior install — rename overwrites on POSIX, but
-    // being explicit keeps the failure modes simpler to reason about.
-    rmSilent(finalPath);
-    fs.renameSync(extractedPath, finalPath);
+    if (entry.installLayout === "single-binary") {
+      fs.chmodSync(extractedPath, 0o755);
+      rmSilent(finalPath);
+      fs.renameSync(extractedPath, finalPath);
+    } else {
+      // preserve-tree: move the entire extraction dir into runtime/.
+      const runtime = runtimeDirFor(entry);
+      // Re-clear in case some prior cleanup missed it.
+      rmSilent(runtime);
+      rmSilent(finalPath);
+      fs.renameSync(extractDirFor(entry), runtime);
+      // Make sure the binary inside the tree is executable. Tar/unzip
+      // usually preserves perms but we re-assert for safety.
+      const innerBin = path.join(runtime, entry.binaryPathInArchive);
+      fs.chmodSync(innerBin, 0o755);
+      // Relative symlink so the install tree is location-independent.
+      const relTarget = path.join(
+        `${entry.tool}-runtime`,
+        entry.binaryPathInArchive
+      );
+      fs.symlinkSync(relTarget, finalPath);
+    }
   } catch (err) {
+    // Belt-and-suspenders cleanup: if we partially moved a runtime dir
+    // before the symlink failed, get rid of it so the next attempt
+    // starts from a clean slate.
+    rmSilent(runtimeDirFor(entry));
+    rmSilent(finalPath);
     return fail(
       "extract",
       `atomic move failed: ${err instanceof Error ? err.message : String(err)}`
@@ -388,11 +428,20 @@ export async function downloadAndStage(
   const verifyResult = await runVerifyExec(finalPath, entry.verifyExec);
   if (!verifyResult.ok) {
     // Pull the broken binary back out so the resolver doesn't see it.
+    // For preserve-tree, remove the runtime dir too — without the symlink
+    // it'd be orphaned, and we'd rather a clean retry than an inconsistent
+    // half-state.
     rmSilent(finalPath);
+    if (entry.installLayout === "preserve-tree") {
+      rmSilent(runtimeDirFor(entry));
+    }
     return fail("verify-exec", verifyResult.error);
   }
 
   // 7. Cleanup of stage state — resolver only ever sees binDir().
+  // For preserve-tree, the extract dir was MOVED (not copied) to runtime/,
+  // so it no longer exists at this point — rmSilent is a no-op but kept
+  // for symmetry / future archive types that might keep stage around.
   rmSilent(stageFileFor(entry));
   rmSilent(extractDirFor(entry));
 

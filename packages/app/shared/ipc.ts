@@ -459,18 +459,28 @@ export interface HardwareInfoDTO {
 }
 
 /**
- * Dependencies the Setup Wizard can install via Homebrew on the user's
- * behalf. Keep this union in sync with the `deps:install` handler in
- * `main/ipc.ts` — adding a new target requires both sides to agree.
+ * Dependencies the Setup Wizard installs directly (no Homebrew). Targets
+ * map 1:1 to `ToolName` in `main/installers/manifest.ts` — adding a new
+ * tool means adding a manifest entry AND extending this union.
  */
-export type DepsInstallTarget = "ffmpeg" | "whisper-cpp";
+export type DepsInstallTarget = "ffmpeg" | "ollama" | "whisper-cli";
 
 export interface DepsInstallResult {
   ok: boolean;
-  /** Set when brew is missing from PATH — renderer shows a targeted fallback. */
+  /**
+   * @deprecated Brew is no longer the install mechanism. Kept for
+   * type-shape compatibility during the Phase 2/3 transition; always
+   * undefined in new code paths.
+   */
   brewMissing?: boolean;
-  /** Error message from the brew process if !ok. */
+  /** Error message from the install pipeline if !ok. */
   error?: string;
+  /**
+   * Phase that failed (download / verify-checksum / extract /
+   * verify-signature / verify-exec / manifest). Renderer maps this
+   * to a specific Retry-state message.
+   */
+  failedPhase?: string;
 }
 
 export interface DetectedVault {
