@@ -8,12 +8,10 @@ const appRoot = path.resolve(__dirname, "..");
 const repoRoot = path.resolve(appRoot, "..", "..");
 
 const requiredBinaries = [
-  {
-    name: "ollama",
-    file: path.join(appRoot, "resources", "bin", "ollama"),
-    setup:
-      "Download the universal macOS binary into packages/app/resources/bin/ollama and mark it executable before packaging.",
-  },
+  // NOTE: ollama is no longer bundled. It's installed at runtime by the
+  // setup wizard via main/installers/ollama.ts. The wizard fetches a
+  // pinned ollama-darwin.tgz, verifies its SHA-256, and lands the
+  // binary in `<userData>/bin/ollama`. See docs/data-directory.md.
   {
     name: "audiotee",
     file: path.join(repoRoot, "node_modules", "audiotee", "bin", "audiotee"),
