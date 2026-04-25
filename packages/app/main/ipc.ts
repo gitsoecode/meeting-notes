@@ -44,6 +44,7 @@ import {
 
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
+import { resolveBin } from "./bundled.js";
 import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
@@ -76,6 +77,8 @@ import type {
   DepsCheckResult,
   DepsInstallResult,
   DepsInstallTarget,
+  ResolvedTool,
+  InstallerProgressEvent,
   DetectedVault,
   JobSummary,
   OllamaRuntimeDTO,
@@ -1614,24 +1617,42 @@ export function registerIpcHandlers(): void {
 
   // ---- deps check ----
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
-    const ffmpeg = await whichCmd("ffmpeg");
+    // ffmpeg — resolved app-installed → bundled → system. Source is
+    // surfaced so the wizard can show "App copy" vs "System: …" badges.
+    const ffmpegBin = await resolveBin("ffmpeg");
     let ffmpegVersion: string | null = null;
-    if (ffmpeg) {
+    if (ffmpegBin) {
       try {
-        const { stdout } = await execFileAsync(ffmpeg, ["-version"]);
+        const { stdout } = await execFileAsync(ffmpegBin.path, ["-version"]);
         const m = stdout.match(/ffmpeg version (\S+)/);
         if (m) ffmpegVersion = m[1];
       } catch { /* ignore */ }
     }
-    const python = (await whichCmd("python3.12")) ?? (await whichCmd("python3.11")) ?? (await whichCmd("python3"));
+    const ffmpeg: ResolvedTool = {
+      path: ffmpegBin?.path ?? null,
+      source: ffmpegBin?.source ?? null,
+      version: ffmpegVersion,
+    };
+
+    // Python — system-only. We never install Python ourselves.
+    const pythonPath =
+      (await whichCmd("python3.12")) ??
+      (await whichCmd("python3.11")) ??
+      (await whichCmd("python3"));
     let pythonVersion: string | null = null;
-    if (python) {
+    if (pythonPath) {
       try {
-        const { stdout } = await execFileAsync(python, ["--version"]);
+        const { stdout } = await execFileAsync(pythonPath, ["--version"]);
         const m = stdout.match(/Python (\S+)/);
         if (m) pythonVersion = m[1];
       } catch { /* ignore */ }
     }
+    const python: ResolvedTool = {
+      path: pythonPath,
+      source: pythonPath ? "system" : null,
+      version: pythonVersion,
+    };
+
     // System audio: check macOS version for AudioTee support (14.2+).
     const systemAudioSupported = isSystemAudioSupported();
 
@@ -1639,26 +1660,40 @@ export function registerIpcHandlers(): void {
     // because during the Setup Wizard the user hasn't written a config yet and
     // safeLoadConfig() returns null. This default matches DEFAULT_CONFIG in
     // engine/core/config.ts — if either changes, this check needs to move.
-    const parakeetBin = path.join(
+    const parakeetBinPath = path.join(
       os.homedir(),
       ".gistlist",
       "parakeet-venv",
       "bin",
       "mlx_audio.stt.generate"
     );
-    let parakeet: string | null = null;
+    let parakeetPath: string | null = null;
     try {
-      const st = fs.statSync(parakeetBin);
+      const st = fs.statSync(parakeetBinPath);
       // Executable bit check — if the file is there but not executable the
       // venv is broken and we should offer to reinstall.
       if (st.isFile() && (st.mode & 0o111) !== 0) {
-        parakeet = parakeetBin;
+        parakeetPath = parakeetBinPath;
       }
     } catch {
-      parakeet = null;
+      parakeetPath = null;
     }
-    // whisper.cpp: check if whisper-cli is on PATH.
-    const whisperBin = await whichCmd("whisper-cli");
+    // Parakeet always lives under ~/.gistlist/parakeet-venv when present —
+    // it's app-managed, not bundled and not on PATH. We tag it as
+    // "app-installed" to match other wizard-managed tools.
+    const parakeet: ResolvedTool = {
+      path: parakeetPath,
+      source: parakeetPath ? "app-installed" : null,
+      version: null,
+    };
+
+    // whisper-cli — resolved app-installed → bundled → system PATH.
+    const whisperBin = await resolveBin("whisper-cli");
+    const whisper: ResolvedTool = {
+      path: whisperBin?.path ?? null,
+      source: whisperBin?.source ?? null,
+      version: null,
+    };
 
     // Ollama: ask the daemon module what state it's in (or attempt to ping a
     // pre-existing system daemon if we haven't started ours yet). We don't
@@ -1696,13 +1731,11 @@ export function registerIpcHandlers(): void {
     }
     return {
       ffmpeg,
-      ffmpegVersion,
       python,
-      pythonVersion,
       blackhole: "missing" as const,
       systemAudioSupported,
       parakeet,
-      whisper: whisperBin,
+      whisper,
       ollama: {
         daemon: ollamaDaemonUp,
         source: ollamaSource,

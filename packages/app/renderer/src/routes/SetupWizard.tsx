@@ -347,8 +347,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const finishDisabled = useMemo(() => {
     if (busy || installing || restartingAudio) return true;
     if (!deps) return true;
-    if (!deps.ffmpeg) return true;
-    if (asrProvider === "parakeet-mlx" && !deps.parakeet) return true;
+    if (!deps.ffmpeg.path) return true;
+    if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
     // BlackHole no longer required — system audio is captured via AudioTee
     if (llmProvider === "ollama") {
       if (!localLlmModel) return true;
@@ -776,8 +776,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className="space-y-3">
                   <DependencyRow
                     name="ffmpeg"
-                    ok={!!deps.ffmpeg}
-                    value={deps.ffmpeg ?? undefined}
+                    ok={!!deps.ffmpeg.path}
+                    value={deps.ffmpeg.path ?? undefined}
                     installLabel="Install via Homebrew"
                     installing={installing === "ffmpeg"}
                     anyInstalling={installing !== null}
@@ -797,15 +797,15 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   {asrProvider === "parakeet-mlx" && (
                     <DependencyRow
                       name="Parakeet"
-                      ok={!!deps.parakeet}
-                      value={deps.parakeet ?? undefined}
+                      ok={!!deps.parakeet.path}
+                      value={deps.parakeet.path ?? undefined}
                       installLabel="Install Parakeet"
                       installing={installing === "parakeet"}
                       anyInstalling={installing !== null}
                       brewAvailable={true}
                       onInstall={installParakeet}
                       footerNote={
-                        !deps.parakeet
+                        !deps.parakeet.path
                           ? "Creates a Python venv at ~/.gistlist/parakeet-venv and downloads model weights (~600 MB). Takes about a minute."
                           : undefined
                       }

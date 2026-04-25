@@ -176,8 +176,8 @@ export function Settings({ config, onChange }: SettingsProps) {
     setHasOpenai(true);
   };
 
-  const parakeetInstalled = Boolean(deps?.parakeet);
-  const whisperInstalled = Boolean(deps?.whisper);
+  const parakeetInstalled = Boolean(deps?.parakeet.path);
+  const whisperInstalled = Boolean(deps?.whisper.path);
 
   const scrollToApiKeys = () => {
     apiKeysRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -208,27 +208,33 @@ export function Settings({ config, onChange }: SettingsProps) {
       : [
           {
             label: "ffmpeg",
-            value: deps.ffmpeg ?? "not found — brew install ffmpeg",
-            version: deps.ffmpegVersion ?? null,
-            ok: !!deps.ffmpeg,
+            value:
+              deps.ffmpeg.path
+                ? `${deps.ffmpeg.path}${deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : ""}`
+                : "not found",
+            version: deps.ffmpeg.version,
+            ok: !!deps.ffmpeg.path,
           },
           {
             label: "Python",
-            value: deps.python ?? "not found",
-            version: deps.pythonVersion ?? null,
-            ok: !!deps.python,
+            value: deps.python.path ?? "not found",
+            version: deps.python.version,
+            ok: !!deps.python.path,
           },
           {
             label: "Parakeet",
-            value: deps.parakeet ?? "not installed",
-            version: null,
-            ok: !!deps.parakeet,
+            value: deps.parakeet.path ?? "not installed",
+            version: deps.parakeet.version,
+            ok: !!deps.parakeet.path,
           },
           {
             label: "whisper.cpp",
-            value: deps.whisper ?? "not found",
-            version: null,
-            ok: !!deps.whisper,
+            value:
+              deps.whisper.path
+                ? `${deps.whisper.path}${deps.whisper.source ? ` (${deps.whisper.source})` : ""}`
+                : "not found",
+            version: deps.whisper.version,
+            ok: !!deps.whisper.path,
           },
           {
             label: "Ollama",
@@ -357,7 +363,7 @@ export function Settings({ config, onChange }: SettingsProps) {
                   ) : parakeetInstalled ? (
                     <div className="space-y-1.5">
                       <p className="text-sm text-[var(--success)]">Installed</p>
-                      <p className="text-xs text-[var(--text-tertiary)]">{deps.parakeet}</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{deps.parakeet.path}</p>
                       <button
                         type="button"
                         className="text-xs text-[var(--text-tertiary)] underline decoration-dotted hover:text-[var(--text-secondary)]"
@@ -436,7 +442,7 @@ export function Settings({ config, onChange }: SettingsProps) {
                   ) : whisperInstalled ? (
                     <div className="space-y-1.5">
                       <p className="text-sm text-[var(--success)]">Installed</p>
-                      <p className="text-xs text-[var(--text-tertiary)]">{deps.whisper}</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{deps.whisper.path}</p>
                     </div>
                   ) : (
                     <div className="space-y-2">

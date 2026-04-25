@@ -1,12 +1,9 @@
-import { spawn, type ChildProcess, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { pingOllama, getConfigDir, createAppLogger } from "@gistlist/engine";
-import { bundledBin, bundledBinExists } from "./bundled.js";
+import { resolveBin } from "./bundled.js";
 import { trackChildProcess, updateTrackedProcess } from "./activity-monitor.js";
-
-const execFileAsync = promisify(execFile);
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const PING_INTERVAL_MS = 250;
@@ -31,10 +28,12 @@ const appLogger = createAppLogger(false);
  * order, top-down:
  *
  *   1. A daemon already answering on :11434 — leave it alone, just use it.
- *   2. A system `ollama` binary on PATH — spawn it ourselves and stop it
- *      on app quit. The user gets to keep their own model directory.
- *   3. The bundled binary inside the .app — spawn it. Models still default
- *      to ~/.ollama/models so a future system install picks them up.
+ *   2. App-installed binary at `<userData>/bin/ollama` — landed by the
+ *      wizard installer (Phase 2). Preferred when present because we
+ *      know its version and SHA-256.
+ *   3. Bundled inside the .app (legacy) — kept so dev builds with locally-
+ *      staged binaries still resolve.
+ *   4. System `ollama` on PATH — the user's existing Homebrew install.
  *
  * In every case OLLAMA_MODELS is left at the standard location so we
  * never duplicate downloads — the win the user explicitly asked for.
@@ -48,21 +47,20 @@ export async function ensureOllamaDaemon(): Promise<OllamaState> {
     return state;
   }
 
-  // 2. System binary on PATH?
-  const systemPath = await whichOllama();
-
-  // 3. Otherwise the bundled binary.
-  let binary: string | null = systemPath;
-  let source: OllamaSource = "system-spawned";
-  if (!binary && bundledBinExists("ollama")) {
-    binary = bundledBin("ollama");
-    source = "bundled-spawned";
-  }
-  if (!binary) {
+  // 2-4. resolveBin walks app-installed → bundled → system in priority order.
+  const resolved = await resolveBin("ollama");
+  if (!resolved) {
     throw new Error(
-      "No Ollama binary available — neither installed on PATH nor bundled with the app."
+      "No Ollama binary available — wizard install hasn't run, nothing bundled, nothing on PATH."
     );
   }
+  const binary: string = resolved.path;
+  // The OllamaSource enum predates the resolver split; both "app-installed"
+  // and "bundled" map to "bundled-spawned" because to the daemon's lifecycle
+  // they're identical (we own it, we kill it on quit). "system" maps to
+  // "system-spawned" — the user's binary, but we run it.
+  const source: OllamaSource =
+    resolved.source === "system" ? "system-spawned" : "bundled-spawned";
 
   // Open log file early so spawn errors get captured too.
   fs.mkdirSync(getConfigDir(), { recursive: true });
@@ -163,16 +161,6 @@ export async function stopOllamaDaemon(): Promise<void> {
 
 export function getOllamaState(): OllamaState | null {
   return state;
-}
-
-async function whichOllama(): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync("/usr/bin/env", ["which", "ollama"]);
-    const trimmed = stdout.trim();
-    return trimmed || null;
-  } catch {
-    return null;
-  }
 }
 
 function delay(ms: number): Promise<void> {

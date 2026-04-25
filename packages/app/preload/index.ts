@@ -23,6 +23,7 @@ import type {
   JobSummary,
   LaunchChatRequest,
   MeetingIndexProgressDTO,
+  InstallerProgressEvent,
 } from "../shared/ipc.js";
 
 const api: GistlistApi = {
@@ -264,6 +265,11 @@ const api: GistlistApi = {
       const handler = (_e: unknown, progress: MeetingIndexProgressDTO) => cb(progress);
       ipcRenderer.on("meeting-index:backfill-progress", handler);
       return () => ipcRenderer.removeListener("meeting-index:backfill-progress", handler);
+    },
+    installerProgress: (cb: (event: InstallerProgressEvent) => void) => {
+      const handler = (_e: unknown, event: InstallerProgressEvent) => cb(event);
+      ipcRenderer.on("installer-progress", handler);
+      return () => ipcRenderer.removeListener("installer-progress", handler);
     },
   },
 };

@@ -382,19 +382,37 @@ export interface AudioTestReport {
 /** @deprecated BlackHole is no longer required — system audio is captured via AudioTee. */
 export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 
+/**
+ * One row of `DepsCheckResult` for tools the resolver can find in
+ * multiple places. The renderer uses `source` to render badges
+ * ("App copy" / "System: …") and to offer a "Use a clean copy"
+ * affordance when a system-resolved binary is in use but a clean
+ * wizard install would be safer.
+ *
+ * `null` source means the binary wasn't found anywhere — `path` is
+ * also null in that case. `version` is best-effort: the resolver
+ * tries to parse `--version` output for tools where it makes sense,
+ * and returns null when parsing fails (which is non-fatal).
+ */
+export interface ResolvedTool {
+  path: string | null;
+  source: "app-installed" | "bundled" | "system" | null;
+  version: string | null;
+}
+
 export interface DepsCheckResult {
-  ffmpeg: string | null;
-  ffmpegVersion?: string | null;
+  /** ffmpeg via wizard install, bundle, or system PATH. */
+  ffmpeg: ResolvedTool;
   /** @deprecated Kept for type compatibility. Always "missing" in new code. */
   blackhole: BlackHoleStatus;
   /** True when macOS 14.2+ supports automatic system audio capture via CoreAudio taps. */
   systemAudioSupported: boolean;
-  python: string | null;
-  pythonVersion?: string | null;
-  /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
-  parakeet: string | null;
-  /** Absolute path to whisper-cli if found on PATH, else null. */
-  whisper: string | null;
+  /** python3 — system-only (we never install python ourselves). */
+  python: ResolvedTool;
+  /** Parakeet venv binary — app-managed, lives under ~/.gistlist/. */
+  parakeet: ResolvedTool;
+  /** whisper-cli — wizard-installable; system PATH fallback for devs. */
+  whisper: ResolvedTool;
   /**
    * Local-LLM (Ollama) status. The daemon is owned by the main process; we
    * always have a binary (bundled or system), so the only useful question
@@ -407,6 +425,29 @@ export interface DepsCheckResult {
     installedModels: string[];
     version?: string | null;
   };
+}
+
+/**
+ * Phase the wizard installer is in. Surfaced via `installer-progress`
+ * so the UI can label the current step ("Downloading…",
+ * "Verifying signature…", etc.) and on failure show which phase failed.
+ */
+export type InstallerPhase =
+  | "download"
+  | "verify-checksum"
+  | "extract"
+  | "verify-signature"
+  | "verify-exec"
+  | "complete"
+  | "failed";
+
+export interface InstallerProgressEvent {
+  tool: "ffmpeg" | "ollama" | "whisper-cli" | string;
+  phase: InstallerPhase;
+  bytesDone?: number;
+  bytesTotal?: number;
+  /** Set on phase: "failed". A short message suitable for the UI. */
+  error?: string;
 }
 
 export interface HardwareInfoDTO {
@@ -824,6 +865,8 @@ export interface GistlistApi {
     processUpdate: (cb: (process: ActivityProcess) => void) => () => void;
     audioMonitorLevels: (cb: (snapshot: AudioMonitorSnapshot) => void) => () => void;
     meetingIndexBackfillProgress: (cb: (progress: MeetingIndexProgressDTO) => void) => () => void;
+    /** Per-phase progress events from the wizard installer. */
+    installerProgress: (cb: (event: InstallerProgressEvent) => void) => () => void;
   };
 }
 
