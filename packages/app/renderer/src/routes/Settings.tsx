@@ -186,13 +186,16 @@ export function Settings({ config, onChange }: SettingsProps) {
   const installWhisper = async () => {
     setInstallingWhisper(true);
     try {
-      const result = await api.deps.install("whisper-cpp");
+      // The wizard installer pulls a pinned, SHA-256-verified whisper-cli
+      // binary directly — no Homebrew. The DepsInstallTarget union became
+      // "whisper-cli" in Phase 2; the old "whisper-cpp" Homebrew formula
+      // name no longer applies.
+      const result = await api.deps.install("whisper-cli");
       if (!result.ok) {
-        if (result.brewMissing) {
-          setError("Homebrew is not installed. Install it from brew.sh, then try again.");
-        } else {
-          setError(result.error ?? "Failed to install whisper-cpp.");
-        }
+        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+        setError(
+          `Failed to install whisper-cli${phase}: ${result.error ?? "unknown error"}`
+        );
       }
       refreshDeps();
     } catch (err) {
@@ -453,15 +456,16 @@ export function Settings({ config, onChange }: SettingsProps) {
                         disabled={installingWhisper}
                         onClick={() => {
                           setPendingConfirm({
-                            title: "Install whisper-cpp?",
-                            description: "This will install whisper-cpp via Homebrew.",
+                            title: "Install whisper-cli?",
+                            description:
+                              "Downloads a SHA-256-pinned whisper-cli binary into Application Support. No Terminal needed.",
                             confirmLabel: "Install",
                             confirmVariant: "default",
                             action: installWhisper,
                           });
                         }}
                       >
-                        {installingWhisper ? <><Spinner className="h-4 w-4" /> Installing…</> : "Install via Homebrew"}
+                        {installingWhisper ? <><Spinner className="h-4 w-4" /> Installing…</> : "Install whisper-cli"}
                       </Button>
                     </div>
                   )}

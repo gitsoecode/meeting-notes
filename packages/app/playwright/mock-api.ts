@@ -45,6 +45,8 @@ export async function installMockApi(page: Page) {
       processUpdate: new Set(),
       audioMonitorLevels: new Set(),
       meetingIndexBackfillProgress: new Set(),
+      installerProgress: new Set(),
+      updaterStatus: new Set(),
     };
     const stateStorageKey = "__gistlist_mock_state__";
     const promptsStorageKey = "__gistlist_prompts__";
@@ -1747,15 +1749,27 @@ export async function installMockApi(page: Page) {
         },
       },
       async depsCheck() {
+        // Wrap flat depsState fields into the ResolvedTool shape the
+        // renderer now expects (path / source / version). Mocked
+        // sources default to "system" (Homebrew-style paths) and
+        // "app-installed" for the parakeet venv, matching the
+        // production resolver semantics.
+        const wrap = (
+          path: string | null,
+          source: "system" | "app-installed" | "bundled",
+          version: string | null = null
+        ) => ({
+          path,
+          source: path ? source : null,
+          version,
+        });
         return {
-          ffmpeg: depsState.ffmpeg,
-          ffmpegVersion: depsState.ffmpegVersion,
+          ffmpeg: wrap(depsState.ffmpeg, "system", depsState.ffmpegVersion),
           blackhole: depsState.blackhole,
           systemAudioSupported: depsState.systemAudioSupported,
-          python: depsState.python,
-          pythonVersion: depsState.pythonVersion,
-          parakeet: depsState.parakeet,
-          whisper: depsState.whisper ?? null,
+          python: wrap(depsState.python, "system", depsState.pythonVersion),
+          parakeet: wrap(depsState.parakeet, "app-installed"),
+          whisper: wrap(depsState.whisper ?? null, "system"),
           ollama: {
             daemon: true,
             source: "bundled-spawned",
@@ -1766,9 +1780,19 @@ export async function installMockApi(page: Page) {
       },
       deps: {
         async install(target) {
+          // The DepsInstallTarget union changed in Phase 2 from
+          // "ffmpeg" | "whisper-cpp" to "ffmpeg" | "ollama" | "whisper-cli".
+          // Mock paths still use Homebrew-style locations because that's
+          // what the test fixtures already have on disk, but the wizard
+          // surfaces these as `(system)` source — same as a real machine
+          // with Homebrew already installed.
           emit("depsInstallLog", `Installed ${target}`);
           if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
-          if (target === "whisper-cpp") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
+          if (target === "whisper-cli") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
+          if (target === "ollama") {
+            // Ollama install just no-ops in the mock — daemon is already
+            // true. Real installs land the binary in <userData>/bin/.
+          }
           persistState();
           return { ok: true };
         },
@@ -1832,6 +1856,43 @@ export async function installMockApi(page: Page) {
         // to signal. Exposed so the renderer's `api.deepLink.ready()` call
         // on App mount doesn't throw.
         ready: () => {},
+      },
+      support: {
+        // Mocked out: no real mailto / Finder in browser-backed Playwright.
+        // Specs that care assert against the externalActionLog instead of
+        // expecting a window to open.
+        async openFeedbackMail() {
+          externalActionLog.push({ type: "support:open-feedback-mail" });
+        },
+        async revealLogsInFinder() {
+          externalActionLog.push({ type: "support:reveal-logs" });
+        },
+      },
+      updater: {
+        // Updater is build-time gated and disabled in mock builds. The
+        // renderer reads `enabled` once on startup and hides the entire
+        // UI surface when disabled, so this is the natural mock shape.
+        async getStatus() {
+          return { enabled: false, kind: "disabled-at-build" as const };
+        },
+        async check() {
+          return { enabled: false, kind: "disabled-at-build" as const };
+        },
+        async download() {
+          return { enabled: false, kind: "disabled-at-build" as const };
+        },
+        async install() {
+          return { enabled: false, kind: "disabled-at-build" as const };
+        },
+        async getPrefs() {
+          return { autoCheck: true, notifyBanner: true };
+        },
+        async setPrefs(prefs) {
+          return prefs;
+        },
+        async simulate() {
+          return { enabled: false, kind: "disabled-at-build" as const };
+        },
       },
       meetingIndex: {
         async backfillStart() {
@@ -1898,6 +1959,12 @@ export async function installMockApi(page: Page) {
         },
         meetingIndexBackfillProgress(cb) {
           return subscribe("meetingIndexBackfillProgress", cb);
+        },
+        installerProgress(cb) {
+          return subscribe("installerProgress", cb);
+        },
+        updaterStatus(cb) {
+          return subscribe("updaterStatus", cb);
         },
       },
     };

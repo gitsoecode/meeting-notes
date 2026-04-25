@@ -113,9 +113,12 @@ export class SetupWizardPage {
     return this.page.locator('input[type="password"]').first();
   }
 
-  // Step 4: Dependencies
+  // Step 4: Dependencies. Uses exact match so we don't collide with the
+  // path-and-source string the row also renders (e.g. the ffmpeg row
+  // shows both "ffmpeg" as a title and "/opt/homebrew/bin/ffmpeg (system)"
+  // as a value — non-exact match would resolve to two elements).
   depRowByName(name: string) {
-    return this.page.getByText(name, { exact: false });
+    return this.page.getByText(name, { exact: true });
   }
 
   recheckButton() {

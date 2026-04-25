@@ -748,7 +748,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           {step === 4 && (
             <WizardStep
               title="Dependencies"
-              description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you with Homebrew."
+              description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you — no Terminal needed."
               footer={
                 <WizardActions
                   back={{ label: "Back", onClick: () => setStep(3), disabled: installing !== null }}

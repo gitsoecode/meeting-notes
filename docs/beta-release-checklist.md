@@ -178,22 +178,26 @@ the upload but are not embedded in the artifact.
 
    ```sh
    # Option A — keychain profile already stored:
-   npm run package:mac --workspace @gistlist/app -- --sign
+   npm run package:mac:sign --workspace @gistlist/app
 
    # Option B — ephemeral env vars:
    export APPLE_API_KEY=~/.gistlist-secrets/AuthKey_<keyid>.p8
    export APPLE_API_KEY_ID=<keyid>
    export APPLE_API_ISSUER=<issuer-uuid>
-   npm run package:mac --workspace @gistlist/app -- --sign
+   npm run package:mac:sign --workspace @gistlist/app
    unset APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
    ```
 
-5. **Preflight runs first.** `scripts/check-notarize-env.mjs` is
-   invoked by the `package:mac` chain when `--sign` is present. It
-   verifies all three env vars (or the keychain profile equivalent)
-   and confirms a Developer ID Application cert is in your keychain.
-   On any failure it exits non-zero **before** electron-builder
-   starts — you don't waste a notarization round-trip.
+5. **Preflight runs first.** The `package:mac:sign` script invokes
+   `scripts/check-notarize-env.mjs` directly before electron-builder.
+   It verifies all three env vars (or the keychain profile
+   equivalent) and confirms a Developer ID Application cert is in
+   your keychain. On any failure it exits non-zero **before**
+   electron-builder starts — you don't waste a notarization round-trip.
+
+   (`package:mac` without the `:sign` suffix produces an unsigned
+   build and skips the preflight entirely, useful for local smoke
+   testing.)
 
 6. **electron-builder signs everything**, then `scripts/after-sign.mjs`
    re-signs `Contents/MacOS/audiotee` with `com.apple.security.inherit`

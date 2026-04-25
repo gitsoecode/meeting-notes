@@ -272,6 +272,18 @@ function runtimeDirFor(entry: ToolManifestEntry): string {
 }
 
 /**
+ * Where a new install stages BEFORE swap. The whole point: never delete
+ * the user's working install until we've verified the replacement. If
+ * download/verify fails, this stage path gets cleaned up and the existing
+ * `<tool>` (and `<tool>-runtime` for preserve-tree) is untouched.
+ */
+function stagedInstallFor(entry: ToolManifestEntry): string {
+  return entry.installLayout === "single-binary"
+    ? path.join(binDir(), `${entry.tool}.next`)
+    : path.join(binDir(), `${entry.tool}-runtime-next`);
+}
+
+/**
  * Top-level installer. Returns ok|failure, never throws.
  * onProgress fires for each phase transition (and during download for byte-level updates).
  */
@@ -305,19 +317,16 @@ export async function downloadAndStage(
     return { ok: false, phase, error };
   };
 
-  // 0. Pre-clean any stale state from a prior (possibly failed) attempt.
-  // For preserve-tree tools, also clear any prior runtime dir + symlink so
-  // re-installs aren't held back by a corrupt previous attempt.
+  // 0. Pre-clean STAGE state only — never touch the existing install.
+  // The user's currently-working `<tool>` (and `<tool>-runtime` for
+  // preserve-tree) stays untouched until the new install fully passes
+  // verifyExec and we atomically swap below. A network or checksum
+  // failure mid-reinstall leaves the user's working binary intact.
   ensureDir(downloadStageDir());
   ensureDir(binDir());
   rmSilent(stageFileFor(entry));
   rmSilent(extractDirFor(entry));
-  if (entry.installLayout === "preserve-tree") {
-    rmSilent(runtimeDirFor(entry));
-    // Remove a stale symlink from a prior install. fs.rm with force:true
-    // handles symlinks the same as files.
-    rmSilent(path.join(binDir(), entry.tool));
-  }
+  rmSilent(stagedInstallFor(entry));
 
   // 1. Download
   emit({ tool: entry.tool, phase: "download", bytesDone: 0 });
@@ -382,66 +391,105 @@ export async function downloadAndStage(
     }
   }
 
-  // 5. Atomic rename into binDir() — same volume, POSIX-atomic.
-  // Two layouts:
-  //   single-binary: just move the executable.
-  //   preserve-tree: move the whole extraction tree, then symlink the
-  //                  canonical <binDir>/<tool> at the bin inside.
-  const finalPath = path.join(binDir(), entry.tool);
+  // 5. STAGE the new install at a side-by-side path — DON'T touch the
+  // existing install yet.
+  //   single-binary: rename the verified extracted binary to <tool>.next
+  //   preserve-tree: rename the whole extraction tree to <tool>-runtime-next
+  // Either way the existing `<tool>` (and `<tool>-runtime`) keeps working
+  // for any concurrent process or for retry-after-failure.
+  const stagedInstall = stagedInstallFor(entry);
   try {
     if (entry.installLayout === "single-binary") {
       fs.chmodSync(extractedPath, 0o755);
-      rmSilent(finalPath);
-      fs.renameSync(extractedPath, finalPath);
+      fs.renameSync(extractedPath, stagedInstall);
     } else {
-      // preserve-tree: move the entire extraction dir into runtime/.
-      const runtime = runtimeDirFor(entry);
-      // Re-clear in case some prior cleanup missed it.
-      rmSilent(runtime);
-      rmSilent(finalPath);
-      fs.renameSync(extractDirFor(entry), runtime);
-      // Make sure the binary inside the tree is executable. Tar/unzip
-      // usually preserves perms but we re-assert for safety.
-      const innerBin = path.join(runtime, entry.binaryPathInArchive);
-      fs.chmodSync(innerBin, 0o755);
-      // Relative symlink so the install tree is location-independent.
-      const relTarget = path.join(
-        `${entry.tool}-runtime`,
-        entry.binaryPathInArchive
+      fs.renameSync(extractDirFor(entry), stagedInstall);
+      // Tar/unzip usually preserves perms but re-assert defensively.
+      fs.chmodSync(
+        path.join(stagedInstall, entry.binaryPathInArchive),
+        0o755
       );
-      fs.symlinkSync(relTarget, finalPath);
     }
   } catch (err) {
-    // Belt-and-suspenders cleanup: if we partially moved a runtime dir
-    // before the symlink failed, get rid of it so the next attempt
-    // starts from a clean slate.
-    rmSilent(runtimeDirFor(entry));
-    rmSilent(finalPath);
+    rmSilent(stagedInstall);
     return fail(
       "extract",
-      `atomic move failed: ${err instanceof Error ? err.message : String(err)}`
+      `staging failed: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
-  // 6. verifyExec — last chance to catch "downloaded fine, segfaults".
+  // 6. verifyExec against the STAGED binary. Catches arch mismatch,
+  // segfault-on-launch, etc. before we touch the existing install.
   emit({ tool: entry.tool, phase: "verify-exec" });
-  const verifyResult = await runVerifyExec(finalPath, entry.verifyExec);
+  const stagedBin =
+    entry.installLayout === "single-binary"
+      ? stagedInstall
+      : path.join(stagedInstall, entry.binaryPathInArchive);
+  const verifyResult = await runVerifyExec(stagedBin, entry.verifyExec);
   if (!verifyResult.ok) {
-    // Pull the broken binary back out so the resolver doesn't see it.
-    // For preserve-tree, remove the runtime dir too — without the symlink
-    // it'd be orphaned, and we'd rather a clean retry than an inconsistent
-    // half-state.
-    rmSilent(finalPath);
-    if (entry.installLayout === "preserve-tree") {
-      rmSilent(runtimeDirFor(entry));
-    }
+    // New install is broken — clean it up. The existing install is
+    // untouched; the user's `<tool>` keeps working.
+    rmSilent(stagedInstall);
     return fail("verify-exec", verifyResult.error);
   }
 
-  // 7. Cleanup of stage state — resolver only ever sees binDir().
-  // For preserve-tree, the extract dir was MOVED (not copied) to runtime/,
-  // so it no longer exists at this point — rmSilent is a no-op but kept
-  // for symmetry / future archive types that might keep stage around.
+  // 7. ATOMIC SWAP — only now do we touch the user's existing install.
+  // Each rename here is POSIX-atomic on the same volume (which is
+  // guaranteed because everything lives under userDataDir()).
+  const finalPath = path.join(binDir(), entry.tool);
+  try {
+    if (entry.installLayout === "single-binary") {
+      // Single rename overwrites the existing executable atomically.
+      fs.renameSync(stagedInstall, finalPath);
+    } else {
+      // preserve-tree: rename old runtime aside, slot new in, recreate
+      // symlink atomically via a temp name. If the swap fails partway,
+      // the .prev rescue below restores the previous install.
+      const runtime = runtimeDirFor(entry);
+      const prevRuntime = runtime + ".prev";
+      rmSilent(prevRuntime);
+      if (fs.existsSync(runtime)) {
+        fs.renameSync(runtime, prevRuntime);
+      }
+      try {
+        fs.renameSync(stagedInstall, runtime);
+        // Symlink-via-temp-rename: avoids any window where `<tool>` is
+        // missing or pointing at the wrong path.
+        const symlinkTemp = finalPath + ".next-link";
+        rmSilent(symlinkTemp);
+        const relTarget = path.join(
+          `${entry.tool}-runtime`,
+          entry.binaryPathInArchive
+        );
+        fs.symlinkSync(relTarget, symlinkTemp);
+        fs.renameSync(symlinkTemp, finalPath);
+      } catch (swapErr) {
+        // Swap blew up midway — restore the previous runtime if we
+        // moved it aside, so the user is at worst back to square one.
+        try {
+          if (fs.existsSync(prevRuntime) && !fs.existsSync(runtime)) {
+            fs.renameSync(prevRuntime, runtime);
+          }
+        } catch {
+          // Nothing more we can safely do.
+        }
+        throw swapErr;
+      }
+      // Success — drop the previous runtime now that the new one is live.
+      rmSilent(prevRuntime);
+    }
+  } catch (err) {
+    // Final-stage swap failure leaves the existing install in place
+    // (per the .prev rescue above for preserve-tree). For single-binary,
+    // a rename failure is rare enough that we just surface it.
+    rmSilent(stagedInstall);
+    return fail(
+      "extract",
+      `atomic swap failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+
+  // 8. Cleanup of stage state — resolver only ever sees binDir().
   rmSilent(stageFileFor(entry));
   rmSilent(extractDirFor(entry));
 

@@ -161,33 +161,63 @@ test.describe("Setup Wizard", () => {
     await wizard.nextButton().click();
 
     await expect(wizard.depRowByName("ffmpeg")).toBeVisible();
-    await expect(wizard.installButton("Install via Homebrew")).toBeVisible();
+    // Phase 2 replaced the brew flow with direct download — the install
+    // button label changed from "Install via Homebrew" to "Install ffmpeg".
+    await expect(wizard.installButton("Install ffmpeg")).toBeVisible();
     await expect(page.getByRole("button", { name: "Restart audio" })).toHaveCount(0);
-    await wizard.installButton("Install via Homebrew").click();
+    await wizard.installButton("Install ffmpeg").click();
     await expect(wizard.finishButton()).toBeEnabled();
   });
 
-  test("Homebrew missing shows install instructions on dependencies step", async ({
+  test("dependencies step never mentions Homebrew or Terminal", async ({
     wizard,
     page,
   }) => {
+    // Phase 3 dropped the entire "Homebrew is not installed" card. The
+    // wizard must never push the user toward Terminal — pre-beta
+    // requirement. This spec replaces the old "Homebrew missing shows
+    // install instructions" test, which is now an anti-requirement.
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ffmpeg: null,
-        brewAvailable: false,
       });
     });
 
-    // Navigate to deps step
     await wizard.getStartedButton().click();
     await wizard.nextButton().click(); // data dir
     await wizard.nextButton().click(); // transcription
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click(); // deps
 
-    // Should show Homebrew install instructions with the install command
-    await expect(page.getByText(/Homebrew is not installed/)).toBeVisible();
-    await expect(page.getByText(/Homebrew is the macOS package manager/)).toBeVisible();
+    // No Homebrew copy anywhere on the page.
+    await expect(page.getByText(/Homebrew/i)).toHaveCount(0);
+    // No "open Terminal", "in Terminal", "Terminal and run" — anything
+    // that asks the user to open the Terminal app. Affirmative copy
+    // ("no Terminal needed") is fine because it's *reassurance*, not
+    // a Terminal instruction.
+    await expect(
+      page.getByText(/open Terminal|in Terminal|Terminal and run/i)
+    ).toHaveCount(0);
+    // The fresh "Install ffmpeg" button is the user-facing path.
+    await expect(wizard.installButton("Install ffmpeg")).toBeVisible();
+  });
+
+  test("ffmpeg dep row surfaces the resolver source label when present", async ({
+    wizard,
+    page,
+  }) => {
+    // The mock returns `source: "system"` for any path-set ffmpeg.
+    // The renderer renders "<path> (system)" — so when ffmpeg is
+    // present (default fixture state), the row should include a
+    // visible source hint.
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // data dir
+    await wizard.nextButton().click(); // transcription
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await wizard.nextButton().click(); // deps
+
+    await expect(wizard.depRowByName("ffmpeg")).toBeVisible();
+    await expect(page.getByText(/\(system\)/)).toBeVisible();
   });
 
   test("system audio shows optional badge when unsupported", async ({
