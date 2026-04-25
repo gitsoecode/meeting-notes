@@ -132,45 +132,68 @@ function main() {
   // Forward argv tail to electron-builder.
   const builderArgs = process.argv.slice(2);
 
-  // 1. Detect current state of the engine link.
-  let originalLinkTarget = null;
-  let hadSymlink = false;
+  // The canonical link target is fixed by the workspace layout.
+  // Hardcoding it (rather than reading from a symlink that may be
+  // missing) means we can ALWAYS restore to the right value at the end,
+  // even if we found something else at the start. This closes a real
+  // bug: a previous run that exited unexpectedly could leave a stale
+  // directory at ENGINE_LINK; the previous version of this script
+  // would see "already a real directory — leaving as-is" and skip
+  // BOTH the staging step AND the cleanup, so the workspace stayed
+  // broken until manual fixup.
+  const ORIGINAL_LINK_TARGET = path.relative(
+    path.dirname(ENGINE_LINK),
+    ENGINE_SOURCE
+  );
+
+  // 1. Detect current state. We always re-stage from clean, so any
+  // pre-existing directory is treated as stale and replaced.
+  let foundShape = "missing";
   try {
     const st = fs.lstatSync(ENGINE_LINK);
     if (st.isSymbolicLink()) {
-      originalLinkTarget = fs.readlinkSync(ENGINE_LINK);
-      hadSymlink = true;
+      foundShape = "symlink";
       console.log(
-        `[package-with-engine-staged] found workspace symlink: ${ENGINE_LINK} -> ${originalLinkTarget}`
+        `[package-with-engine-staged] found workspace symlink: ${ENGINE_LINK} -> ${fs.readlinkSync(ENGINE_LINK)}`
+      );
+    } else if (st.isDirectory()) {
+      foundShape = "directory";
+      console.log(
+        `[package-with-engine-staged] found stale directory at ${ENGINE_LINK} — will replace`
       );
     } else {
+      foundShape = "other";
       console.log(
-        `[package-with-engine-staged] ${ENGINE_LINK} is already a real directory — leaving as-is`
+        `[package-with-engine-staged] found unexpected non-dir, non-symlink at ${ENGINE_LINK} — will replace`
       );
     }
   } catch {
     throw new Error(
-      `[package-with-engine-staged] ${ENGINE_LINK} does not exist. Run \`npm install\` first.`
+      `[package-with-engine-staged] ${path.dirname(ENGINE_LINK)} does not exist. Run \`npm install\` first.`
     );
   }
 
-  // 2. Stage the engine copy (only when we found a symlink to replace).
-  if (hadSymlink) {
-    fs.unlinkSync(ENGINE_LINK);
-    try {
-      stageEngineCopy(ENGINE_LINK);
-      console.log(
-        `[package-with-engine-staged] staged engine copy at ${ENGINE_LINK} (package.json + dist/**)`
-      );
-    } catch (err) {
-      // Restore symlink on staging failure too.
-      console.error(
-        `[package-with-engine-staged] staging failed: ${err.message}`
-      );
-      restoreSymlink(originalLinkTarget);
-      process.exit(1);
-    }
+  // 2. Always re-stage from clean. Whatever we found, replace with a
+  // fresh staged copy. The finally block will restore to a symlink
+  // pointing at packages/engine regardless of what we found here.
+  try {
+    fs.rmSync(ENGINE_LINK, { recursive: true, force: true });
+    stageEngineCopy(ENGINE_LINK);
+    console.log(
+      `[package-with-engine-staged] staged engine copy at ${ENGINE_LINK} (package.json + dist/**)`
+    );
+  } catch (err) {
+    console.error(
+      `[package-with-engine-staged] staging failed: ${err.message}`
+    );
+    restoreSymlink(ORIGINAL_LINK_TARGET);
+    process.exit(1);
   }
+  // From here on, we have a staged copy in place and a symlink to
+  // restore at exit. Both staging-failure and electron-builder-failure
+  // paths route through the finally block below.
+  const originalLinkTarget = ORIGINAL_LINK_TARGET;
+  const hadSymlink = true; // Always restore — see commentary above.
 
   // 3. Run electron-builder. Always restore in finally.
   let exitCode = 0;
@@ -216,9 +239,25 @@ function spawnSyncWithLog(cmd, args) {
   console.log(
     `[package-with-engine-staged] running: ${cmd} ${args.join(" ")}`
   );
+
+  // Pass the keychain profile to electron-builder via env var.
+  // electron-builder v25's `notarize` config schema only accepts
+  // `teamId` (the keychainProfile property is rejected at validation
+  // time), so the only supported way to wire notarytool's keychain
+  // profile is via APPLE_KEYCHAIN_PROFILE in the env. Setting it
+  // here, in the only place that ever spawns electron-builder, keeps
+  // it out of npm-script env-var soup. If a caller has already set
+  // it (e.g., for a different profile name), respect that.
+  const env = {
+    ...process.env,
+    APPLE_KEYCHAIN_PROFILE:
+      process.env.APPLE_KEYCHAIN_PROFILE ?? "gistlist-notary",
+  };
+
   return spawnSync(cmd, args, {
     stdio: "inherit",
     cwd: APP_PKG_ROOT,
+    env,
   });
 }
 

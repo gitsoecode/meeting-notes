@@ -29,6 +29,18 @@ const ENTITLEMENTS = path.join(
   "audiotee-inherit.entitlements"
 );
 
+function resolveSigningIdentity(packager) {
+  const configuredIdentity = packager.platformSpecificBuildOptions?.identity;
+  if (configuredIdentity) return configuredIdentity;
+  if (process.env.CSC_IDENTITY_AUTO_DISCOVERY === "false") return "-";
+
+  return (
+    packager.codeSigningInfo?.value?.identityName ??
+    packager.codeSigningInfo?.value?.hash ??
+    "-"
+  );
+}
+
 export default async function afterSign(context) {
   if (context.electronPlatformName !== "darwin") return;
 
@@ -57,15 +69,10 @@ export default async function afterSign(context) {
   // Pull the signing identity electron-builder used for the main bundle so we
   // re-sign audiotee with the same identity. Falls back to ad-hoc ("-") when
   // no Developer ID is configured, which is fine for local builds.
-  const identity =
-    packager.platformSpecificBuildOptions?.identity ??
-    process.env.CSC_IDENTITY_AUTO_DISCOVERY === "false"
-      ? "-"
-      : packager.codeSigningInfo?.value?.identityName ?? "-";
+  const identity = resolveSigningIdentity(packager);
 
   const args = [
     "--force",
-    "--timestamp",
     "--options",
     "runtime", // match hardenedRuntime on the main app
     "--sign",
@@ -74,6 +81,9 @@ export default async function afterSign(context) {
     JSON.stringify(ENTITLEMENTS),
     JSON.stringify(audioteePath),
   ];
+  if (identity !== "-") {
+    args.splice(1, 0, "--timestamp");
+  }
 
   console.log(
     `[after-sign] re-signing audiotee with com.apple.security.inherit entitlement (identity: ${identity})`
@@ -92,9 +102,16 @@ export default async function afterSign(context) {
       `codesign --verify --verbose=2 ${JSON.stringify(audioteePath)}`,
       { stdio: "inherit" }
     );
+    const entitlements = execSync(
+      `codesign -dv --entitlements - ${JSON.stringify(audioteePath)} 2>&1`,
+      { encoding: "utf8" }
+    );
+    if (!entitlements.includes("com.apple.security.inherit")) {
+      throw new Error("missing com.apple.security.inherit entitlement");
+    }
   } catch (err) {
     throw new Error(
-      `[after-sign] signature verification failed: ${err.message}`
+      `[after-sign] signature/entitlement verification failed: ${err.message}`
     );
   }
   console.log("[after-sign] audiotee re-signed successfully");

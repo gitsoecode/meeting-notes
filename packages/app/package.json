@@ -17,7 +17,7 @@
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
     "package:mac": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
-    "package:mac:sign": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
+    "package:mac:sign": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release --config.mac.notarize=false && node scripts/notarize-release.mjs",
     "build:mcp": "npm run build:packaged --workspace @gistlist/mcp-server",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
@@ -131,6 +131,9 @@
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
+      "notarize": {
+        "teamId": "UZ8554JSAM"
+      },
       "target": [
         "zip"
       ],
