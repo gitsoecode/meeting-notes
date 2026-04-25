@@ -491,7 +491,18 @@ export function Settings({ config, onChange }: SettingsProps) {
                 </div>
               )}
 
-              {/* whisper.cpp conditional */}
+              {/* whisper.cpp conditional. Legacy-only: only renders when
+                  the user's existing config is already on whisper-local.
+                  New configs can't reach this option (the dropdown
+                  item above is gated on the same flag).
+
+                  IMPORTANT: don't render the "Install whisper-cli" button
+                  here when the user already has whisper-cli on disk
+                  (legacy install survives), but never render it when
+                  whisper-cli is missing — the manifest has no entry, so
+                  installTool("whisper-cli") would fail with "no manifest
+                  entry" and the user would just see a broken action.
+                  Instead we tell them what to do: switch ASR provider. */}
               {config.asr_provider === "whisper-local" && (
                 <div className="space-y-2">
                   {deps == null ? (
@@ -505,24 +516,16 @@ export function Settings({ config, onChange }: SettingsProps) {
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-sm text-[var(--warning-text)]">Not installed</p>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={installingWhisper}
-                        onClick={() => {
-                          setPendingConfirm({
-                            title: "Install whisper-cli?",
-                            description:
-                              "Downloads a SHA-256-pinned whisper-cli binary into Application Support. No Terminal needed.",
-                            confirmLabel: "Install",
-                            confirmVariant: "default",
-                            action: installWhisper,
-                          });
-                        }}
-                      >
-                        {installingWhisper ? <><Spinner className="h-4 w-4" /> Installing…</> : "Install whisper-cli"}
-                      </Button>
+                      <p className="text-sm text-[var(--warning-text)]">
+                        Not installed. whisper-cli isn't a wizard-installable
+                        target in this build — pick Parakeet or OpenAI Whisper
+                        in the ASR dropdown above to keep transcribing.
+                      </p>
+                      {/* Install button intentionally absent — the manifest
+                          has no whisper-cli entry, so a clickable Install
+                          here would route to a guaranteed "no manifest
+                          entry for whisper-cli" failure. Showing only the
+                          guidance is the honest UX. */}
                     </div>
                   )}
                 </div>

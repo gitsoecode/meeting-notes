@@ -111,6 +111,10 @@
       {
         "from": "../mcp-server/dist/packaged",
         "to": "mcp-server"
+      },
+      {
+        "from": "assets/THIRD_PARTY_LICENSES.md",
+        "to": "THIRD_PARTY_LICENSES.md"
       }
     ],
     "protocols": [

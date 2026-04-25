@@ -448,6 +448,24 @@ export async function installMockApi(page: Page) {
       string,
       { ok: false; error?: string; failedPhase?: string }
     >();
+    // Updater state — starts in the build-disabled shape so the default
+    // mock matches first-beta behavior. Tests flip it via
+    // __MEETING_NOTES_TEST.setUpdaterStatus({...}) when they want to
+    // exercise the enabled UI surface.
+    let updaterStatusState: {
+      enabled: boolean;
+      kind: string;
+      version?: string;
+      bytesDone?: number;
+      bytesTotal?: number;
+      lastChecked?: string;
+      error?: string;
+      releaseNotesUrl?: string;
+    } = { enabled: false, kind: "disabled-at-build" };
+    const updaterPrefsState: { autoCheck: boolean; notifyBanner: boolean } = {
+      autoCheck: true,
+      notifyBanner: true,
+    };
 
     const hydrateArray = <T,>(target: T[], source: T[]) => {
       target.splice(0, target.length, ...clone(source));
@@ -873,6 +891,21 @@ export async function installMockApi(page: Page) {
        */
       setNextInstallFailure(target, response) {
         installFailureOverrides.set(target, clone(response));
+      },
+      /**
+       * Test helper: replace the mock's current updater status. Pushed
+       * to subscribers so any rendered component (Settings panel,
+       * UpdaterBanner) re-renders against the new state. Used by the
+       * updater enabled-state spec to exercise available / downloading /
+       * downloaded / deferred-recording / error UI.
+       */
+      setUpdaterStatus(next) {
+        updaterStatusState = clone(next);
+        emit("updaterStatus", clone(updaterStatusState));
+      },
+      /** Test helper: read the current updater prefs the mock persists. */
+      getUpdaterPrefs() {
+        return { ...updaterPrefsState };
       },
       getLastExternalAction() {
         return clone(externalActionLog[0] ?? null);
@@ -1908,29 +1941,66 @@ export async function installMockApi(page: Page) {
         },
       },
       updater: {
-        // Updater is build-time gated and disabled in mock builds. The
-        // renderer reads `enabled` once on startup and hides the entire
-        // UI surface when disabled, so this is the natural mock shape.
+        // Updater is build-time gated. The mock starts in the disabled
+        // shape (matches first-beta behavior). Specs that want to drive
+        // the enabled UI flip the state via
+        // __MEETING_NOTES_TEST.setUpdaterStatus({...}). Each method below
+        // mutates updaterStatusState and re-broadcasts via the
+        // updaterStatus subscription so subscribed components re-render.
         async getStatus() {
-          return { enabled: false, kind: "disabled-at-build" as const };
+          return clone(updaterStatusState);
         },
         async check() {
-          return { enabled: false, kind: "disabled-at-build" as const };
+          if (!updaterStatusState.enabled) return clone(updaterStatusState);
+          updaterStatusState = {
+            ...updaterStatusState,
+            kind: "checking",
+            lastChecked: new Date().toISOString(),
+          };
+          emit("updaterStatus", clone(updaterStatusState));
+          // Synchronously settle into the prior available/no-update kind
+          // — specs that want a specific resolution call setUpdaterStatus
+          // directly. Default to "no-update" if nothing announced.
+          updaterStatusState = {
+            ...updaterStatusState,
+            kind: updaterStatusState.version ? "available" : "no-update",
+          };
+          emit("updaterStatus", clone(updaterStatusState));
+          return clone(updaterStatusState);
         },
         async download() {
-          return { enabled: false, kind: "disabled-at-build" as const };
+          if (!updaterStatusState.enabled) return clone(updaterStatusState);
+          // Synchronous transition straight to "downloaded" — specs
+          // assert the result, not the streaming animation. Specs that
+          // want to test "downloading" mid-state set it explicitly.
+          updaterStatusState = {
+            ...updaterStatusState,
+            kind: "downloaded",
+            bytesDone: updaterStatusState.bytesTotal ?? undefined,
+          };
+          emit("updaterStatus", clone(updaterStatusState));
+          return clone(updaterStatusState);
         },
         async install() {
-          return { enabled: false, kind: "disabled-at-build" as const };
+          // Mirror the production dev simulator: never actually call
+          // quitAndInstall in tests. State stays at "downloaded".
+          if (!updaterStatusState.enabled) return clone(updaterStatusState);
+          externalActionLog.push({ type: "updater:install-attempted" });
+          return clone(updaterStatusState);
         },
         async getPrefs() {
-          return { autoCheck: true, notifyBanner: true };
+          return { ...updaterPrefsState };
         },
         async setPrefs(prefs) {
-          return prefs;
+          Object.assign(updaterPrefsState, prefs);
+          // Nudge subscribers so any component holding a stale prefs
+          // copy (e.g., the global UpdaterBanner) refetches and re-
+          // renders. Cheap — payload is the unchanged status.
+          emit("updaterStatus", clone(updaterStatusState));
+          return { ...updaterPrefsState };
         },
         async simulate() {
-          return { enabled: false, kind: "disabled-at-build" as const };
+          return clone(updaterStatusState);
         },
       },
       meetingIndex: {

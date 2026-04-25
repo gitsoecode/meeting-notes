@@ -59,14 +59,22 @@ export async function revealLogsInFinder(): Promise<void> {
 
 /**
  * Open the bundled THIRD_PARTY_LICENSES.md file in the user's default
- * Markdown / text viewer. The file is copied from packages/app/assets/
- * into dist/assets/ at build time and shipped inside the .app bundle
- * under Contents/Resources/app.asar/dist/assets/.
+ * Markdown / text viewer.
  *
- * `__dirname` resolves to dist/main/ at runtime, so ../assets/ is the
- * canonical path in both dev and packaged builds.
+ * Path resolution: in a packaged build the file lives OUTSIDE app.asar
+ * under `Contents/Resources/THIRD_PARTY_LICENSES.md` (placed there by
+ * the `extraResources` entry in package.json's electron-builder config).
+ * It has to live outside asar because `shell.openPath` hands the path
+ * to a system viewer, and external apps can't read inside an asar
+ * archive — they see the path as a single .asar file rather than the
+ * tree inside it.
+ *
+ * In dev (`!app.isPackaged`) the file is just at
+ * `packages/app/assets/THIRD_PARTY_LICENSES.md` — there's no asar.
  */
 export async function openLicensesFile(): Promise<void> {
-  const assetPath = path.resolve(__dirname, "../assets/THIRD_PARTY_LICENSES.md");
+  const assetPath = app.isPackaged
+    ? path.join(process.resourcesPath, "THIRD_PARTY_LICENSES.md")
+    : path.resolve(__dirname, "../../assets/THIRD_PARTY_LICENSES.md");
   await shell.openPath(assetPath);
 }
