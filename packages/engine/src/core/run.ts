@@ -60,7 +60,7 @@ function formatDateFolder(date: Date): string {
   return path.join(String(y), m, d);
 }
 
-function formatRunFolderName(date: Date, title: string): string {
+function formatRunFolderName(date: Date, title: string, runId: string): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
@@ -76,7 +76,11 @@ function formatRunFolderName(date: Date, title: string): string {
     .trim()
     .replace(/[.\s]+$/, "");
   const base = `${y}-${m}-${d}_${hh}-${mm}`;
-  return safeTitle ? `${base} ${safeTitle}` : base;
+  // ULIDs are time-prefixed; the trailing chars are random — gives us
+  // collision-resistance for back-to-back drafts in the same minute without
+  // making the folder name unreadable.
+  const idSuffix = runId.slice(-8);
+  return safeTitle ? `${base} ${safeTitle} ${idSuffix}` : `${base} ${idSuffix}`;
 }
 
 function getNotesTemplate(config: AppConfig): string {
@@ -158,7 +162,7 @@ export function createRun(
   const now = new Date();
   const runId = ulid();
   const dateFolder = formatDateFolder(now);
-  const runFolderName = formatRunFolderName(now, title);
+  const runFolderName = formatRunFolderName(now, title, runId);
   const folderPath = path.join(resolveRunsPath(config), dateFolder, runFolderName);
 
   fs.mkdirSync(path.join(folderPath, "audio"), { recursive: true });
@@ -303,7 +307,7 @@ export function createDraftRun(
   const now = new Date();
   const runId = ulid();
   const dateFolder = formatDateFolder(folderDate);
-  const runFolderName = formatRunFolderName(folderDate, title);
+  const runFolderName = formatRunFolderName(folderDate, title, runId);
   const folderPath = path.join(resolveRunsPath(config), dateFolder, runFolderName);
 
   fs.mkdirSync(path.join(folderPath, "audio"), { recursive: true });

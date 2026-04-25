@@ -98,6 +98,34 @@ export function resolveRunMediaPath(
   );
 }
 
+export interface BulkDeletePartition {
+  // Validated, resolved-and-rooted run folder paths — safe to remove from disk.
+  validatedFolders: string[];
+  // Inputs that failed validation. DB cleanup only — must NEVER be passed to
+  // any filesystem mutation. Kept so the caller can still scrub stale rows.
+  dbOnlyFolders: string[];
+}
+
+// Partitions a list of raw run-folder strings (e.g. from the renderer) into
+// "safe to fs.rmSync" vs "DB cleanup only". The bug this guards against is
+// pushing the *raw* input into the rmSync list when validation throws — a
+// single line that previously allowed arbitrary path removal.
+export function partitionRunFoldersForBulkDelete(
+  runFolders: readonly string[],
+  config: AppConfig = loadConfig()
+): BulkDeletePartition {
+  const validatedFolders: string[] = [];
+  const dbOnlyFolders: string[] = [];
+  for (const rf of runFolders) {
+    try {
+      validatedFolders.push(resolveRunFolderPath(rf, config));
+    } catch {
+      dbOnlyFolders.push(rf);
+    }
+  }
+  return { validatedFolders, dbOnlyFolders };
+}
+
 export function isAllowedAttachmentName(fileName: string): boolean {
   if (!fileName || path.basename(fileName) !== fileName) return false;
   if (fileName.startsWith(".")) return false;

@@ -8,6 +8,7 @@ import { writeMarkdownFile } from "./markdown.js";
 import { updatePromptOutput } from "./run.js";
 import type { RunStore } from "./run-store.js";
 import { migrateVaultPromptsToHome } from "./migrate-prompts.js";
+import { isAllowedPromptOutputFilename } from "./prompt-validation.js";
 import { Logger } from "../logging/logger.js";
 import { throwIfAborted } from "./abort.js";
 
@@ -224,6 +225,13 @@ function parsePromptFile(filePath: string, logger?: Logger): ResolvedPrompt | nu
   }
   if (typeof fm.filename !== "string" || !fm.filename) {
     logger?.warn("Prompt file missing required 'filename' field, skipping", { path: filePath });
+    return null;
+  }
+  if (!isAllowedPromptOutputFilename(fm.filename)) {
+    logger?.warn(
+      "Prompt 'filename' is invalid (must be a basename ending in .md and not a reserved run-folder filename), skipping",
+      { path: filePath, filename: fm.filename }
+    );
     return null;
   }
   if (!body) {

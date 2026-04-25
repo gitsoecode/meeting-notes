@@ -200,7 +200,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   useEffect(() => {
     if (dataPathTouched) return;
     if (usesObsidian && vaultPath) {
-      setDataPath(joinPath(vaultPath, "Meeting-notes"));
+      setDataPath(joinPath(vaultPath, "Gistlist"));
     } else if (!usesObsidian) {
       setDataPath("~/Documents/Gistlist");
     } else {
@@ -228,12 +228,17 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     try {
       const result = await api.deps.install(target);
       if (!result.ok) {
-        if (result.brewMissing) {
-          setBrewAvailable(false);
-          setInstallError("Homebrew is not installed. See the link below to get it, then re-run the install.");
-        } else {
-          setInstallError(result.error ?? "Install failed.");
-        }
+        // failedPhase tells the user *which* step blew up (download
+        // / verify-checksum / extract / verify-signature / verify-exec).
+        // Surfacing it makes a Retry button less frustrating — the user
+        // knows whether to expect a quick fix or a network reset.
+        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+        setInstallError(`Install failed${phase}: ${result.error ?? "unknown error"}`);
+      } else if (target === "ollama") {
+        // Ollama just landed on disk. Bring the daemon up so subsequent
+        // model pulls don't pay the cold-start cost. Failure here is
+        // non-fatal — the next interaction will retry.
+        await api.llm.check().catch(() => {});
       }
       const fresh = await api.depsCheck();
       setDeps(fresh);
@@ -347,8 +352,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   const finishDisabled = useMemo(() => {
     if (busy || installing || restartingAudio) return true;
     if (!deps) return true;
-    if (!deps.ffmpeg) return true;
-    if (asrProvider === "parakeet-mlx" && !deps.parakeet) return true;
+    if (!deps.ffmpeg.path) return true;
+    if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
     // BlackHole no longer required — system audio is captured via AudioTee
     if (llmProvider === "ollama") {
       if (!localLlmModel) return true;
@@ -468,7 +473,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               title="Where should meetings be stored?"
               description={
                 usesObsidian
-                  ? "This folder lives inside your Obsidian vault — the default is a Meeting-notes subfolder. Every meeting becomes its own markdown file."
+                  ? "This folder lives inside your Obsidian vault — the default is a Gistlist subfolder. Every meeting becomes its own markdown file."
                   : "Pick any folder on your machine. Every meeting becomes a subfolder with plain markdown files. You can change this later."
               }
               footer={
@@ -561,7 +566,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     <SelectContent>
                       <SelectItem value="parakeet-mlx">Parakeet (local)</SelectItem>
                       <SelectItem value="openai">OpenAI (cloud)</SelectItem>
-                      <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
+                      {/* whisper.cpp (local) intentionally hidden for first
+                          beta — whisper.cpp Releases don't currently ship
+                          a signed macOS binary, so the manifest has no
+                          entry, so installTool("whisper-cli") would fail
+                          and a user who picked it would silently end up
+                          with no working ASR. Re-add when upstream ships
+                          a signed binary or we host our own. See
+                          packages/app/main/installers/manifest.ts. */}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -743,7 +755,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           {step === 4 && (
             <WizardStep
               title="Dependencies"
-              description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you with Homebrew."
+              description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you — no Terminal needed."
               footer={
                 <WizardActions
                   back={{ label: "Back", onClick: () => setStep(3), disabled: installing !== null }}
@@ -776,13 +788,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 <div className="space-y-3">
                   <DependencyRow
                     name="ffmpeg"
-                    ok={!!deps.ffmpeg}
-                    value={deps.ffmpeg ?? undefined}
-                    installLabel="Install via Homebrew"
+                    ok={!!deps.ffmpeg.path}
+                    value={
+                      deps.ffmpeg.path
+                        ? `${deps.ffmpeg.path}${deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : ""}`
+                        : undefined
+                    }
+                    installLabel="Install ffmpeg"
                     installing={installing === "ffmpeg"}
                     anyInstalling={installing !== null}
-                    brewAvailable={brewAvailable}
+                    brewAvailable={true}
                     onInstall={() => installDep("ffmpeg")}
+                    footerNote={
+                      !deps.ffmpeg.path
+                        ? "Downloads ~25 MB from evermeet.cx (LGPL static build). On Apple Silicon, runs via Rosetta 2 — first invocation may prompt for a one-time Rosetta install."
+                        : undefined
+                    }
                   />
                   {/* Audio permissions — actionable during setup so recording works on first try */}
                   <AudioPermissionsPanel
@@ -797,21 +818,42 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                   {asrProvider === "parakeet-mlx" && (
                     <DependencyRow
                       name="Parakeet"
-                      ok={!!deps.parakeet}
-                      value={deps.parakeet ?? undefined}
+                      ok={!!deps.parakeet.path}
+                      value={deps.parakeet.path ?? undefined}
                       installLabel="Install Parakeet"
                       installing={installing === "parakeet"}
                       anyInstalling={installing !== null}
                       brewAvailable={true}
                       onInstall={installParakeet}
                       footerNote={
-                        !deps.parakeet
+                        !deps.parakeet.path
                           ? "Creates a Python venv at ~/.gistlist/parakeet-venv and downloads model weights (~600 MB). Takes about a minute."
                           : undefined
                       }
                     />
                   )}
-                  {llmProvider === "ollama" && localLlmModel && (
+                  {llmProvider === "ollama" && (
+                    <DependencyRow
+                      name="Ollama"
+                      ok={deps.ollama.daemon}
+                      value={
+                        deps.ollama.daemon
+                          ? `running${deps.ollama.source ? ` (${deps.ollama.source})` : ""}`
+                          : undefined
+                      }
+                      installLabel="Install Ollama"
+                      installing={installing === "ollama"}
+                      anyInstalling={installing !== null}
+                      brewAvailable={true}
+                      onInstall={() => installDep("ollama")}
+                      footerNote={
+                        !deps.ollama.daemon
+                          ? "Downloads ~130 MB. Lands at <userData>/bin/ollama-runtime/. Models live at ~/.ollama/models so a future system Ollama install picks them up."
+                          : undefined
+                      }
+                    />
+                  )}
+                  {llmProvider === "ollama" && localLlmModel && deps.ollama.daemon && (
                     <DependencyRow
                       name={`Model: ${localLlmModel}`}
                       ok={hasInstalledLocalModel(installedLocalModels, localLlmModel)}
@@ -837,27 +879,8 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                 </div>
               )}
 
-              {brewAvailable === false && (
-                <Card className="border-[var(--warning)]/40 bg-[var(--warning-muted)]/50 shadow-none">
-                  <CardContent className="space-y-3 p-4">
-                    <div className="text-sm font-medium text-[var(--text-primary)]">Homebrew is not installed</div>
-                    <div className="text-sm text-[var(--text-secondary)]">
-                      Homebrew is the macOS package manager we use to install ffmpeg. Open Terminal and run:
-                    </div>
-                    <pre className="overflow-x-auto rounded-lg border border-[var(--border-default)] bg-white px-3 py-2 font-mono text-xs text-[var(--text-primary)]">
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-                    </pre>
-                    <Button
-                      variant="secondary"
-                      onClick={() => {
-                        api.deps.checkBrew().then(setBrewAvailable);
-                      }}
-                    >
-                      Re-check
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
+              {/* Brew prompt removed — Phase 2 replaced Homebrew with direct
+                  download. The wizard never asks the user to open Terminal. */}
 
               {installLog.length > 0 && (
                 <pre className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]">

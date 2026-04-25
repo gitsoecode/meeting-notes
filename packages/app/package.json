@@ -11,23 +11,24 @@
     "build": "npm run build:main && npm run build:preload && npm run build:renderer && npm run build:assets && npm run build:mic-capture",
     "build:assets": "npm run build:icons && node -e \"require('fs').cpSync('assets','dist/assets',{recursive:true});\"",
     "build:icons": "/usr/bin/python3 scripts/generate-icons.py",
-    "build:main": "tsc -p tsconfig.main.json",
+    "build:main": "node scripts/write-build-flags.mjs && tsc -p tsconfig.main.json",
     "build:mic-capture": "node scripts/build-mic-capture.mjs",
     "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
-    "package:mac": "npm run build && npm run build:mcp && npm run check:bundle && electron-builder --mac --config.directories.output=release",
+    "package:mac": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
+    "package:mac:sign": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release --config.mac.notarize=false && node scripts/notarize-release.mjs",
     "build:mcp": "npm run build:packaged --workspace @gistlist/mcp-server",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
-    "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @gistlist/engine && npm run build:main && node --test test/*.test.mjs",
+    "test": "node scripts/ensure-better-sqlite3.mjs && npm run build --workspace @gistlist/engine && npm run build:main && node --test test/*.test.mjs && node scripts/verify-manifest.mjs",
     "test:e2e": "npm run build:renderer && playwright test",
     "test:e2e:electron": "npm run build && playwright test --config=playwright.electron.config.ts",
     "test:e2e:fast": "playwright test --timeout=8000 --max-failures=5 --workers=4 --reporter=line --project=desktop",
     "test:e2e:focus": "playwright test --timeout=8000 --workers=4 --reporter=line --project=desktop",
     "capture:marketing": "npm run build:renderer && node scripts/build-og-image.mjs && playwright test --config=playwright.marketing.config.ts",
     "dev": "npm run patch:audiotee && npm run build:mic-capture && npm run build:assets && concurrently -k -r \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run start:electron\"",
-    "dev:main": "tsc -p tsconfig.main.json --watch --preserveWatchOutput",
+    "dev:main": "node scripts/write-build-flags.mjs && tsc -p tsconfig.main.json --watch --preserveWatchOutput",
     "dev:preload": "tsc -p tsconfig.preload.json --watch --preserveWatchOutput",
     "dev:renderer": "vite",
     "preview:renderer": "vite preview --host 127.0.0.1 --port 4173",
@@ -58,6 +59,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dompurify": "^3.2.3",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^1.7.0",
     "markdown-it": "^14.1.0",
     "plyr": "^3.8.4",
@@ -80,7 +82,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.27",
     "concurrently": "^9.1.0",
-    "electron": "^41.2.0",
+    "electron": "41.2.0",
     "electron-builder": "^25.0.0",
     "postcss": "^8.5.9",
     "tailwindcss": "^4.2.2",
@@ -91,6 +93,7 @@
   "build": {
     "appId": "app.gistlist.desktop",
     "productName": "Gistlist",
+    "electronVersion": "41.2.0",
     "files": [
       "dist/**/*",
       "package.json"
@@ -109,18 +112,31 @@
       {
         "from": "../mcp-server/dist/packaged",
         "to": "mcp-server"
+      },
+      {
+        "from": "assets/THIRD_PARTY_LICENSES.md",
+        "to": "THIRD_PARTY_LICENSES.md"
       }
     ],
     "protocols": [
       {
         "name": "Gistlist",
-        "schemes": ["gistlist"]
+        "schemes": [
+          "gistlist"
+        ]
       }
     ],
+    "publish": null,
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
+      "notarize": {
+        "teamId": "UZ8554JSAM"
+      },
+      "target": [
+        "zip"
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Gistlist uses your microphone to capture your voice during meetings for local transcription.",
         "NSAudioCaptureUsageDescription": "Gistlist captures system audio so the other participants in your meeting can be transcribed."

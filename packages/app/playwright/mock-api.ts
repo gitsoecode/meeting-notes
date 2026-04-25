@@ -45,6 +45,8 @@ export async function installMockApi(page: Page) {
       processUpdate: new Set(),
       audioMonitorLevels: new Set(),
       meetingIndexBackfillProgress: new Set(),
+      installerProgress: new Set(),
+      updaterStatus: new Set(),
     };
     const stateStorageKey = "__gistlist_mock_state__";
     const promptsStorageKey = "__gistlist_prompts__";
@@ -439,6 +441,31 @@ export async function installMockApi(page: Page) {
       brewAvailable: boolean | null;
     };
     const externalActionLog: Array<{ type: string; payload?: unknown }> = [];
+    // Per-target one-shot install-failure overrides. Tests prime these
+    // via __MEETING_NOTES_TEST.setNextInstallFailure(...) before clicking
+    // an install button; the mock consumes and clears on use.
+    const installFailureOverrides = new Map<
+      string,
+      { ok: false; error?: string; failedPhase?: string }
+    >();
+    // Updater state — starts in the build-disabled shape so the default
+    // mock matches first-beta behavior. Tests flip it via
+    // __MEETING_NOTES_TEST.setUpdaterStatus({...}) when they want to
+    // exercise the enabled UI surface.
+    let updaterStatusState: {
+      enabled: boolean;
+      kind: string;
+      version?: string;
+      bytesDone?: number;
+      bytesTotal?: number;
+      lastChecked?: string;
+      error?: string;
+      releaseNotesUrl?: string;
+    } = { enabled: false, kind: "disabled-at-build" };
+    const updaterPrefsState: { autoCheck: boolean; notifyBanner: boolean } = {
+      autoCheck: true,
+      notifyBanner: true,
+    };
 
     const hydrateArray = <T,>(target: T[], source: T[]) => {
       target.splice(0, target.length, ...clone(source));
@@ -853,6 +880,32 @@ export async function installMockApi(page: Page) {
       setDependencyState(overrides) {
         Object.assign(depsState, overrides);
         persistState();
+      },
+      /**
+       * Test helper: schedule the next call to `deps.install(target)` to
+       * return a failure result instead of the happy `{ ok: true }`. The
+       * override clears itself on first use so a subsequent retry hits
+       * the normal success path. Used by installer-failure-modes spec
+       * to drive checksum-mismatch / network-error / extract-failure
+       * UX without standing up an actual download server.
+       */
+      setNextInstallFailure(target, response) {
+        installFailureOverrides.set(target, clone(response));
+      },
+      /**
+       * Test helper: replace the mock's current updater status. Pushed
+       * to subscribers so any rendered component (Settings panel,
+       * UpdaterBanner) re-renders against the new state. Used by the
+       * updater enabled-state spec to exercise available / downloading /
+       * downloaded / deferred-recording / error UI.
+       */
+      setUpdaterStatus(next) {
+        updaterStatusState = clone(next);
+        emit("updaterStatus", clone(updaterStatusState));
+      },
+      /** Test helper: read the current updater prefs the mock persists. */
+      getUpdaterPrefs() {
+        return { ...updaterPrefsState };
       },
       getLastExternalAction() {
         return clone(externalActionLog[0] ?? null);
@@ -1747,15 +1800,27 @@ export async function installMockApi(page: Page) {
         },
       },
       async depsCheck() {
+        // Wrap flat depsState fields into the ResolvedTool shape the
+        // renderer now expects (path / source / version). Mocked
+        // sources default to "system" (Homebrew-style paths) and
+        // "app-installed" for the parakeet venv, matching the
+        // production resolver semantics.
+        const wrap = (
+          path: string | null,
+          source: "system" | "app-installed" | "bundled",
+          version: string | null = null
+        ) => ({
+          path,
+          source: path ? source : null,
+          version,
+        });
         return {
-          ffmpeg: depsState.ffmpeg,
-          ffmpegVersion: depsState.ffmpegVersion,
+          ffmpeg: wrap(depsState.ffmpeg, "system", depsState.ffmpegVersion),
           blackhole: depsState.blackhole,
           systemAudioSupported: depsState.systemAudioSupported,
-          python: depsState.python,
-          pythonVersion: depsState.pythonVersion,
-          parakeet: depsState.parakeet,
-          whisper: depsState.whisper ?? null,
+          python: wrap(depsState.python, "system", depsState.pythonVersion),
+          parakeet: wrap(depsState.parakeet, "app-installed"),
+          whisper: wrap(depsState.whisper ?? null, "system"),
           ollama: {
             daemon: true,
             source: "bundled-spawned",
@@ -1766,9 +1831,37 @@ export async function installMockApi(page: Page) {
       },
       deps: {
         async install(target) {
+          // Test seam: if a spec primed an install-failure for this
+          // target via setNextInstallFailure, return that exact failure
+          // (and clear it so a follow-up Retry hits the happy path).
+          // This is how installer-failure-modes specs drive the
+          // checksum-mismatch / verify-exec UX without standing up an
+          // actual fixture download server.
+          if (installFailureOverrides.has(target)) {
+            const override = installFailureOverrides.get(target)!;
+            installFailureOverrides.delete(target);
+            const phase = override.failedPhase
+              ? ` [${override.failedPhase}]`
+              : "";
+            emit(
+              "depsInstallLog",
+              `✘ ${target} install failed${phase}: ${override.error ?? "unknown"}`
+            );
+            return override;
+          }
+          // The DepsInstallTarget union changed in Phase 2 from
+          // "ffmpeg" | "whisper-cpp" to "ffmpeg" | "ollama" | "whisper-cli".
+          // Mock paths still use Homebrew-style locations because that's
+          // what the test fixtures already have on disk, but the wizard
+          // surfaces these as `(system)` source — same as a real machine
+          // with Homebrew already installed.
           emit("depsInstallLog", `Installed ${target}`);
           if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
-          if (target === "whisper-cpp") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
+          if (target === "whisper-cli") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
+          if (target === "ollama") {
+            // Ollama install just no-ops in the mock — daemon is already
+            // true. Real installs land the binary in <userData>/bin/.
+          }
           persistState();
           return { ok: true };
         },
@@ -1832,6 +1925,83 @@ export async function installMockApi(page: Page) {
         // to signal. Exposed so the renderer's `api.deepLink.ready()` call
         // on App mount doesn't throw.
         ready: () => {},
+      },
+      support: {
+        // Mocked out: no real mailto / Finder in browser-backed Playwright.
+        // Specs that care assert against the externalActionLog instead of
+        // expecting a window to open.
+        async openFeedbackMail() {
+          externalActionLog.push({ type: "support:open-feedback-mail" });
+        },
+        async revealLogsInFinder() {
+          externalActionLog.push({ type: "support:reveal-logs" });
+        },
+        async openLicensesFile() {
+          externalActionLog.push({ type: "support:open-licenses" });
+        },
+      },
+      updater: {
+        // Updater is build-time gated. The mock starts in the disabled
+        // shape (matches first-beta behavior). Specs that want to drive
+        // the enabled UI flip the state via
+        // __MEETING_NOTES_TEST.setUpdaterStatus({...}). Each method below
+        // mutates updaterStatusState and re-broadcasts via the
+        // updaterStatus subscription so subscribed components re-render.
+        async getStatus() {
+          return clone(updaterStatusState);
+        },
+        async check() {
+          if (!updaterStatusState.enabled) return clone(updaterStatusState);
+          updaterStatusState = {
+            ...updaterStatusState,
+            kind: "checking",
+            lastChecked: new Date().toISOString(),
+          };
+          emit("updaterStatus", clone(updaterStatusState));
+          // Synchronously settle into the prior available/no-update kind
+          // — specs that want a specific resolution call setUpdaterStatus
+          // directly. Default to "no-update" if nothing announced.
+          updaterStatusState = {
+            ...updaterStatusState,
+            kind: updaterStatusState.version ? "available" : "no-update",
+          };
+          emit("updaterStatus", clone(updaterStatusState));
+          return clone(updaterStatusState);
+        },
+        async download() {
+          if (!updaterStatusState.enabled) return clone(updaterStatusState);
+          // Synchronous transition straight to "downloaded" — specs
+          // assert the result, not the streaming animation. Specs that
+          // want to test "downloading" mid-state set it explicitly.
+          updaterStatusState = {
+            ...updaterStatusState,
+            kind: "downloaded",
+            bytesDone: updaterStatusState.bytesTotal ?? undefined,
+          };
+          emit("updaterStatus", clone(updaterStatusState));
+          return clone(updaterStatusState);
+        },
+        async install() {
+          // Mirror the production dev simulator: never actually call
+          // quitAndInstall in tests. State stays at "downloaded".
+          if (!updaterStatusState.enabled) return clone(updaterStatusState);
+          externalActionLog.push({ type: "updater:install-attempted" });
+          return clone(updaterStatusState);
+        },
+        async getPrefs() {
+          return { ...updaterPrefsState };
+        },
+        async setPrefs(prefs) {
+          Object.assign(updaterPrefsState, prefs);
+          // Nudge subscribers so any component holding a stale prefs
+          // copy (e.g., the global UpdaterBanner) refetches and re-
+          // renders. Cheap — payload is the unchanged status.
+          emit("updaterStatus", clone(updaterStatusState));
+          return { ...updaterPrefsState };
+        },
+        async simulate() {
+          return clone(updaterStatusState);
+        },
       },
       meetingIndex: {
         async backfillStart() {
@@ -1898,6 +2068,12 @@ export async function installMockApi(page: Page) {
         },
         meetingIndexBackfillProgress(cb) {
           return subscribe("meetingIndexBackfillProgress", cb);
+        },
+        installerProgress(cb) {
+          return subscribe("installerProgress", cb);
+        },
+        updaterStatus(cb) {
+          return subscribe("updaterStatus", cb);
         },
       },
     };

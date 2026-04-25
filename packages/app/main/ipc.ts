@@ -20,6 +20,7 @@ import {
   updatePromptFrontmatter,
   resetDefaultPrompts,
   getPromptsDir,
+  isAllowedPromptOutputFilename,
   DEFAULT_PROMPTS_DIR,
   FfmpegRecorder,
   openInObsidian,
@@ -44,6 +45,19 @@ import {
 
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
+import { resolveBin } from "./bundled.js";
+import { installTool } from "./installers/install-tool.js";
+import {
+  checkForUpdates,
+  startDownload,
+  installAndRestart,
+  getStatus as getUpdaterStatus,
+  loadPrefs as loadUpdaterPrefs,
+  savePrefs as saveUpdaterPrefs,
+  updaterEnabled,
+} from "./updater.js";
+import { dispatchSimulator } from "./updater-dev.js";
+import { openFeedbackMail, revealLogsInFinder, openLicensesFile } from "./feedback.js";
 import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
@@ -76,6 +90,10 @@ import type {
   DepsCheckResult,
   DepsInstallResult,
   DepsInstallTarget,
+  ResolvedTool,
+  InstallerProgressEvent,
+  UpdaterPreferences,
+  UpdaterSimulatorAction,
   DetectedVault,
   JobSummary,
   OllamaRuntimeDTO,
@@ -103,6 +121,7 @@ import {
   resolveRunFolderPath,
   resolveRunMediaPath,
   resolveRunAttachmentPath,
+  partitionRunFoldersForBulkDelete,
   listRunFiles,
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
@@ -233,9 +252,21 @@ function walkRunFolders(runsRoot: string): string[] {
   return folders;
 }
 
+// Track the prior recording state so we can fire a one-shot transition
+// hook when recording goes from active → not active. The updater needs
+// this to drain any deferred download/install requests that piled up
+// during recording (see main/updater.ts).
+let lastRecordingActive = false;
+
 export function broadcastRecordingStatus(): void {
   void getRecordingStatus().then((status) => {
     broadcastToAll("recording:status", status);
+    const nowActive = !!status.active;
+    if (lastRecordingActive && !nowActive) {
+      // Fire-and-forget — the updater handles its own errors.
+      void import("./updater.js").then((m) => m.onRecordingStopped()).catch(() => {});
+    }
+    lastRecordingActive = nowActive;
   });
 }
 
@@ -1001,16 +1032,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("runs:bulk-delete", async (_e, runFolders: string[]) => {
     const config = loadConfig();
     const store = getStore();
-    const validatedFolders: string[] = [];
-    for (const rf of runFolders) {
-      try {
-        validatedFolders.push(resolveRunFolderPath(rf, config));
-      } catch {
-        // Already gone — still remove from DB
-        validatedFolders.push(rf);
-      }
-    }
-    store.deleteRuns(validatedFolders);
+    const { validatedFolders, dbOnlyFolders } =
+      partitionRunFoldersForBulkDelete(runFolders, config);
+    store.deleteRuns([...validatedFolders, ...dbOnlyFolders]);
     for (const folder of validatedFolders) {
       fs.rmSync(folder, { recursive: true, force: true });
     }
@@ -1188,6 +1212,23 @@ export function registerIpcHandlers(): void {
   });
 
   // ---- prompts ----
+  function assertValidPromptId(id: unknown): asserts id is string {
+    if (
+      typeof id !== "string" ||
+      !id ||
+      id.includes("/") ||
+      id.includes("\\") ||
+      id.includes("..")
+    ) {
+      throw new Error(`Invalid prompt id: ${String(id)}`);
+    }
+  }
+  function assertValidPromptFilename(filename: unknown): asserts filename is string {
+    if (!isAllowedPromptOutputFilename(filename)) {
+      throw new Error(`Invalid prompt filename: ${String(filename)}`);
+    }
+  }
+
   ipcMain.handle("prompts:list", async (): Promise<PromptRow[]> => {
     const config = safeLoadConfig();
     const all = loadAllPrompts(config ?? undefined);
@@ -1210,6 +1251,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     "prompts:save",
     async (_e, id: string, body: string, patch: Partial<PromptRow>) => {
+      // Cheap local validations first — bad input fails before we spin up Ollama.
+      if ("filename" in patch) assertValidPromptFilename(patch.filename);
       const config = safeLoadConfig();
       const all = loadAllPrompts(config ?? undefined);
       const existing = all.find((p) => p.id === id);
@@ -1263,6 +1306,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     "prompts:create",
     async (_e, id: string, label: string, filename: string, body: string) => {
+      assertValidPromptId(id);
+      assertValidPromptFilename(filename);
       const dir = getPromptsDir();
       fs.mkdirSync(dir, { recursive: true });
       const dest = path.join(dir, `${id}.md`);
@@ -1350,86 +1395,134 @@ export function registerIpcHandlers(): void {
     });
   });
 
-  // ---- dep install (brew wrapper) ----
+  // ---- dep install (direct download + verify, no Homebrew) ----
   //
-  // The Parakeet installer already streams logs via setup-asr:log. This
-  // mirrors that pattern for ffmpeg + BlackHole via Homebrew so the wizard
-  // can offer one-click installs without ever dropping the user into a
-  // terminal. We deliberately don't try to install Homebrew itself — that
-  // requires interactive sudo and an internet redirect dance that's
-  // much safer to hand off to the user.
+  // Replaces the prior brew wrapper. The wizard buttons call here for
+  // ffmpeg / ollama / whisper-cli; we look up the manifest entry,
+  // stream the URL through hash + signature + verify-exec checks, and
+  // atomic-rename into <userData>/bin. No Terminal, no Homebrew,
+  // no interactive sudo.
+  //
+  // `deps:check-brew` stays as a stub returning true so the existing
+  // wizard renderer doesn't show the "Homebrew not installed" card.
+  // Phase 3's wizard rewrite removes both this stub and the renderer
+  // call site entirely.
   ipcMain.handle("deps:check-brew", async (): Promise<boolean> => {
-    const brew = await whichCmd("brew");
-    return brew !== null;
+    return true;
   });
 
   ipcMain.handle(
     "deps:install",
     async (_e, target: DepsInstallTarget): Promise<DepsInstallResult> => {
-      const brew = await whichCmd("brew");
-      if (!brew) {
-        return { ok: false, brewMissing: true };
-      }
+      broadcastToAll("deps-install:log", `→ installing ${target}`);
 
-      const args =
-        target === "ffmpeg"
-          ? ["install", "ffmpeg"]
-          : ["install", "whisper-cpp"];
-
-      broadcastToAll("deps-install:log", `$ brew ${args.join(" ")}`);
-
-      return await new Promise<DepsInstallResult>((resolve) => {
-        const child = spawn(brew, args, {
-          env: { ...process.env },
-          stdio: ["ignore", "pipe", "pipe"],
-        });
-        trackChildProcess(child, {
-          type: "brew-install",
-          label: target === "ffmpeg" ? "Installing ffmpeg" : "Installing whisper-cpp",
-          command: `${brew} ${args.join(" ")}`,
-        });
-
-        const streamLines = (chunk: Buffer) => {
-          const text = chunk.toString("utf-8");
-          for (const line of text.split(/\r?\n/)) {
-            if (line.trim() !== "") {
-              broadcastToAll("deps-install:log", line);
-            }
-          }
-        };
-        child.stdout?.on("data", streamLines);
-        child.stderr?.on("data", streamLines);
-
-        child.on("error", (err) => {
-          createAppLogger(false).error("Dependency install failed", {
-            processType: "brew-install",
-            pid: child.pid,
-            detail: target,
-            message: err.message,
-          });
-          resolve({ ok: false, error: err.message });
-        });
-        child.on("exit", (code) => {
-          if (code === 0) {
-            createAppLogger(false).info("Dependency install completed", {
-              processType: "brew-install",
-              pid: child.pid,
-              detail: target,
-            });
-            broadcastToAll("deps-install:log", `✓ ${target} installed`);
-            resolve({ ok: true });
+      const result = await installTool({
+        tool: target,
+        onProgress: (event: InstallerProgressEvent) => {
+          // Stream progress to two channels:
+          //  - installer-progress: structured payload (Phase 3 wizard
+          //    surfaces bytesDone/bytesTotal in a progress bar)
+          //  - deps-install:log: human-readable line stream (wizard
+          //    log panel — same UX as the brew wrapper used to drive)
+          broadcastToAll("installer-progress", event);
+          if (event.phase === "download" && event.bytesDone !== undefined) {
+            const total = event.bytesTotal
+              ? ` / ${humanBytes(event.bytesTotal)}`
+              : "";
+            broadcastToAll(
+              "deps-install:log",
+              `  ${event.phase}: ${humanBytes(event.bytesDone)}${total}`
+            );
+          } else if (event.phase === "failed") {
+            broadcastToAll(
+              "deps-install:log",
+              `✘ ${target} install failed: ${event.error ?? "unknown"}`
+            );
           } else {
-            createAppLogger(false).error("Dependency install exited with error", {
-              processType: "brew-install",
-              pid: child.pid,
-              detail: target,
-            });
-            resolve({ ok: false, error: `brew exited with code ${code}` });
+            broadcastToAll("deps-install:log", `  ${event.phase}…`);
           }
-        });
+        },
       });
+
+      if (result.ok) {
+        broadcastToAll("deps-install:log", `✓ ${target} installed`);
+        createAppLogger(false).info("Dependency install completed", {
+          processType: "wizard-install",
+          detail: target,
+        });
+        return { ok: true };
+      }
+      createAppLogger(false).error("Dependency install failed", {
+        processType: "wizard-install",
+        detail: target,
+        message: result.error,
+      });
+      return { ok: false, error: result.error, failedPhase: result.phase };
     }
   );
+
+  // ---- electron-updater ----
+  //
+  // All four handlers below are always registered. When UPDATER_ENABLED
+  // is false (no real publish target in build-flags.ts), each returns
+  // an inert `{ enabled: false, kind: "disabled-at-build" }` status —
+  // the renderer reads `enabled` once on startup and hides the entire
+  // UI surface. Keeping the handlers registered (rather than skipping
+  // them) means preload/renderer skew can never crash with "no handler
+  // registered for channel updater:check".
+  ipcMain.handle("updater:get-status", async () => getUpdaterStatus());
+  ipcMain.handle("updater:check", async () => await checkForUpdates());
+  ipcMain.handle("updater:download", async () => await startDownload());
+  ipcMain.handle("updater:install", async () => await installAndRestart());
+  ipcMain.handle("updater:get-prefs", async () => loadUpdaterPrefs());
+  ipcMain.handle("updater:set-prefs", async (_e, prefs: UpdaterPreferences) => {
+    saveUpdaterPrefs(prefs);
+    const updated = loadUpdaterPrefs();
+    // Nudge subscribers (UpdaterBanner, Settings → Updates panel) so
+    // they re-fetch prefs and re-render. The status payload itself is
+    // unchanged — what matters is the event firing.
+    //
+    // Without this broadcast, flipping "Show a banner…" off in Settings
+    // wouldn't hide an already-visible banner until some unrelated
+    // updater status event happened to fire — a real production bug
+    // hidden by mock-only test coverage. The Playwright mock-api
+    // (playwright/mock-api.ts) already broadcasts on setPrefs; this
+    // line keeps the production path in sync.
+    broadcastToAll("updater:status", getUpdaterStatus());
+    return updated;
+  });
+
+  // Dev simulator — only registered when not packaged. Production
+  // builds will respond with "simulated-install-blocked"-shaped object
+  // if a renderer somehow invokes it (defensive, shouldn't happen).
+  if (!app.isPackaged) {
+    ipcMain.handle(
+      "updater:simulate",
+      async (
+        _e,
+        action: UpdaterSimulatorAction,
+        payload?: { version?: string; message?: string }
+      ) => {
+        return dispatchSimulator(action, payload);
+      }
+    );
+  } else {
+    ipcMain.handle("updater:simulate", async () => ({
+      enabled: updaterEnabled,
+      kind: "disabled-at-build" as const,
+    }));
+  }
+
+  // ---- support: feedback mailto + reveal logs ----
+  ipcMain.handle("support:open-feedback-mail", async () => {
+    await openFeedbackMail();
+  });
+  ipcMain.handle("support:reveal-logs", async () => {
+    await revealLogsInFinder();
+  });
+  ipcMain.handle("support:open-licenses", async () => {
+    await openLicensesFile();
+  });
 
   // ---- Obsidian vault detection ----
   //
@@ -1614,24 +1707,42 @@ export function registerIpcHandlers(): void {
 
   // ---- deps check ----
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
-    const ffmpeg = await whichCmd("ffmpeg");
+    // ffmpeg — resolved app-installed → bundled → system. Source is
+    // surfaced so the wizard can show "App copy" vs "System: …" badges.
+    const ffmpegBin = await resolveBin("ffmpeg");
     let ffmpegVersion: string | null = null;
-    if (ffmpeg) {
+    if (ffmpegBin) {
       try {
-        const { stdout } = await execFileAsync(ffmpeg, ["-version"]);
+        const { stdout } = await execFileAsync(ffmpegBin.path, ["-version"]);
         const m = stdout.match(/ffmpeg version (\S+)/);
         if (m) ffmpegVersion = m[1];
       } catch { /* ignore */ }
     }
-    const python = (await whichCmd("python3.12")) ?? (await whichCmd("python3.11")) ?? (await whichCmd("python3"));
+    const ffmpeg: ResolvedTool = {
+      path: ffmpegBin?.path ?? null,
+      source: ffmpegBin?.source ?? null,
+      version: ffmpegVersion,
+    };
+
+    // Python — system-only. We never install Python ourselves.
+    const pythonPath =
+      (await whichCmd("python3.12")) ??
+      (await whichCmd("python3.11")) ??
+      (await whichCmd("python3"));
     let pythonVersion: string | null = null;
-    if (python) {
+    if (pythonPath) {
       try {
-        const { stdout } = await execFileAsync(python, ["--version"]);
+        const { stdout } = await execFileAsync(pythonPath, ["--version"]);
         const m = stdout.match(/Python (\S+)/);
         if (m) pythonVersion = m[1];
       } catch { /* ignore */ }
     }
+    const python: ResolvedTool = {
+      path: pythonPath,
+      source: pythonPath ? "system" : null,
+      version: pythonVersion,
+    };
+
     // System audio: check macOS version for AudioTee support (14.2+).
     const systemAudioSupported = isSystemAudioSupported();
 
@@ -1639,26 +1750,40 @@ export function registerIpcHandlers(): void {
     // because during the Setup Wizard the user hasn't written a config yet and
     // safeLoadConfig() returns null. This default matches DEFAULT_CONFIG in
     // engine/core/config.ts — if either changes, this check needs to move.
-    const parakeetBin = path.join(
+    const parakeetBinPath = path.join(
       os.homedir(),
       ".gistlist",
       "parakeet-venv",
       "bin",
       "mlx_audio.stt.generate"
     );
-    let parakeet: string | null = null;
+    let parakeetPath: string | null = null;
     try {
-      const st = fs.statSync(parakeetBin);
+      const st = fs.statSync(parakeetBinPath);
       // Executable bit check — if the file is there but not executable the
       // venv is broken and we should offer to reinstall.
       if (st.isFile() && (st.mode & 0o111) !== 0) {
-        parakeet = parakeetBin;
+        parakeetPath = parakeetBinPath;
       }
     } catch {
-      parakeet = null;
+      parakeetPath = null;
     }
-    // whisper.cpp: check if whisper-cli is on PATH.
-    const whisperBin = await whichCmd("whisper-cli");
+    // Parakeet always lives under ~/.gistlist/parakeet-venv when present —
+    // it's app-managed, not bundled and not on PATH. We tag it as
+    // "app-installed" to match other wizard-managed tools.
+    const parakeet: ResolvedTool = {
+      path: parakeetPath,
+      source: parakeetPath ? "app-installed" : null,
+      version: null,
+    };
+
+    // whisper-cli — resolved app-installed → bundled → system PATH.
+    const whisperBin = await resolveBin("whisper-cli");
+    const whisper: ResolvedTool = {
+      path: whisperBin?.path ?? null,
+      source: whisperBin?.source ?? null,
+      version: null,
+    };
 
     // Ollama: ask the daemon module what state it's in (or attempt to ping a
     // pre-existing system daemon if we haven't started ours yet). We don't
@@ -1696,13 +1821,11 @@ export function registerIpcHandlers(): void {
     }
     return {
       ffmpeg,
-      ffmpegVersion,
       python,
-      pythonVersion,
       blackhole: "missing" as const,
       systemAudioSupported,
       parakeet,
-      whisper: whisperBin,
+      whisper,
       ollama: {
         daemon: ollamaDaemonUp,
         source: ollamaSource,
@@ -1835,4 +1958,12 @@ async function whichCmd(cmd: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** Render a byte count for human-readable progress logs. */
+function humanBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }

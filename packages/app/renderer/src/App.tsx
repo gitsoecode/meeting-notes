@@ -13,6 +13,7 @@ import { GistlistMark } from "./components/GistlistMark";
 import { AppSidebar } from "./components/AppSidebar";
 import { SiteHeader } from "./components/SiteHeader";
 import { SidebarInset, SidebarMain, SidebarProvider } from "./components/ui/sidebar";
+import { UpdaterBanner } from "./components/UpdaterBanner";
 
 export type MeetingView = "workspace" | "details";
 
@@ -494,6 +495,7 @@ export function App() {
             canGoBack={canGoBack}
             canGoForward={canGoForward}
           />
+          <UpdaterBanner />
           <main className="flex min-h-0 flex-1 flex-col">
             {route.name === "record" && (
               <RecordView

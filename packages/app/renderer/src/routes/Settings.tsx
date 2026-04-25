@@ -8,6 +8,8 @@ import type {
   AppConfigDTO,
   AudioDevice,
   DepsCheckResult,
+  UpdaterStatus,
+  UpdaterPreferences,
 } from "../../../shared/ipc";
 import { classifyModelClient, findModelEntry } from "../constants";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
@@ -62,6 +64,9 @@ export function Settings({ config, onChange }: SettingsProps) {
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updaterStatus, setUpdaterStatus] = useState<UpdaterStatus | null>(null);
+  const [updaterPrefs, setUpdaterPrefs] = useState<UpdaterPreferences | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [setupAsrMode, setSetupAsrMode] = useState<"install" | "reinstall" | null>(null);
   const [installedLocal, setInstalledLocal] = useState<string[]>([]);
   const [pullModel, setPullModel] = useState("");
@@ -90,6 +95,42 @@ export function Settings({ config, onChange }: SettingsProps) {
     refreshDeps();
     refreshInstalledLocal();
   }, []);
+
+  // Updater status — read once on mount, then live-update from broadcast.
+  // Renders nothing in the section below when status.enabled is false
+  // (build-time-disabled — placeholder publish.repo). The dev simulator
+  // also drives this same channel.
+  useEffect(() => {
+    api.updater.getStatus().then(setUpdaterStatus).catch(() => {});
+    api.updater.getPrefs().then(setUpdaterPrefs).catch(() => {});
+    const unsub = api.on.updaterStatus((status) => setUpdaterStatus(status));
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  const handleCheckForUpdates = async () => {
+    setCheckingUpdate(true);
+    try {
+      const next = await api.updater.check();
+      setUpdaterStatus(next);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleUpdaterPrefChange = async (patch: Partial<UpdaterPreferences>) => {
+    if (!updaterPrefs) return;
+    const next = { ...updaterPrefs, ...patch };
+    setUpdaterPrefs(next); // optimistic — main writes the file
+    try {
+      const echoed = await api.updater.setPrefs(next);
+      setUpdaterPrefs(echoed);
+    } catch {
+      // Revert on failure.
+      setUpdaterPrefs(updaterPrefs);
+    }
+  };
 
   const save = async (next: AppConfigDTO) => {
     setError(null);
@@ -176,8 +217,8 @@ export function Settings({ config, onChange }: SettingsProps) {
     setHasOpenai(true);
   };
 
-  const parakeetInstalled = Boolean(deps?.parakeet);
-  const whisperInstalled = Boolean(deps?.whisper);
+  const parakeetInstalled = Boolean(deps?.parakeet.path);
+  const whisperInstalled = Boolean(deps?.whisper.path);
 
   const scrollToApiKeys = () => {
     apiKeysRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -186,13 +227,16 @@ export function Settings({ config, onChange }: SettingsProps) {
   const installWhisper = async () => {
     setInstallingWhisper(true);
     try {
-      const result = await api.deps.install("whisper-cpp");
+      // The wizard installer pulls a pinned, SHA-256-verified whisper-cli
+      // binary directly — no Homebrew. The DepsInstallTarget union became
+      // "whisper-cli" in Phase 2; the old "whisper-cpp" Homebrew formula
+      // name no longer applies.
+      const result = await api.deps.install("whisper-cli");
       if (!result.ok) {
-        if (result.brewMissing) {
-          setError("Homebrew is not installed. Install it from brew.sh, then try again.");
-        } else {
-          setError(result.error ?? "Failed to install whisper-cpp.");
-        }
+        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+        setError(
+          `Failed to install whisper-cli${phase}: ${result.error ?? "unknown error"}`
+        );
       }
       refreshDeps();
     } catch (err) {
@@ -208,27 +252,33 @@ export function Settings({ config, onChange }: SettingsProps) {
       : [
           {
             label: "ffmpeg",
-            value: deps.ffmpeg ?? "not found — brew install ffmpeg",
-            version: deps.ffmpegVersion ?? null,
-            ok: !!deps.ffmpeg,
+            value:
+              deps.ffmpeg.path
+                ? `${deps.ffmpeg.path}${deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : ""}`
+                : "not found",
+            version: deps.ffmpeg.version,
+            ok: !!deps.ffmpeg.path,
           },
           {
             label: "Python",
-            value: deps.python ?? "not found",
-            version: deps.pythonVersion ?? null,
-            ok: !!deps.python,
+            value: deps.python.path ?? "not found",
+            version: deps.python.version,
+            ok: !!deps.python.path,
           },
           {
             label: "Parakeet",
-            value: deps.parakeet ?? "not installed",
-            version: null,
-            ok: !!deps.parakeet,
+            value: deps.parakeet.path ?? "not installed",
+            version: deps.parakeet.version,
+            ok: !!deps.parakeet.path,
           },
           {
             label: "whisper.cpp",
-            value: deps.whisper ?? "not found",
-            version: null,
-            ok: !!deps.whisper,
+            value:
+              deps.whisper.path
+                ? `${deps.whisper.path}${deps.whisper.source ? ` (${deps.whisper.source})` : ""}`
+                : "not found",
+            version: deps.whisper.version,
+            ok: !!deps.whisper.path,
           },
           {
             label: "Ollama",
@@ -342,9 +392,24 @@ export function Settings({ config, onChange }: SettingsProps) {
                   <SelectContent>
                     <SelectItem value="parakeet-mlx">Parakeet (local, MLX)</SelectItem>
                     <SelectItem value="openai">OpenAI Whisper (cloud)</SelectItem>
-                    <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
+                    {/* Keep showing whisper.cpp (local) ONLY when the
+                        existing config is already on it — that way users
+                        with legacy configs don't see their selection
+                        silently disappear. New configs can't reach this
+                        option. See manifest.ts for why first beta hides
+                        whisper-local entirely. */}
+                    {config.asr_provider === "whisper-local" && (
+                      <SelectItem value="whisper-local">whisper.cpp (local) — needs reinstall</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
+                {config.asr_provider === "whisper-local" && (
+                  <p className="text-xs text-[var(--warning)] pt-2">
+                    whisper.cpp local transcription is unavailable in this
+                    build (no signed macOS binary upstream yet). Switch to
+                    Parakeet or OpenAI Whisper to keep transcribing.
+                  </p>
+                )}
               </div>
 
               {/* Parakeet conditional */}
@@ -357,7 +422,7 @@ export function Settings({ config, onChange }: SettingsProps) {
                   ) : parakeetInstalled ? (
                     <div className="space-y-1.5">
                       <p className="text-sm text-[var(--success)]">Installed</p>
-                      <p className="text-xs text-[var(--text-tertiary)]">{deps.parakeet}</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{deps.parakeet.path}</p>
                       <button
                         type="button"
                         className="text-xs text-[var(--text-tertiary)] underline decoration-dotted hover:text-[var(--text-secondary)]"
@@ -426,7 +491,18 @@ export function Settings({ config, onChange }: SettingsProps) {
                 </div>
               )}
 
-              {/* whisper.cpp conditional */}
+              {/* whisper.cpp conditional. Legacy-only: only renders when
+                  the user's existing config is already on whisper-local.
+                  New configs can't reach this option (the dropdown
+                  item above is gated on the same flag).
+
+                  IMPORTANT: don't render the "Install whisper-cli" button
+                  here when the user already has whisper-cli on disk
+                  (legacy install survives), but never render it when
+                  whisper-cli is missing — the manifest has no entry, so
+                  installTool("whisper-cli") would fail with "no manifest
+                  entry" and the user would just see a broken action.
+                  Instead we tell them what to do: switch ASR provider. */}
               {config.asr_provider === "whisper-local" && (
                 <div className="space-y-2">
                   {deps == null ? (
@@ -436,27 +512,20 @@ export function Settings({ config, onChange }: SettingsProps) {
                   ) : whisperInstalled ? (
                     <div className="space-y-1.5">
                       <p className="text-sm text-[var(--success)]">Installed</p>
-                      <p className="text-xs text-[var(--text-tertiary)]">{deps.whisper}</p>
+                      <p className="text-xs text-[var(--text-tertiary)]">{deps.whisper.path}</p>
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      <p className="text-sm text-[var(--warning-text)]">Not installed</p>
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        disabled={installingWhisper}
-                        onClick={() => {
-                          setPendingConfirm({
-                            title: "Install whisper-cpp?",
-                            description: "This will install whisper-cpp via Homebrew.",
-                            confirmLabel: "Install",
-                            confirmVariant: "default",
-                            action: installWhisper,
-                          });
-                        }}
-                      >
-                        {installingWhisper ? <><Spinner className="h-4 w-4" /> Installing…</> : "Install via Homebrew"}
-                      </Button>
+                      <p className="text-sm text-[var(--warning-text)]">
+                        Not installed. whisper-cli isn't a wizard-installable
+                        target in this build — pick Parakeet or OpenAI Whisper
+                        in the ASR dropdown above to keep transcribing.
+                      </p>
+                      {/* Install button intentionally absent — the manifest
+                          has no whisper-cli entry, so a clickable Install
+                          here would route to a guaranteed "no manifest
+                          entry for whisper-cli" failure. Showing only the
+                          guidance is the honest UX. */}
                     </div>
                   )}
                 </div>
@@ -797,6 +866,151 @@ export function Settings({ config, onChange }: SettingsProps) {
               )}
             </div>
           </section>
+
+          {updaterStatus?.enabled && (
+            <>
+              <Separator />
+              <section className="space-y-4" data-testid="settings-updates-section">
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Updates</h3>
+                  <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                    Gistlist checks for updates and tells you when one is
+                    available — it never installs without your consent.
+                  </p>
+                </div>
+
+                <div className="space-y-3 rounded-md border border-[var(--border-subtle)] p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium text-[var(--text-primary)]">
+                        Current version
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)]">
+                        {updaterStatus.kind === "available" && updaterStatus.version
+                          ? `Update ${updaterStatus.version} is available`
+                          : updaterStatus.kind === "downloading"
+                            ? `Downloading ${updaterStatus.version ?? "update"}…${
+                                updaterStatus.bytesTotal
+                                  ? ` ${Math.round(
+                                      ((updaterStatus.bytesDone ?? 0) /
+                                        updaterStatus.bytesTotal) *
+                                        100
+                                    )}%`
+                                  : ""
+                              }`
+                            : updaterStatus.kind === "downloaded"
+                              ? `Update ${updaterStatus.version ?? ""} is ready to install`
+                              : updaterStatus.kind === "deferred-recording"
+                                ? "Update deferred — finishing your recording first"
+                                : updaterStatus.kind === "error"
+                                  ? `Last check failed: ${updaterStatus.error ?? "unknown"}`
+                                  : updaterStatus.kind === "checking"
+                                    ? "Checking for updates…"
+                                    : updaterStatus.lastChecked
+                                      ? `Up to date · last checked ${new Date(updaterStatus.lastChecked).toLocaleString()}`
+                                      : "Up to date"}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {updaterStatus.kind === "available" && (
+                        <Button
+                          size="sm"
+                          onClick={() => void api.updater.download()}
+                          data-testid="updater-download"
+                        >
+                          Download
+                        </Button>
+                      )}
+                      {updaterStatus.kind === "downloaded" && (
+                        <Button
+                          size="sm"
+                          onClick={() => void api.updater.install()}
+                          data-testid="updater-install"
+                        >
+                          Install &amp; Restart
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleCheckForUpdates()}
+                        disabled={checkingUpdate}
+                        data-testid="updater-check-now"
+                      >
+                        {checkingUpdate ? <><Spinner className="h-3.5 w-3.5" /> Checking…</> : "Check Now"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {updaterPrefs && (
+                    <div className="space-y-3 pt-2 border-t border-[var(--border-subtle)]">
+                      <label className="flex items-center justify-between gap-4 text-sm">
+                        <span className="text-[var(--text-primary)]">
+                          Automatically check for updates
+                        </span>
+                        <Switch
+                          checked={updaterPrefs.autoCheck}
+                          onCheckedChange={(v) =>
+                            void handleUpdaterPrefChange({ autoCheck: !!v })
+                          }
+                          data-testid="updater-auto-check-toggle"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-4 text-sm">
+                        <span className="text-[var(--text-primary)]">
+                          Show a banner when an update is available
+                        </span>
+                        <Switch
+                          checked={updaterPrefs.notifyBanner}
+                          onCheckedChange={(v) =>
+                            void handleUpdaterPrefChange({ notifyBanner: !!v })
+                          }
+                          data-testid="updater-banner-toggle"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+
+          <Separator />
+          <section className="space-y-4" data-testid="settings-support-section">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Support</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Reach the team or peek at what Gistlist is doing under the hood.
+                Logs stay on your machine — Gistlist never uploads them.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void api.support.openFeedbackMail()}
+                data-testid="support-send-feedback"
+              >
+                Send Feedback
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void api.support.revealLogsInFinder()}
+                data-testid="support-reveal-logs"
+              >
+                Reveal Logs in Finder
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void api.support.openLicensesFile()}
+                data-testid="support-view-licenses"
+              >
+                View Third-Party Licenses
+              </Button>
+            </div>
+          </section>
         </TabsContent>
 
         <TabsContent value="meeting-index" className="max-w-2xl space-y-5 outline-none">
@@ -811,7 +1025,7 @@ export function Settings({ config, onChange }: SettingsProps) {
       {setupAsrMode && (
         <SetupAsrModal
           mode={setupAsrMode}
-          binaryPath={deps?.parakeet ?? null}
+          binaryPath={deps?.parakeet.path ?? null}
           onClose={() => {
             setSetupAsrMode(null);
             refreshDeps();

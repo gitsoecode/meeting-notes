@@ -4,8 +4,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 
-// Marketing screenshot capture. Produces `hero-app.png` and `prompt-file.png`
-// in `gistlist/web/public/assets/`. Not part of the e2e suite — invoked via
+// Marketing screenshot capture. Produces `hero-app.png`, `prompt-file.png`,
+// `claude-answer-citations.png`, and `integrations-install.png` in
+// `gistlist/web/public/assets/`. Not part of the e2e suite — invoked via
 // `npm run capture:marketing`. See docs in CLAUDE plan file.
 
 const __filename = fileURLToPath(import.meta.url);
@@ -356,4 +357,157 @@ test("prompt-file.png", async ({ browser }) => {
   await compPage.screenshot({ path: outPath, type: "png", fullPage: false });
   console.log(`wrote ${outPath}`);
   await compCtx.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Claude Desktop conversation shot. Sourced from a real screenshot (the
+// portrait PNG in ./assets/), trimmed of top/bottom whitespace, then scaled
+// to fit on a 1920×1200 white canvas to match the 16:10 spec the landing
+// page expects. We don't drive the real Claude Desktop app from Playwright,
+// so regeneration means dropping a new source PNG into ./assets/ and
+// rerunning this test.
+// ─────────────────────────────────────────────────────────────────────────
+test("claude-answer-citations.png", async ({ browser }) => {
+  const sourcePath = resolve(
+    __dirname,
+    "assets/claude-answer-citations-source.png",
+  );
+  const sourceB64 = readFileSync(sourcePath).toString("base64");
+
+  const TARGET_W = 1920;
+  const TARGET_H = 1200;
+
+  const html = `<!doctype html>
+<html><head><meta charset="utf-8"/>
+<style>
+  html, body { margin: 0; padding: 0; background: #FFFFFF; }
+  body { width: ${TARGET_W}px; height: ${TARGET_H}px; display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; }
+</style></head>
+<body>
+  <canvas id="c" width="${TARGET_W}" height="${TARGET_H}"></canvas>
+  <script>
+    (async () => {
+      const img = new Image();
+      img.src = "data:image/png;base64,${sourceB64}";
+      await new Promise((res, rej) => { img.onload = res; img.onerror = rej; });
+
+      // Trim near-white top/bottom rows so content isn't floating in padding.
+      const off = document.createElement("canvas");
+      off.width = img.width; off.height = img.height;
+      const octx = off.getContext("2d", { willReadFrequently: true });
+      octx.drawImage(img, 0, 0);
+      const data = octx.getImageData(0, 0, img.width, img.height).data;
+      const w = img.width, h = img.height;
+      const rowBlank = (y, thresh = 248) => {
+        const step = Math.max(1, Math.floor(w / 40));
+        for (let x = 0; x < w; x += step) {
+          const i = (y * w + x) * 4;
+          if (data[i] < thresh || data[i+1] < thresh || data[i+2] < thresh) return false;
+        }
+        return true;
+      };
+      let top = 0; while (top < h && rowBlank(top)) top++;
+      let bot = h - 1; while (bot > top && rowBlank(bot)) bot--;
+      const margin = 24;
+      top = Math.max(0, top - margin);
+      bot = Math.min(h - 1, bot + margin);
+      const cropH = bot - top + 1;
+
+      // Scale-to-fit within target, preserving aspect. Center on white.
+      const scale = Math.min(TARGET_W / w, TARGET_H / cropH);
+      const drawW = Math.round(w * scale);
+      const drawH = Math.round(cropH * scale);
+      const ox = Math.round((TARGET_W - drawW) / 2);
+      const oy = Math.round((TARGET_H - drawH) / 2);
+
+      const c = document.getElementById("c");
+      const ctx = c.getContext("2d");
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, TARGET_W, TARGET_H);
+      ctx.drawImage(img, 0, top, w, cropH, ox, oy, drawW, drawH);
+
+      const blob = await new Promise(r => c.toBlob(r, "image/png"));
+      const buf = await blob.arrayBuffer();
+      const bytes = new Uint8Array(buf);
+      const hex = Array.from(bytes, b => b.toString(16).padStart(2, "0")).join("");
+      document.body.setAttribute("data-png", hex);
+    })();
+  </script>
+</body></html>`;
+
+  const ctx = await browser.newContext({
+    viewport: { width: TARGET_W, height: TARGET_H },
+    deviceScaleFactor: 1,
+  });
+  const page = await ctx.newPage();
+  // Define TARGET_W / TARGET_H inside the page too (setContent doesn't see outer scope).
+  const pageHtml = html.replace(
+    "<script>",
+    `<script>const TARGET_W=${TARGET_W};const TARGET_H=${TARGET_H};`,
+  );
+  await page.setContent(pageHtml, { waitUntil: "load" });
+  await page.waitForFunction(() => document.body.getAttribute("data-png") != null, null, {
+    timeout: 15_000,
+  });
+  const hex = await page.getAttribute("body", "data-png");
+  if (!hex) throw new Error("canvas produced no PNG data");
+  const outPath = resolve(OUT_DIR, "claude-answer-citations.png");
+  writeFileSync(outPath, Buffer.from(hex, "hex"));
+  console.log(`wrote ${outPath}`);
+  await ctx.close();
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// Gistlist Settings → Integrations tab, pre-install state. Drives the real
+// renderer and swaps in a marketing-friendly MCP status (N=47 meetings,
+// Claude Desktop detected, Ollama running, not-yet-installed).
+// ─────────────────────────────────────────────────────────────────────────
+test("integrations-install.png", async ({ browser }) => {
+  const ctx = await browser.newContext({
+    viewport: { width: 800, height: 600 },
+    deviceScaleFactor: 2,
+  });
+  const page = await ctx.newPage();
+  await installMockApi(page);
+  await page.addInitScript(() => {
+    const poll = () => {
+      const anyWindow = window as typeof window & { api?: any };
+      if (!anyWindow.api?.integrations?.getMcpStatus) {
+        setTimeout(poll, 10);
+        return;
+      }
+      anyWindow.api.integrations.getMcpStatus = async () => ({
+        serverJsPath:
+          "/Applications/Gistlist.app/Contents/Resources/mcp-server/server.js",
+        serverJsExists: true,
+        configInstalled: false,
+        configReadError: null,
+        claudeConfigPath:
+          "~/Library/Application Support/Claude/claude_desktop_config.json",
+        claudeDesktopInstalled: "yes",
+        meetingsIndexed: 47,
+        ollamaRunning: true,
+      });
+    };
+    poll();
+  });
+
+  await page.goto("/#/settings");
+  // Click into the Integrations tab.
+  await page.getByRole("tab", { name: "Integrations" }).click();
+  await expect(
+    page.getByRole("button", { name: /Install Gistlist for Claude Desktop/i }),
+  ).toBeVisible({ timeout: 10_000 });
+  // Wait for the status list (meetings indexed) to reflect our override.
+  await expect(page.getByText("47 meetings indexed")).toBeVisible({ timeout: 10_000 });
+  await page.waitForLoadState("networkidle").catch(() => undefined);
+  await page.waitForTimeout(500);
+
+  const outPath = resolve(OUT_DIR, "integrations-install.png");
+  await page.screenshot({ path: outPath, type: "png", fullPage: false });
+  console.log(`wrote ${outPath}`);
+  await ctx.close();
 });

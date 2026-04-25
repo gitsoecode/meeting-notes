@@ -382,19 +382,37 @@ export interface AudioTestReport {
 /** @deprecated BlackHole is no longer required — system audio is captured via AudioTee. */
 export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 
+/**
+ * One row of `DepsCheckResult` for tools the resolver can find in
+ * multiple places. The renderer uses `source` to render badges
+ * ("App copy" / "System: …") and to offer a "Use a clean copy"
+ * affordance when a system-resolved binary is in use but a clean
+ * wizard install would be safer.
+ *
+ * `null` source means the binary wasn't found anywhere — `path` is
+ * also null in that case. `version` is best-effort: the resolver
+ * tries to parse `--version` output for tools where it makes sense,
+ * and returns null when parsing fails (which is non-fatal).
+ */
+export interface ResolvedTool {
+  path: string | null;
+  source: "app-installed" | "bundled" | "system" | null;
+  version: string | null;
+}
+
 export interface DepsCheckResult {
-  ffmpeg: string | null;
-  ffmpegVersion?: string | null;
+  /** ffmpeg via wizard install, bundle, or system PATH. */
+  ffmpeg: ResolvedTool;
   /** @deprecated Kept for type compatibility. Always "missing" in new code. */
   blackhole: BlackHoleStatus;
   /** True when macOS 14.2+ supports automatic system audio capture via CoreAudio taps. */
   systemAudioSupported: boolean;
-  python: string | null;
-  pythonVersion?: string | null;
-  /** Absolute path to the Parakeet binary if it's installed and executable, else null. */
-  parakeet: string | null;
-  /** Absolute path to whisper-cli if found on PATH, else null. */
-  whisper: string | null;
+  /** python3 — system-only (we never install python ourselves). */
+  python: ResolvedTool;
+  /** Parakeet venv binary — app-managed, lives under ~/.gistlist/. */
+  parakeet: ResolvedTool;
+  /** whisper-cli — wizard-installable; system PATH fallback for devs. */
+  whisper: ResolvedTool;
   /**
    * Local-LLM (Ollama) status. The daemon is owned by the main process; we
    * always have a binary (bundled or system), so the only useful question
@@ -409,6 +427,71 @@ export interface DepsCheckResult {
   };
 }
 
+/**
+ * Phase the wizard installer is in. Surfaced via `installer-progress`
+ * so the UI can label the current step ("Downloading…",
+ * "Verifying signature…", etc.) and on failure show which phase failed.
+ */
+export type InstallerPhase =
+  | "download"
+  | "verify-checksum"
+  | "extract"
+  | "verify-signature"
+  | "verify-exec"
+  | "complete"
+  | "failed";
+
+export interface InstallerProgressEvent {
+  tool: "ffmpeg" | "ollama" | "whisper-cli" | string;
+  phase: InstallerPhase;
+  bytesDone?: number;
+  bytesTotal?: number;
+  /** Set on phase: "failed". A short message suitable for the UI. */
+  error?: string;
+}
+
+// ---- electron-updater wiring ----------------------------------------------
+
+export type UpdaterStatusKind =
+  | "disabled-at-build"
+  | "idle"
+  | "checking"
+  | "no-update"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "deferred-recording"
+  | "error";
+
+export interface UpdaterStatus {
+  enabled: boolean;
+  kind: UpdaterStatusKind;
+  /** Set when an update is announced or downloaded. */
+  version?: string;
+  bytesPerSecond?: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+  /** ISO timestamp of the last `checkForUpdates` call. */
+  lastChecked?: string;
+  /** Set on kind === "error". */
+  error?: string;
+  /** GitHub release notes URL when available. */
+  releaseNotesUrl?: string;
+}
+
+export interface UpdaterPreferences {
+  autoCheck: boolean;
+  notifyBanner: boolean;
+}
+
+/** Dev-only simulator dispatch payload. Production builds reject these. */
+export type UpdaterSimulatorAction =
+  | "available-and-prompt"
+  | "download-start"
+  | "install-attempt"
+  | "error"
+  | "reset";
+
 export interface HardwareInfoDTO {
   arch: string;
   platform: string;
@@ -418,18 +501,28 @@ export interface HardwareInfoDTO {
 }
 
 /**
- * Dependencies the Setup Wizard can install via Homebrew on the user's
- * behalf. Keep this union in sync with the `deps:install` handler in
- * `main/ipc.ts` — adding a new target requires both sides to agree.
+ * Dependencies the Setup Wizard installs directly (no Homebrew). Targets
+ * map 1:1 to `ToolName` in `main/installers/manifest.ts` — adding a new
+ * tool means adding a manifest entry AND extending this union.
  */
-export type DepsInstallTarget = "ffmpeg" | "whisper-cpp";
+export type DepsInstallTarget = "ffmpeg" | "ollama" | "whisper-cli";
 
 export interface DepsInstallResult {
   ok: boolean;
-  /** Set when brew is missing from PATH — renderer shows a targeted fallback. */
+  /**
+   * @deprecated Brew is no longer the install mechanism. Kept for
+   * type-shape compatibility during the Phase 2/3 transition; always
+   * undefined in new code paths.
+   */
   brewMissing?: boolean;
-  /** Error message from the brew process if !ok. */
+  /** Error message from the install pipeline if !ok. */
   error?: string;
+  /**
+   * Phase that failed (download / verify-checksum / extract /
+   * verify-signature / verify-exec / manifest). Renderer maps this
+   * to a specific Retry-state message.
+   */
+  failedPhase?: string;
 }
 
 export interface DetectedVault {
@@ -810,6 +903,33 @@ export interface GistlistApi {
      *  `open-meeting` app actions. Call after subscribing to appAction. */
     ready: () => void;
   };
+  // Feedback / support — mailto + reveal-logs entry points wired
+  // from tray menu, Settings, and Help menu. Opens the user's default
+  // mail client (no automatic attachments — mailto can't carry files;
+  // use revealLogsInFinder to attach manually).
+  support: {
+    openFeedbackMail: () => Promise<void>;
+    revealLogsInFinder: () => Promise<void>;
+    /** Open the bundled THIRD_PARTY_LICENSES.md in the user's default viewer. */
+    openLicensesFile: () => Promise<void>;
+  };
+  // electron-updater. When `UPDATER_ENABLED` is false at build time
+  // (publish.repo not configured), every method returns `{ enabled: false }`-
+  // shaped results — the renderer reads `enabled` once on startup and
+  // hides the entire UI surface when disabled.
+  updater: {
+    getStatus: () => Promise<UpdaterStatus>;
+    check: () => Promise<UpdaterStatus>;
+    download: () => Promise<UpdaterStatus>;
+    install: () => Promise<UpdaterStatus>;
+    getPrefs: () => Promise<UpdaterPreferences>;
+    setPrefs: (prefs: UpdaterPreferences) => Promise<UpdaterPreferences>;
+    /** Dev-only simulator. Production builds reject calls (returns disabled status). */
+    simulate: (
+      action: UpdaterSimulatorAction,
+      payload?: { version?: string; message?: string }
+    ) => Promise<UpdaterStatus | { ok: false; status: "simulated-install-blocked" }>;
+  };
   // Events (subscribe)
   on: {
     recordingStatus: (cb: (status: RecordingStatus) => void) => () => void;
@@ -824,6 +944,10 @@ export interface GistlistApi {
     processUpdate: (cb: (process: ActivityProcess) => void) => () => void;
     audioMonitorLevels: (cb: (snapshot: AudioMonitorSnapshot) => void) => () => void;
     meetingIndexBackfillProgress: (cb: (progress: MeetingIndexProgressDTO) => void) => () => void;
+    /** Per-phase progress events from the wizard installer. */
+    installerProgress: (cb: (event: InstallerProgressEvent) => void) => () => void;
+    /** Status updates from electron-updater (or the dev simulator). */
+    updaterStatus: (cb: (status: UpdaterStatus) => void) => () => void;
   };
 }
 
