@@ -1461,7 +1461,19 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("updater:get-prefs", async () => loadUpdaterPrefs());
   ipcMain.handle("updater:set-prefs", async (_e, prefs: UpdaterPreferences) => {
     saveUpdaterPrefs(prefs);
-    return loadUpdaterPrefs();
+    const updated = loadUpdaterPrefs();
+    // Nudge subscribers (UpdaterBanner, Settings → Updates panel) so
+    // they re-fetch prefs and re-render. The status payload itself is
+    // unchanged — what matters is the event firing.
+    //
+    // Without this broadcast, flipping "Show a banner…" off in Settings
+    // wouldn't hide an already-visible banner until some unrelated
+    // updater status event happened to fire — a real production bug
+    // hidden by mock-only test coverage. The Playwright mock-api
+    // (playwright/mock-api.ts) already broadcasts on setPrefs; this
+    // line keeps the production path in sync.
+    broadcastToAll("updater:status", getUpdaterStatus());
+    return updated;
   });
 
   // Dev simulator — only registered when not packaged. Production
