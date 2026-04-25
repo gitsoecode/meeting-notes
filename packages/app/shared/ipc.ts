@@ -910,6 +910,8 @@ export interface GistlistApi {
   support: {
     openFeedbackMail: () => Promise<void>;
     revealLogsInFinder: () => Promise<void>;
+    /** Open the bundled THIRD_PARTY_LICENSES.md in the user's default viewer. */
+    openLicensesFile: () => Promise<void>;
   };
   // electron-updater. When `UPDATER_ENABLED` is false at build time
   // (publish.repo not configured), every method returns `{ enabled: false }`-

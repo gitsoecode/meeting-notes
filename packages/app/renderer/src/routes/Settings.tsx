@@ -8,6 +8,8 @@ import type {
   AppConfigDTO,
   AudioDevice,
   DepsCheckResult,
+  UpdaterStatus,
+  UpdaterPreferences,
 } from "../../../shared/ipc";
 import { classifyModelClient, findModelEntry } from "../constants";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
@@ -62,6 +64,9 @@ export function Settings({ config, onChange }: SettingsProps) {
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [updaterStatus, setUpdaterStatus] = useState<UpdaterStatus | null>(null);
+  const [updaterPrefs, setUpdaterPrefs] = useState<UpdaterPreferences | null>(null);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [setupAsrMode, setSetupAsrMode] = useState<"install" | "reinstall" | null>(null);
   const [installedLocal, setInstalledLocal] = useState<string[]>([]);
   const [pullModel, setPullModel] = useState("");
@@ -90,6 +95,42 @@ export function Settings({ config, onChange }: SettingsProps) {
     refreshDeps();
     refreshInstalledLocal();
   }, []);
+
+  // Updater status — read once on mount, then live-update from broadcast.
+  // Renders nothing in the section below when status.enabled is false
+  // (build-time-disabled — placeholder publish.repo). The dev simulator
+  // also drives this same channel.
+  useEffect(() => {
+    api.updater.getStatus().then(setUpdaterStatus).catch(() => {});
+    api.updater.getPrefs().then(setUpdaterPrefs).catch(() => {});
+    const unsub = api.on.updaterStatus((status) => setUpdaterStatus(status));
+    return () => {
+      unsub();
+    };
+  }, []);
+
+  const handleCheckForUpdates = async () => {
+    setCheckingUpdate(true);
+    try {
+      const next = await api.updater.check();
+      setUpdaterStatus(next);
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleUpdaterPrefChange = async (patch: Partial<UpdaterPreferences>) => {
+    if (!updaterPrefs) return;
+    const next = { ...updaterPrefs, ...patch };
+    setUpdaterPrefs(next); // optimistic — main writes the file
+    try {
+      const echoed = await api.updater.setPrefs(next);
+      setUpdaterPrefs(echoed);
+    } catch {
+      // Revert on failure.
+      setUpdaterPrefs(updaterPrefs);
+    }
+  };
 
   const save = async (next: AppConfigDTO) => {
     setError(null);
@@ -351,9 +392,24 @@ export function Settings({ config, onChange }: SettingsProps) {
                   <SelectContent>
                     <SelectItem value="parakeet-mlx">Parakeet (local, MLX)</SelectItem>
                     <SelectItem value="openai">OpenAI Whisper (cloud)</SelectItem>
-                    <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
+                    {/* Keep showing whisper.cpp (local) ONLY when the
+                        existing config is already on it — that way users
+                        with legacy configs don't see their selection
+                        silently disappear. New configs can't reach this
+                        option. See manifest.ts for why first beta hides
+                        whisper-local entirely. */}
+                    {config.asr_provider === "whisper-local" && (
+                      <SelectItem value="whisper-local">whisper.cpp (local) — needs reinstall</SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
+                {config.asr_provider === "whisper-local" && (
+                  <p className="text-xs text-[var(--warning)] pt-2">
+                    whisper.cpp local transcription is unavailable in this
+                    build (no signed macOS binary upstream yet). Switch to
+                    Parakeet or OpenAI Whisper to keep transcribing.
+                  </p>
+                )}
               </div>
 
               {/* Parakeet conditional */}
@@ -805,6 +861,151 @@ export function Settings({ config, onChange }: SettingsProps) {
                   </Table>
                 </div>
               )}
+            </div>
+          </section>
+
+          {updaterStatus?.enabled && (
+            <>
+              <Separator />
+              <section className="space-y-4" data-testid="settings-updates-section">
+                <div className="space-y-1">
+                  <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Updates</h3>
+                  <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                    Gistlist checks for updates and tells you when one is
+                    available — it never installs without your consent.
+                  </p>
+                </div>
+
+                <div className="space-y-3 rounded-md border border-[var(--border-subtle)] p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium text-[var(--text-primary)]">
+                        Current version
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)]">
+                        {updaterStatus.kind === "available" && updaterStatus.version
+                          ? `Update ${updaterStatus.version} is available`
+                          : updaterStatus.kind === "downloading"
+                            ? `Downloading ${updaterStatus.version ?? "update"}…${
+                                updaterStatus.bytesTotal
+                                  ? ` ${Math.round(
+                                      ((updaterStatus.bytesDone ?? 0) /
+                                        updaterStatus.bytesTotal) *
+                                        100
+                                    )}%`
+                                  : ""
+                              }`
+                            : updaterStatus.kind === "downloaded"
+                              ? `Update ${updaterStatus.version ?? ""} is ready to install`
+                              : updaterStatus.kind === "deferred-recording"
+                                ? "Update deferred — finishing your recording first"
+                                : updaterStatus.kind === "error"
+                                  ? `Last check failed: ${updaterStatus.error ?? "unknown"}`
+                                  : updaterStatus.kind === "checking"
+                                    ? "Checking for updates…"
+                                    : updaterStatus.lastChecked
+                                      ? `Up to date · last checked ${new Date(updaterStatus.lastChecked).toLocaleString()}`
+                                      : "Up to date"}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {updaterStatus.kind === "available" && (
+                        <Button
+                          size="sm"
+                          onClick={() => void api.updater.download()}
+                          data-testid="updater-download"
+                        >
+                          Download
+                        </Button>
+                      )}
+                      {updaterStatus.kind === "downloaded" && (
+                        <Button
+                          size="sm"
+                          onClick={() => void api.updater.install()}
+                          data-testid="updater-install"
+                        >
+                          Install &amp; Restart
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void handleCheckForUpdates()}
+                        disabled={checkingUpdate}
+                        data-testid="updater-check-now"
+                      >
+                        {checkingUpdate ? <><Spinner className="h-3.5 w-3.5" /> Checking…</> : "Check Now"}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {updaterPrefs && (
+                    <div className="space-y-3 pt-2 border-t border-[var(--border-subtle)]">
+                      <label className="flex items-center justify-between gap-4 text-sm">
+                        <span className="text-[var(--text-primary)]">
+                          Automatically check for updates
+                        </span>
+                        <Switch
+                          checked={updaterPrefs.autoCheck}
+                          onCheckedChange={(v) =>
+                            void handleUpdaterPrefChange({ autoCheck: !!v })
+                          }
+                          data-testid="updater-auto-check-toggle"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between gap-4 text-sm">
+                        <span className="text-[var(--text-primary)]">
+                          Show a banner when an update is available
+                        </span>
+                        <Switch
+                          checked={updaterPrefs.notifyBanner}
+                          onCheckedChange={(v) =>
+                            void handleUpdaterPrefChange({ notifyBanner: !!v })
+                          }
+                          data-testid="updater-banner-toggle"
+                        />
+                      </label>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </>
+          )}
+
+          <Separator />
+          <section className="space-y-4" data-testid="settings-support-section">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Support</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Reach the team or peek at what Gistlist is doing under the hood.
+                Logs stay on your machine — Gistlist never uploads them.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void api.support.openFeedbackMail()}
+                data-testid="support-send-feedback"
+              >
+                Send Feedback
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void api.support.revealLogsInFinder()}
+                data-testid="support-reveal-logs"
+              >
+                Reveal Logs in Finder
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => void api.support.openLicensesFile()}
+                data-testid="support-view-licenses"
+              >
+                View Third-Party Licenses
+              </Button>
             </div>
           </section>
         </TabsContent>

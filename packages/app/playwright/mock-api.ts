@@ -441,6 +441,13 @@ export async function installMockApi(page: Page) {
       brewAvailable: boolean | null;
     };
     const externalActionLog: Array<{ type: string; payload?: unknown }> = [];
+    // Per-target one-shot install-failure overrides. Tests prime these
+    // via __MEETING_NOTES_TEST.setNextInstallFailure(...) before clicking
+    // an install button; the mock consumes and clears on use.
+    const installFailureOverrides = new Map<
+      string,
+      { ok: false; error?: string; failedPhase?: string }
+    >();
 
     const hydrateArray = <T,>(target: T[], source: T[]) => {
       target.splice(0, target.length, ...clone(source));
@@ -855,6 +862,17 @@ export async function installMockApi(page: Page) {
       setDependencyState(overrides) {
         Object.assign(depsState, overrides);
         persistState();
+      },
+      /**
+       * Test helper: schedule the next call to `deps.install(target)` to
+       * return a failure result instead of the happy `{ ok: true }`. The
+       * override clears itself on first use so a subsequent retry hits
+       * the normal success path. Used by installer-failure-modes spec
+       * to drive checksum-mismatch / network-error / extract-failure
+       * UX without standing up an actual download server.
+       */
+      setNextInstallFailure(target, response) {
+        installFailureOverrides.set(target, clone(response));
       },
       getLastExternalAction() {
         return clone(externalActionLog[0] ?? null);
@@ -1780,6 +1798,24 @@ export async function installMockApi(page: Page) {
       },
       deps: {
         async install(target) {
+          // Test seam: if a spec primed an install-failure for this
+          // target via setNextInstallFailure, return that exact failure
+          // (and clear it so a follow-up Retry hits the happy path).
+          // This is how installer-failure-modes specs drive the
+          // checksum-mismatch / verify-exec UX without standing up an
+          // actual fixture download server.
+          if (installFailureOverrides.has(target)) {
+            const override = installFailureOverrides.get(target)!;
+            installFailureOverrides.delete(target);
+            const phase = override.failedPhase
+              ? ` [${override.failedPhase}]`
+              : "";
+            emit(
+              "depsInstallLog",
+              `✘ ${target} install failed${phase}: ${override.error ?? "unknown"}`
+            );
+            return override;
+          }
           // The DepsInstallTarget union changed in Phase 2 from
           // "ffmpeg" | "whisper-cpp" to "ffmpeg" | "ollama" | "whisper-cli".
           // Mock paths still use Homebrew-style locations because that's
@@ -1866,6 +1902,9 @@ export async function installMockApi(page: Page) {
         },
         async revealLogsInFinder() {
           externalActionLog.push({ type: "support:reveal-logs" });
+        },
+        async openLicensesFile() {
+          externalActionLog.push({ type: "support:open-licenses" });
         },
       },
       updater: {

@@ -191,6 +191,7 @@ const api: GistlistApi = {
   support: {
     openFeedbackMail: () => ipcRenderer.invoke("support:open-feedback-mail"),
     revealLogsInFinder: () => ipcRenderer.invoke("support:reveal-logs"),
+    openLicensesFile: () => ipcRenderer.invoke("support:open-licenses"),
   },
   updater: {
     getStatus: () => ipcRenderer.invoke("updater:get-status"),

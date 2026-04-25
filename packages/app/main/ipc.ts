@@ -56,7 +56,7 @@ import {
   updaterEnabled,
 } from "./updater.js";
 import { dispatchSimulator } from "./updater-dev.js";
-import { openFeedbackMail, revealLogsInFinder } from "./feedback.js";
+import { openFeedbackMail, revealLogsInFinder, openLicensesFile } from "./feedback.js";
 import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
@@ -1491,6 +1491,9 @@ export function registerIpcHandlers(): void {
   });
   ipcMain.handle("support:reveal-logs", async () => {
     await revealLogsInFinder();
+  });
+  ipcMain.handle("support:open-licenses", async () => {
+    await openLicensesFile();
   });
 
   // ---- Obsidian vault detection ----

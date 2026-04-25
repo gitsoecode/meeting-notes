@@ -566,7 +566,14 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
                     <SelectContent>
                       <SelectItem value="parakeet-mlx">Parakeet (local)</SelectItem>
                       <SelectItem value="openai">OpenAI (cloud)</SelectItem>
-                      <SelectItem value="whisper-local">whisper.cpp (local)</SelectItem>
+                      {/* whisper.cpp (local) intentionally hidden for first
+                          beta — whisper.cpp Releases don't currently ship
+                          a signed macOS binary, so the manifest has no
+                          entry, so installTool("whisper-cli") would fail
+                          and a user who picked it would silently end up
+                          with no working ASR. Re-add when upstream ships
+                          a signed binary or we host our own. See
+                          packages/app/main/installers/manifest.ts. */}
                     </SelectContent>
                   </Select>
                 </Field>

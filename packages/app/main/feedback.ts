@@ -12,8 +12,13 @@
  * Local-first contract: nothing is uploaded, no analytics, no Sentry.
  * Logs stay on disk. The user controls what they email.
  */
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { app, shell } from "electron";
 import { logsDir } from "./paths.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const SUPPORT_EMAIL = "support@gistlist.co";
 
@@ -50,4 +55,18 @@ export async function openFeedbackMail(): Promise<void> {
 /** Reveal the logs folder in Finder. */
 export async function revealLogsInFinder(): Promise<void> {
   await shell.openPath(logsDir());
+}
+
+/**
+ * Open the bundled THIRD_PARTY_LICENSES.md file in the user's default
+ * Markdown / text viewer. The file is copied from packages/app/assets/
+ * into dist/assets/ at build time and shipped inside the .app bundle
+ * under Contents/Resources/app.asar/dist/assets/.
+ *
+ * `__dirname` resolves to dist/main/ at runtime, so ../assets/ is the
+ * canonical path in both dev and packaged builds.
+ */
+export async function openLicensesFile(): Promise<void> {
+  const assetPath = path.resolve(__dirname, "../assets/THIRD_PARTY_LICENSES.md");
+  await shell.openPath(assetPath);
 }
