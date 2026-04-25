@@ -46,6 +46,17 @@ const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { resolveBin } from "./bundled.js";
 import { installTool } from "./installers/install-tool.js";
+import {
+  checkForUpdates,
+  startDownload,
+  installAndRestart,
+  getStatus as getUpdaterStatus,
+  loadPrefs as loadUpdaterPrefs,
+  savePrefs as saveUpdaterPrefs,
+  updaterEnabled,
+} from "./updater.js";
+import { dispatchSimulator } from "./updater-dev.js";
+import { openFeedbackMail, revealLogsInFinder } from "./feedback.js";
 import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
@@ -80,6 +91,8 @@ import type {
   DepsInstallTarget,
   ResolvedTool,
   InstallerProgressEvent,
+  UpdaterPreferences,
+  UpdaterSimulatorAction,
   DetectedVault,
   JobSummary,
   OllamaRuntimeDTO,
@@ -237,9 +250,21 @@ function walkRunFolders(runsRoot: string): string[] {
   return folders;
 }
 
+// Track the prior recording state so we can fire a one-shot transition
+// hook when recording goes from active → not active. The updater needs
+// this to drain any deferred download/install requests that piled up
+// during recording (see main/updater.ts).
+let lastRecordingActive = false;
+
 export function broadcastRecordingStatus(): void {
   void getRecordingStatus().then((status) => {
     broadcastToAll("recording:status", status);
+    const nowActive = !!status.active;
+    if (lastRecordingActive && !nowActive) {
+      // Fire-and-forget — the updater handles its own errors.
+      void import("./updater.js").then((m) => m.onRecordingStopped()).catch(() => {});
+    }
+    lastRecordingActive = nowActive;
   });
 }
 
@@ -1419,6 +1444,54 @@ export function registerIpcHandlers(): void {
       return { ok: false, error: result.error, failedPhase: result.phase };
     }
   );
+
+  // ---- electron-updater ----
+  //
+  // All four handlers below are always registered. When UPDATER_ENABLED
+  // is false (no real publish target in build-flags.ts), each returns
+  // an inert `{ enabled: false, kind: "disabled-at-build" }` status —
+  // the renderer reads `enabled` once on startup and hides the entire
+  // UI surface. Keeping the handlers registered (rather than skipping
+  // them) means preload/renderer skew can never crash with "no handler
+  // registered for channel updater:check".
+  ipcMain.handle("updater:get-status", async () => getUpdaterStatus());
+  ipcMain.handle("updater:check", async () => await checkForUpdates());
+  ipcMain.handle("updater:download", async () => await startDownload());
+  ipcMain.handle("updater:install", async () => await installAndRestart());
+  ipcMain.handle("updater:get-prefs", async () => loadUpdaterPrefs());
+  ipcMain.handle("updater:set-prefs", async (_e, prefs: UpdaterPreferences) => {
+    saveUpdaterPrefs(prefs);
+    return loadUpdaterPrefs();
+  });
+
+  // Dev simulator — only registered when not packaged. Production
+  // builds will respond with "simulated-install-blocked"-shaped object
+  // if a renderer somehow invokes it (defensive, shouldn't happen).
+  if (!app.isPackaged) {
+    ipcMain.handle(
+      "updater:simulate",
+      async (
+        _e,
+        action: UpdaterSimulatorAction,
+        payload?: { version?: string; message?: string }
+      ) => {
+        return dispatchSimulator(action, payload);
+      }
+    );
+  } else {
+    ipcMain.handle("updater:simulate", async () => ({
+      enabled: updaterEnabled,
+      kind: "disabled-at-build" as const,
+    }));
+  }
+
+  // ---- support: feedback mailto + reveal logs ----
+  ipcMain.handle("support:open-feedback-mail", async () => {
+    await openFeedbackMail();
+  });
+  ipcMain.handle("support:reveal-logs", async () => {
+    await revealLogsInFinder();
+  });
 
   // ---- Obsidian vault detection ----
   //

@@ -74,7 +74,11 @@ function buildMenu(): Menu {
     ]);
   }
 
-  return Menu.buildFromTemplate([
+  // Conditional menu items — only render entries the user can act on.
+  // "Check for Updates" appears only when the updater is enabled at
+  // build time; otherwise the entry would be a no-op and users would
+  // (correctly) wonder what it does.
+  const items: Electron.MenuItemConstructorOptions[] = [
     { label: "Gistlist", enabled: false },
     { type: "separator" },
     { label: "Open Gistlist", click: () => ensureMainWindow() },
@@ -85,8 +89,38 @@ function buildMenu(): Menu {
       },
     },
     { type: "separator" },
-    { label: "Quit Gistlist", click: () => app.quit() },
-  ]);
+    {
+      label: "Send Feedback…",
+      click: () => {
+        void import("./feedback.js")
+          .then((m) => m.openFeedbackMail())
+          .catch(() => {});
+      },
+    },
+  ];
+
+  // Lazy-import to avoid pulling updater code into the tray module's
+  // synchronous load path. We only check the build flag here.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { updaterEnabled } = require("./updater.js");
+    if (updaterEnabled) {
+      items.push({
+        label: "Check for Updates…",
+        click: () => {
+          void import("./updater.js").then((m) => m.checkForUpdates());
+        },
+      });
+    }
+  } catch {
+    // build-flags / updater not available yet (very-early-launch race) —
+    // skip silently. The Settings page exposes the same control.
+  }
+
+  items.push({ type: "separator" });
+  items.push({ label: "Quit Gistlist", click: () => app.quit() });
+
+  return Menu.buildFromTemplate(items);
 }
 
 export function setupTray(): void {

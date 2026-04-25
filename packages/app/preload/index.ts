@@ -24,6 +24,9 @@ import type {
   LaunchChatRequest,
   MeetingIndexProgressDTO,
   InstallerProgressEvent,
+  UpdaterStatus,
+  UpdaterPreferences,
+  UpdaterSimulatorAction,
 } from "../shared/ipc.js";
 
 const api: GistlistApi = {
@@ -185,6 +188,21 @@ const api: GistlistApi = {
     installMcpForClaude: () => ipcRenderer.invoke("integrations:install-mcp-claude"),
     uninstallMcpForClaude: () => ipcRenderer.invoke("integrations:uninstall-mcp-claude"),
   },
+  support: {
+    openFeedbackMail: () => ipcRenderer.invoke("support:open-feedback-mail"),
+    revealLogsInFinder: () => ipcRenderer.invoke("support:reveal-logs"),
+  },
+  updater: {
+    getStatus: () => ipcRenderer.invoke("updater:get-status"),
+    check: () => ipcRenderer.invoke("updater:check"),
+    download: () => ipcRenderer.invoke("updater:download"),
+    install: () => ipcRenderer.invoke("updater:install"),
+    getPrefs: () => ipcRenderer.invoke("updater:get-prefs"),
+    setPrefs: (prefs: UpdaterPreferences) =>
+      ipcRenderer.invoke("updater:set-prefs", prefs),
+    simulate: (action: UpdaterSimulatorAction, payload?) =>
+      ipcRenderer.invoke("updater:simulate", action, payload),
+  },
   deepLink: {
     // Signals the main process that the renderer's `appAction`
     // subscription is live. Main buffers gistlist:// URLs received during
@@ -270,6 +288,11 @@ const api: GistlistApi = {
       const handler = (_e: unknown, event: InstallerProgressEvent) => cb(event);
       ipcRenderer.on("installer-progress", handler);
       return () => ipcRenderer.removeListener("installer-progress", handler);
+    },
+    updaterStatus: (cb: (status: UpdaterStatus) => void) => {
+      const handler = (_e: unknown, status: UpdaterStatus) => cb(status);
+      ipcRenderer.on("updater:status", handler);
+      return () => ipcRenderer.removeListener("updater:status", handler);
     },
   },
 };

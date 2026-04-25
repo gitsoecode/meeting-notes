@@ -278,6 +278,13 @@ app.whenReady().then(async () => {
       ensureMainWindow();
     }
   });
+
+  // electron-updater. No-op when UPDATER_ENABLED is false at build
+  // time (placeholder publish.repo). When enabled, kicks an initial
+  // check after 3s and then every 4h. Recording-guarded — see
+  // main/updater.ts for the deferral logic.
+  const { bootUpdater } = await import("./updater.js");
+  bootUpdater(mainWindow ?? undefined);
 });
 
 app.on("window-all-closed", () => {
@@ -307,6 +314,12 @@ app.on("before-quit", async (event) => {
   }
   closeDb();
   globalShortcut.unregisterAll();
+  try {
+    const { shutdownUpdater } = await import("./updater.js");
+    shutdownUpdater();
+  } catch {
+    // Best effort.
+  }
   appLogger.info("App quit complete");
   app.exit(0);
 });

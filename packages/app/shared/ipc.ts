@@ -450,6 +450,48 @@ export interface InstallerProgressEvent {
   error?: string;
 }
 
+// ---- electron-updater wiring ----------------------------------------------
+
+export type UpdaterStatusKind =
+  | "disabled-at-build"
+  | "idle"
+  | "checking"
+  | "no-update"
+  | "available"
+  | "downloading"
+  | "downloaded"
+  | "deferred-recording"
+  | "error";
+
+export interface UpdaterStatus {
+  enabled: boolean;
+  kind: UpdaterStatusKind;
+  /** Set when an update is announced or downloaded. */
+  version?: string;
+  bytesPerSecond?: number;
+  bytesDone?: number;
+  bytesTotal?: number;
+  /** ISO timestamp of the last `checkForUpdates` call. */
+  lastChecked?: string;
+  /** Set on kind === "error". */
+  error?: string;
+  /** GitHub release notes URL when available. */
+  releaseNotesUrl?: string;
+}
+
+export interface UpdaterPreferences {
+  autoCheck: boolean;
+  notifyBanner: boolean;
+}
+
+/** Dev-only simulator dispatch payload. Production builds reject these. */
+export type UpdaterSimulatorAction =
+  | "available-and-prompt"
+  | "download-start"
+  | "install-attempt"
+  | "error"
+  | "reset";
+
 export interface HardwareInfoDTO {
   arch: string;
   platform: string;
@@ -861,6 +903,31 @@ export interface GistlistApi {
      *  `open-meeting` app actions. Call after subscribing to appAction. */
     ready: () => void;
   };
+  // Feedback / support — mailto + reveal-logs entry points wired
+  // from tray menu, Settings, and Help menu. Opens the user's default
+  // mail client (no automatic attachments — mailto can't carry files;
+  // use revealLogsInFinder to attach manually).
+  support: {
+    openFeedbackMail: () => Promise<void>;
+    revealLogsInFinder: () => Promise<void>;
+  };
+  // electron-updater. When `UPDATER_ENABLED` is false at build time
+  // (publish.repo not configured), every method returns `{ enabled: false }`-
+  // shaped results — the renderer reads `enabled` once on startup and
+  // hides the entire UI surface when disabled.
+  updater: {
+    getStatus: () => Promise<UpdaterStatus>;
+    check: () => Promise<UpdaterStatus>;
+    download: () => Promise<UpdaterStatus>;
+    install: () => Promise<UpdaterStatus>;
+    getPrefs: () => Promise<UpdaterPreferences>;
+    setPrefs: (prefs: UpdaterPreferences) => Promise<UpdaterPreferences>;
+    /** Dev-only simulator. Production builds reject calls (returns disabled status). */
+    simulate: (
+      action: UpdaterSimulatorAction,
+      payload?: { version?: string; message?: string }
+    ) => Promise<UpdaterStatus | { ok: false; status: "simulated-install-blocked" }>;
+  };
   // Events (subscribe)
   on: {
     recordingStatus: (cb: (status: RecordingStatus) => void) => () => void;
@@ -877,6 +944,8 @@ export interface GistlistApi {
     meetingIndexBackfillProgress: (cb: (progress: MeetingIndexProgressDTO) => void) => () => void;
     /** Per-phase progress events from the wizard installer. */
     installerProgress: (cb: (event: InstallerProgressEvent) => void) => () => void;
+    /** Status updates from electron-updater (or the dev simulator). */
+    updaterStatus: (cb: (status: UpdaterStatus) => void) => () => void;
   };
 }
 

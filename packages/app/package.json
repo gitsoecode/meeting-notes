@@ -58,6 +58,7 @@
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "dompurify": "^3.2.3",
+    "electron-updater": "^6.8.3",
     "lucide-react": "^1.7.0",
     "markdown-it": "^14.1.0",
     "plyr": "^3.8.4",
@@ -114,9 +115,15 @@
     "protocols": [
       {
         "name": "Gistlist",
-        "schemes": ["gistlist"]
+        "schemes": [
+          "gistlist"
+        ]
       }
     ],
+    "publish": {
+      "provider": "github",
+      "repo": ""
+    },
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
