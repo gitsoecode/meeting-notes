@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -69,6 +70,46 @@ for (const binary of requiredBinaries) {
     fs.accessSync(binary.file, mode);
   } catch {
     missing.push(binary);
+  }
+}
+
+// File-existence checks pass — now load-probe the staged better-sqlite3
+// under `ELECTRON_RUN_AS_NODE=1`. The bare .node addon being readable
+// doesn't prove it can be loaded by the JS wrapper the MCP server uses
+// (e.g. after `npm test` rebuilds the addon for Node's ABI, the file is
+// still readable but `require()` throws NODE_MODULE_VERSION).
+if (missing.length === 0) {
+  const pkgDir = path.join(
+    repoRoot,
+    "packages",
+    "mcp-server",
+    "dist",
+    "packaged",
+    "node_modules",
+    "better-sqlite3"
+  );
+  const electronModule = await import("electron");
+  const electronBin = electronModule.default;
+  const probe = spawnSync(
+    electronBin,
+    [
+      "-e",
+      `try { const D = require(${JSON.stringify(pkgDir)}); new D(':memory:').close(); } ` +
+        `catch (e) { console.error(e && e.message ? e.message : String(e)); process.exit(1); }`,
+    ],
+    {
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      encoding: "utf8",
+    }
+  );
+  if (probe.status !== 0) {
+    const errOutput = (probe.stderr || probe.stdout || "(no output)").trim();
+    missing.push({
+      name: "mcp-server better-sqlite3 ABI load",
+      file: pkgDir,
+      setup:
+        `Bundled better-sqlite3 fails to load under ELECTRON_RUN_AS_NODE=1 — most likely a NODE_MODULE_VERSION mismatch from a Node-ABI rebuild (e.g. after \`npm test\`). Run \`npm run rebuild:native --workspace @gistlist/app\` and then re-run \`npm run build:mcp\`. Underlying error:\n  ${errOutput}`,
+    });
   }
 }
 

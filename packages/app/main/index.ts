@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, nativeImage, net, protocol } from "electron";
+import { app, BrowserWindow, globalShortcut, nativeImage } from "electron";
 // Must be called before app.whenReady() to have any chance of taking effect.
 // In dev this cosmetically renames the app (menu bar, dock tooltip) but TCC
 // still identifies the bundle as "Electron" because we're running the stock
@@ -7,7 +7,7 @@ import { app, BrowserWindow, globalShortcut, nativeImage, net, protocol } from "
 app.setName("Gistlist");
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { createAppLogger, setAppLoggerListener, unloadOllamaModels } from "@gistlist/engine";
 import {
   registerIpcHandlers,
@@ -78,20 +78,6 @@ let appLoggerRef: ReturnType<typeof createAppLogger> | null = null;
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const IS_DEV = Boolean(DEV_URL);
 const APP_ICON_PATH = path.resolve(__dirname, "../assets/app-icon.png");
-
-// Register custom protocol for serving audio files to the renderer.
-// Must be called before app.whenReady().
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: "meeting-media",
-    privileges: {
-      standard: false,
-      secure: true,
-      supportFetchAPI: true,
-      stream: true,
-    },
-  },
-]);
 
 // Register `gistlist://` as a URL scheme so citations from Claude Desktop
 // (and any other markdown renderer) can deep-link into specific meetings.
@@ -182,20 +168,6 @@ app.whenReady().then(async () => {
   if (process.platform === "darwin" && app.dock && dockIcon) {
     app.dock.setIcon(dockIcon);
   }
-
-  // Serve audio files via meeting-media:// protocol so the sandboxed
-  // renderer can play them without file:// access.
-  protocol.handle("meeting-media", (request) => {
-    // URL format: meeting-media://audio/<encoded-file-path>
-    const url = new URL(request.url);
-    const filePath = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-    // Delegate to net.fetch(file://...) which handles streaming, Range
-    // requests, and correct MIME types automatically.
-    const fileUrl = pathToFileURL(filePath).toString();
-    return net.fetch(fileUrl, {
-      headers: request.headers,
-    });
-  });
 
   registerIpcHandlers();
   appLogger.info("App ready");

@@ -16,8 +16,8 @@
     "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
-    "package:mac": "npm run build && npm run build:mcp && npm run check:bundle && electron-builder --mac --config.directories.output=release",
-    "package:mac:sign": "npm run build && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && electron-builder --mac --config.directories.output=release",
+    "package:mac": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
+    "package:mac:sign": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
     "build:mcp": "npm run build:packaged --workspace @gistlist/mcp-server",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
@@ -82,7 +82,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.27",
     "concurrently": "^9.1.0",
-    "electron": "^41.2.0",
+    "electron": "41.2.0",
     "electron-builder": "^25.0.0",
     "postcss": "^8.5.9",
     "tailwindcss": "^4.2.2",
@@ -93,6 +93,7 @@
   "build": {
     "appId": "app.gistlist.desktop",
     "productName": "Gistlist",
+    "electronVersion": "41.2.0",
     "files": [
       "dist/**/*",
       "package.json"
@@ -125,14 +126,14 @@
         ]
       }
     ],
-    "publish": {
-      "provider": "github",
-      "repo": ""
-    },
+    "publish": null,
     "mac": {
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
+      "target": [
+        "zip"
+      ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Gistlist uses your microphone to capture your voice during meetings for local transcription.",
         "NSAudioCaptureUsageDescription": "Gistlist captures system audio so the other participants in your meeting can be transcribed."

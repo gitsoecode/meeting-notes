@@ -20,6 +20,7 @@ import {
   updatePromptFrontmatter,
   resetDefaultPrompts,
   getPromptsDir,
+  isAllowedPromptOutputFilename,
   DEFAULT_PROMPTS_DIR,
   FfmpegRecorder,
   openInObsidian,
@@ -120,6 +121,7 @@ import {
   resolveRunFolderPath,
   resolveRunMediaPath,
   resolveRunAttachmentPath,
+  partitionRunFoldersForBulkDelete,
   listRunFiles,
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
@@ -1030,16 +1032,9 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("runs:bulk-delete", async (_e, runFolders: string[]) => {
     const config = loadConfig();
     const store = getStore();
-    const validatedFolders: string[] = [];
-    for (const rf of runFolders) {
-      try {
-        validatedFolders.push(resolveRunFolderPath(rf, config));
-      } catch {
-        // Already gone — still remove from DB
-        validatedFolders.push(rf);
-      }
-    }
-    store.deleteRuns(validatedFolders);
+    const { validatedFolders, dbOnlyFolders } =
+      partitionRunFoldersForBulkDelete(runFolders, config);
+    store.deleteRuns([...validatedFolders, ...dbOnlyFolders]);
     for (const folder of validatedFolders) {
       fs.rmSync(folder, { recursive: true, force: true });
     }
@@ -1217,6 +1212,23 @@ export function registerIpcHandlers(): void {
   });
 
   // ---- prompts ----
+  function assertValidPromptId(id: unknown): asserts id is string {
+    if (
+      typeof id !== "string" ||
+      !id ||
+      id.includes("/") ||
+      id.includes("\\") ||
+      id.includes("..")
+    ) {
+      throw new Error(`Invalid prompt id: ${String(id)}`);
+    }
+  }
+  function assertValidPromptFilename(filename: unknown): asserts filename is string {
+    if (!isAllowedPromptOutputFilename(filename)) {
+      throw new Error(`Invalid prompt filename: ${String(filename)}`);
+    }
+  }
+
   ipcMain.handle("prompts:list", async (): Promise<PromptRow[]> => {
     const config = safeLoadConfig();
     const all = loadAllPrompts(config ?? undefined);
@@ -1239,6 +1251,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     "prompts:save",
     async (_e, id: string, body: string, patch: Partial<PromptRow>) => {
+      // Cheap local validations first — bad input fails before we spin up Ollama.
+      if ("filename" in patch) assertValidPromptFilename(patch.filename);
       const config = safeLoadConfig();
       const all = loadAllPrompts(config ?? undefined);
       const existing = all.find((p) => p.id === id);
@@ -1292,6 +1306,8 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     "prompts:create",
     async (_e, id: string, label: string, filename: string, body: string) => {
+      assertValidPromptId(id);
+      assertValidPromptFilename(filename);
       const dir = getPromptsDir();
       fs.mkdirSync(dir, { recursive: true });
       const dest = path.join(dir, `${id}.md`);

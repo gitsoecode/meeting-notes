@@ -200,7 +200,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   useEffect(() => {
     if (dataPathTouched) return;
     if (usesObsidian && vaultPath) {
-      setDataPath(joinPath(vaultPath, "Meeting-notes"));
+      setDataPath(joinPath(vaultPath, "Gistlist"));
     } else if (!usesObsidian) {
       setDataPath("~/Documents/Gistlist");
     } else {
@@ -473,7 +473,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               title="Where should meetings be stored?"
               description={
                 usesObsidian
-                  ? "This folder lives inside your Obsidian vault — the default is a Meeting-notes subfolder. Every meeting becomes its own markdown file."
+                  ? "This folder lives inside your Obsidian vault — the default is a Gistlist subfolder. Every meeting becomes its own markdown file."
                   : "Pick any folder on your machine. Every meeting becomes a subfolder with plain markdown files. You can change this later."
               }
               footer={

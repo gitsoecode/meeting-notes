@@ -170,7 +170,7 @@ async function makeServerClientPair(fixture) {
   return { client, server, stopPolling };
 }
 
-test("MCP: list_recent_meetings returns the seeded meeting with resource_uri", async () => {
+test("MCP: list_recent_meetings returns the seeded meeting with a click-through link", async () => {
   const fixture = makeFixture();
   const { client, server, stopPolling } = await makeServerClientPair(fixture);
   try {
@@ -179,14 +179,20 @@ test("MCP: list_recent_meetings returns the seeded meeting with resource_uri", a
     assert.equal(payload.meetings.length, 1);
     assert.equal(payload.meetings[0].run_id, "RUN_LAUREN");
     assert.equal(payload.meetings[0].title, "Catch up with Lauren");
-    assert.equal(payload.meetings[0].resource_uri, "meeting://RUN_LAUREN");
+    // tools.ts intentionally emits a single `link` field (markdown) instead
+    // of `resource_uri` so Claude Desktop renders it as a clickable
+    // citation. See the comment at packages/mcp-server/src/tools.ts:318.
+    assert.match(
+      payload.meetings[0].link,
+      /^\[.+\]\(https?:\/\/.+m=RUN_LAUREN/
+    );
   } finally {
     stopPolling();
     await server.close();
   }
 });
 
-test("MCP: search_meetings returns FTS hits with thin snippet + resource_link", async () => {
+test("MCP: search_meetings returns FTS hits with thin snippet + click-through link", async () => {
   const fixture = makeFixture();
   const { client, server, stopPolling } = await makeServerClientPair(fixture);
   try {
@@ -199,8 +205,9 @@ test("MCP: search_meetings returns FTS hits with thin snippet + resource_link", 
     assert.ok(payload.results.length >= 1, "expect at least one pricing hit");
     const hit = payload.results[0];
     assert.equal(hit.run_id, "RUN_LAUREN");
-    assert.equal(hit.resource_uri, "meeting://RUN_LAUREN");
-    assert.match(hit.citation, /^\[\[cite:RUN_LAUREN:/);
+    // Markdown link with the run_id encoded in the query string. Same
+    // single-field design as list_recent_meetings.
+    assert.match(hit.link, /^\[.+\]\(https?:\/\/.+m=RUN_LAUREN/);
     assert.ok(hit.snippet.length > 0 && hit.snippet.length <= 700);
   } finally {
     stopPolling();

@@ -66,9 +66,9 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.nextButton()).toBeEnabled();
     await wizard.nextButton().click();
 
-    // Data dir should auto-default to vault + /Meeting-notes
+    // Data dir should auto-default to vault + /Gistlist
     await expect(wizard.dataPathInput()).toHaveValue(
-      "/Users/test/Obsidian/MyVault/Meeting-notes"
+      "/Users/test/Obsidian/MyVault/Gistlist"
     );
   });
 
