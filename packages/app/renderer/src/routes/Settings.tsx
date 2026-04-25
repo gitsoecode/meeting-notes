@@ -817,7 +817,7 @@ export function Settings({ config, onChange }: SettingsProps) {
       {setupAsrMode && (
         <SetupAsrModal
           mode={setupAsrMode}
-          binaryPath={deps?.parakeet ?? null}
+          binaryPath={deps?.parakeet.path ?? null}
           onClose={() => {
             setSetupAsrMode(null);
             refreshDeps();

@@ -16,7 +16,7 @@
     "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
-    "package:mac": "npm run build && npm run build:mcp && npm run check:bundle && electron-builder --mac --config.directories.output=release",
+    "package:mac": "npm run build && npm run build:mcp && npm run check:bundle && node scripts/maybe-check-notarize-env.mjs && electron-builder --mac --config.directories.output=release",
     "build:mcp": "npm run build:packaged --workspace @gistlist/mcp-server",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
