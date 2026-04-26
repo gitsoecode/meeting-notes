@@ -17,6 +17,7 @@ import type {
   AppConfigDTO,
   JobSummary,
   PipelineProgressEvent,
+  ProcessRecordingRequest,
   PromptRow,
   RecordingStatus,
   ReprocessRequest,
@@ -315,13 +316,24 @@ export function MeetingShell({
 
   // ---- Derived state ----
   const isRecordingThis = recording.active && recording.run_folder === runFolder;
-  const isDraft = detail?.status === "draft" && !isRecordingThis;
   const isRecording = isRecordingThis && !recording.paused;
   const isPaused =
     (isRecordingThis && !!recording.paused) || (!isRecordingThis && detail?.status === "paused");
-  const isProcessing = detail?.status === "processing";
-  const isComplete = detail?.status === "complete";
-  const isError = detail?.status === "error";
+  const hasActiveProcessingJob =
+    reprocessStarting || activeJob?.status === "queued" || activeJob?.status === "running";
+  const effectiveStatus = isRecording
+    ? "recording"
+    : isPaused
+    ? "paused"
+    : pipelineError
+    ? "error"
+    : hasActiveProcessingJob
+    ? "processing"
+    : detail?.status ?? "draft";
+  const isDraft = effectiveStatus === "draft" && !isRecordingThis;
+  const isProcessing = effectiveStatus === "processing";
+  const isComplete = effectiveStatus === "complete";
+  const isError = effectiveStatus === "error";
   const isLive = isRecording || isPaused;
   const stopping = stopMode !== null;
 
@@ -330,12 +342,6 @@ export function MeetingShell({
     const manifestSections = detail.manifest?.prompt_outputs ?? {};
     return Object.values(manifestSections).some((s) => s?.status === "complete");
   }, [isDraft, detail]);
-
-  const effectiveStatus = isRecording
-    ? "recording"
-    : isPaused
-    ? "paused"
-    : detail?.status ?? "draft";
 
   // ---- Load detail ----
   const invalidateAnalysisCache = (promptOutputId?: string | null) => {
@@ -874,7 +880,7 @@ export function MeetingShell({
     if (!result?.run_folder) return;
     if (mode === "process") {
       const onlyIds = selectedProcessStepIds.filter((id) => id !== TRANSCRIPT_STEP_ID);
-      await api.runs.startProcessRecording({ runFolder: result.run_folder, onlyIds });
+      await startProcessRecording({ runFolder: result.run_folder, onlyIds });
     }
     onOpenMeeting(result.run_folder);
   };
@@ -899,6 +905,14 @@ export function MeetingShell({
 
   const startReprocess = async (request: ReprocessRequest) => {
     await api.runs.startReprocess(request);
+    setSections([]);
+    setPipelineError(null);
+    setReprocessStarting(true);
+    void refresh();
+  };
+
+  const startProcessRecording = async (request: ProcessRecordingRequest) => {
+    await api.runs.startProcessRecording(request);
     setSections([]);
     setPipelineError(null);
     setReprocessStarting(true);
@@ -1421,7 +1435,7 @@ export function MeetingShell({
           onClose={() => setReprocessOpen(false)}
           onStart={async ({ transcript, summary }) => {
             if (transcript) {
-              await api.runs.startProcessRecording({ runFolder });
+              await startProcessRecording({ runFolder });
             } else if (summary) {
               await startReprocess({ runFolder, onlyIds: [PRIMARY_PROMPT_ID] });
             }

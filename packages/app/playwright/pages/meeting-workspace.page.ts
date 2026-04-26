@@ -25,6 +25,10 @@ export class MeetingWorkspacePage {
     return this.main.locator("[data-slot='badge']").first();
   }
 
+  statusChip() {
+    return this.main.getByRole("button", { name: "Meeting status details" });
+  }
+
   // View toggle (Workspace | Details segmented control)
   viewToggle(which: MeetingView) {
     return this.main.getByRole("tab", { name: which });

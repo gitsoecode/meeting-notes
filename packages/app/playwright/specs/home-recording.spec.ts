@@ -16,6 +16,12 @@ test.describe("Home & Recording", () => {
     page,
     meetingWorkspace,
   }) => {
+    await page.evaluate(() => {
+      (window as unknown as {
+        __MEETING_NOTES_TEST: { setProgressEmissionDelay: (ms: number) => void };
+      }).__MEETING_NOTES_TEST.setProgressEmissionDelay(3000);
+    });
+
     await recordView.startRecording("Test Meeting");
     await expect(recordView.recordingLiveBadge()).toBeVisible();
 
@@ -33,6 +39,8 @@ test.describe("Home & Recording", () => {
     // still loads, which is what this test cares about. A follow-up test
     // covers the post-completion Details landing.
     await meetingWorkspace.waitForReady({ view: "workspace" });
+    await expect(meetingWorkspace.statusChip()).toContainText("Processing");
+    await expect(meetingWorkspace.statusChip()).not.toContainText("Complete");
   });
 
   test("end meeting dialog can save without processing", async ({
