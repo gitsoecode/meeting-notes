@@ -35,18 +35,22 @@ let stderr = FileHandle.standardError
 let engine = AVAudioEngine()
 let input = engine.inputNode
 
-// Toggle Apple's voice processing (AEC + AGC + noise suppression).
-// Enabling VPIO can change the negotiated channel layout: on M-series
-// MacBook Pros, the built-in mic array exposes 9 discrete elements with
-// no defined channel layout. AVAudioFile would write that verbatim, and
-// every downstream ffmpeg filter chain in the engine
-// (`aformat=channel_layouts=mono`) refuses to remix a 9-channel
-// undefined-layout source to mono. To stay compatible with the rest of
-// the pipeline we explicitly downmix to mono in the tap callback below
-// via AVAudioConverter, regardless of how many channels VPIO surfaces.
-// See voice-processing.test.mjs for the regression gate.
+// Apple's voice processing (AEC + AGC + noise suppression) is on by
+// default. It cancels speaker bleed at capture time when the user is
+// recording with built-in speakers + built-in mic. The Settings → Audio
+// toggle sets GISTLIST_DISABLE_VOICE_PROCESSING=1 when the user turns
+// it off, which is also useful as an internal fallback if a future
+// hardware combo turns out to be incompatible.
+//
+// Enabling VPIO changes the negotiated channel layout: on M-series
+// MacBook Pros, the input bus exposes a 9-channel mic-array layout
+// where channel 0 is the AEC-processed output. Downstream ffmpeg
+// filter chains all demand `aformat=channel_layouts=mono`, so we
+// extract channel 0 manually in the tap callback rather than letting
+// AVAudioConverter average all channels (which dilutes the AEC).
+// See the VPIO regression test in recording-live.test.mjs.
 let voiceProcessingEnabled =
-  ProcessInfo.processInfo.environment["GISTLIST_VOICE_PROCESSING"] == "1"
+  ProcessInfo.processInfo.environment["GISTLIST_DISABLE_VOICE_PROCESSING"] != "1"
 if voiceProcessingEnabled {
   if #available(macOS 10.15, *) {
     do {
@@ -59,7 +63,7 @@ if voiceProcessingEnabled {
     stderr.write("VOICE_PROCESSING_UNAVAILABLE\n".data(using: .utf8)!)
   }
 } else {
-  stderr.write("VOICE_PROCESSING_OFF\n".data(using: .utf8)!)
+  stderr.write("VOICE_PROCESSING_DISABLED_BY_ENV\n".data(using: .utf8)!)
 }
 
 // Tap format: whatever the bus delivers.

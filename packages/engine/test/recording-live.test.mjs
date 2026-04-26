@@ -390,10 +390,12 @@ test("FfmpegRecorder: a 10s real capture has no pathological drift once correcte
 function runMicCaptureHelper({ binaryPath, outputPath, durationMs, voiceProcessing }) {
   return new Promise((resolve, reject) => {
     const env = { ...process.env };
-    if (voiceProcessing) {
-      env.GISTLIST_VOICE_PROCESSING = "1";
+    // VPIO is on by default; the Settings → Audio toggle sets
+    // GISTLIST_DISABLE_VOICE_PROCESSING=1 to opt out.
+    if (voiceProcessing === false) {
+      env.GISTLIST_DISABLE_VOICE_PROCESSING = "1";
     } else {
-      delete env.GISTLIST_VOICE_PROCESSING;
+      delete env.GISTLIST_DISABLE_VOICE_PROCESSING;
     }
     const child = spawn(binaryPath, [outputPath], {
       stdio: ["ignore", "ignore", "pipe"],
@@ -410,7 +412,7 @@ function runMicCaptureHelper({ binaryPath, outputPath, durationMs, voiceProcessi
         "VOICE_PROCESSING_ENABLED",
         "VOICE_PROCESSING_FAILED",
         "VOICE_PROCESSING_UNAVAILABLE",
-        "VOICE_PROCESSING_OFF",
+        "VOICE_PROCESSING_DISABLED_BY_ENV",
       ]) {
         if (vpState === null && stderrBuf.includes(marker)) vpState = marker;
       }

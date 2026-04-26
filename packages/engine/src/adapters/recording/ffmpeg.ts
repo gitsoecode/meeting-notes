@@ -132,6 +132,7 @@ export class FfmpegRecorder implements Recorder {
         binaryPath: nativeMicBinary,
         outputPath: scratchMicPath,
         logger: this.logger,
+        voiceProcessingEnabled: options.voiceProcessingEnabled ?? true,
         onFirstSample: () => {
           if (micTiming.firstSampleSource !== "mic-capture-first-sample") {
             micTiming.firstSampleAtMs = Date.now();

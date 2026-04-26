@@ -20,6 +20,15 @@ export interface RecordingConfig {
    * catches residual system-audio bleed that survives AEC.
    */
   dedup_me_against_others: boolean;
+  /**
+   * When true (default), enables Apple's voice processing
+   * (AEC + AGC + noise suppression) on the native mic-capture helper.
+   * Cancels speaker bleed at capture time when recording with built-in
+   * speakers + built-in mic. Disable if voices sound clipped or
+   * "tunnely". Has no effect when using an external mic with its own
+   * DSP applied as the system default input.
+   */
+  voice_processing_enabled: boolean;
 }
 
 export interface WhisperLocalConfig {
@@ -145,6 +154,7 @@ const DEFAULT_CONFIG: AppConfig = {
     system_device: "", // Deprecated: system audio is now captured automatically via AudioTee
     aec_enabled: true,
     dedup_me_against_others: true,
+    voice_processing_enabled: true,
   },
   shortcuts: {
     toggle_recording: "CommandOrControl+Shift+M",
