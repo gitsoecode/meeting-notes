@@ -137,7 +137,8 @@
         "teamId": "UZ8554JSAM"
       },
       "target": [
-        "zip"
+        "zip",
+        "dmg"
       ],
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Gistlist uses your microphone to capture your voice during meetings for local transcription.",

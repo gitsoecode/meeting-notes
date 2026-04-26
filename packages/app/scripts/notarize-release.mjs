@@ -150,6 +150,19 @@ if (status !== "Accepted") {
 run("xcrun", ["stapler", "staple", appPath]);
 run("xcrun", ["stapler", "validate", appPath]);
 
+const dmgCandidates = fs
+  .readdirSync(releaseDir)
+  .filter((name) => name.endsWith(".dmg") && name.includes(arch))
+  .map((name) => path.join(releaseDir, name));
+for (const dmgPath of dmgCandidates) {
+  log(`stapling dmg ${dmgPath}`);
+  run("xcrun", ["stapler", "staple", dmgPath]);
+  run("xcrun", ["stapler", "validate", dmgPath]);
+}
+if (dmgCandidates.length === 0) {
+  log("no .dmg found in release/ — skipping dmg staple");
+}
+
 log(`rebuilding stapled release zip at ${finalZip}`);
 run("ditto", [
   "-c",
