@@ -19,13 +19,19 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { FfmpegRecorder } from "../dist/adapters/recording/ffmpeg.js";
-import { correctStreamDrift } from "../dist/core/audio.js";
+import { resolveNativeMicBinary } from "../dist/adapters/recording/native-mic-recorder.js";
+import {
+  correctStreamDrift,
+  getAudioInfo,
+  checkAudioSilence,
+  mergeTimedAudioFiles,
+} from "../dist/core/audio.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -343,6 +349,192 @@ test("FfmpegRecorder: a 10s real capture has no pathological drift once correcte
     assert.ok(
       Math.abs(sysFinal - sysWall) < 100,
       `system file duration should be within 100ms of wall-clock; file=${sysFinal}ms wall=${sysWall}ms`
+    );
+  }
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ---- Voice processing (VPIO) regression tests ----
+//
+// History: a first attempt at enabling Apple's AVAudioInputNode voice
+// processing (AEC + AGC + noise suppression) shipped silently broken
+// because the helper read `inputFormat(forBus: 0)` after enabling
+// VPIO. With voice processing on, M-series MacBook Pros expose a
+// 9-channel mic-array layout where channel 0 is the AEC-processed
+// output. AVAudioFile wrote that 9-channel buffer verbatim, and every
+// downstream ffmpeg filter chain in the engine includes
+// `aformat=channel_layouts=mono` — ffmpeg cannot auto-downmix a
+// 9-channel-undefined-layout source to mono. The cascade that
+// followed:
+//
+//   - cleanMicForSpeech (RNNoise + fallback) → "Rematrix is needed
+//     between 9 channels and mono but there is not enough information"
+//   - estimateMicSystemOffsetMs → reads mic via ffmpeg, same error
+//   - mergeTimedAudioFiles → same error → combined.wav never gets
+//     written, which is the user-visible "no combined audio file"
+//     symptom
+//   - encodeAudioArchive (compact mode) → same error
+//
+// These tests live in this file (not a separate one) so they run
+// serially with the FfmpegRecorder tests above. With multiple test
+// files all spawning mic-capture concurrently, macOS audio device
+// contention pushes the 3s drop-rate test above its 15% budget.
+
+/**
+ * Run the bundled mic-capture helper for `durationMs` against
+ * `outputPath`. Returns { wavExists, stderrTail, vpState,
+ * firstSampleSeen }. `vpState` is the VOICE_PROCESSING_* marker the
+ * helper printed (or null if none seen).
+ */
+function runMicCaptureHelper({ binaryPath, outputPath, durationMs, voiceProcessing }) {
+  return new Promise((resolve, reject) => {
+    const env = { ...process.env };
+    if (voiceProcessing) {
+      env.GISTLIST_VOICE_PROCESSING = "1";
+    } else {
+      delete env.GISTLIST_VOICE_PROCESSING;
+    }
+    const child = spawn(binaryPath, [outputPath], {
+      stdio: ["ignore", "ignore", "pipe"],
+      env,
+    });
+    let stderrBuf = "";
+    let vpState = null;
+    let firstSampleSeen = false;
+    child.stderr.on("data", (chunk) => {
+      const text = chunk.toString();
+      stderrBuf = (stderrBuf + text).slice(-4000);
+      if (text.includes("FIRST_SAMPLE")) firstSampleSeen = true;
+      for (const marker of [
+        "VOICE_PROCESSING_ENABLED",
+        "VOICE_PROCESSING_FAILED",
+        "VOICE_PROCESSING_UNAVAILABLE",
+        "VOICE_PROCESSING_OFF",
+      ]) {
+        if (vpState === null && stderrBuf.includes(marker)) vpState = marker;
+      }
+    });
+    child.on("error", reject);
+    setTimeout(() => {
+      try {
+        if (child.pid) process.kill(child.pid, "SIGINT");
+      } catch {
+        // already exited
+      }
+    }, durationMs);
+    child.on("exit", () => {
+      resolve({
+        stderrTail: stderrBuf,
+        vpState,
+        firstSampleSeen,
+        wavExists: fs.existsSync(outputPath),
+      });
+    });
+  });
+}
+
+async function generateToneWav(outputPath) {
+  await execFileAsync("ffmpeg", [
+    "-hide_banner", "-loglevel", "error",
+    "-f", "lavfi",
+    "-i", "sine=frequency=440:sample_rate=48000:duration=3",
+    "-ac", "1",
+    "-c:a", "pcm_s16le",
+    "-y",
+    outputPath,
+  ]);
+}
+
+test("mic-capture: voice processing produces mono audio that downstream ffmpeg can merge", async (t) => {
+  if (await shouldSkipLiveRecording(t)) return;
+  const binaryPath = resolveNativeMicBinary();
+  if (!binaryPath) { t.skip("mic-capture helper not built"); return; }
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "vp-on-"));
+  const outputPath = path.join(tmpDir, "mic.wav");
+  const captureMs = 3000;
+  const wallStart = Date.now();
+  const result = await runMicCaptureHelper({
+    binaryPath, outputPath, durationMs: captureMs, voiceProcessing: true,
+  });
+  const wallMs = Date.now() - wallStart;
+
+  if (result.vpState === "VOICE_PROCESSING_FAILED" || result.vpState === "VOICE_PROCESSING_UNAVAILABLE") {
+    t.skip(`voice processing did not engage on this host (${result.vpState})`);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    return;
+  }
+  if (!result.firstSampleSeen) {
+    t.skip(`no FIRST_SAMPLE — likely missing mic permission`);
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    return;
+  }
+
+  assert.equal(result.vpState, "VOICE_PROCESSING_ENABLED", "expected VP to engage");
+  assert.ok(result.wavExists, "VP-enabled mic.wav should exist");
+
+  let info;
+  try {
+    info = await getAudioInfo(outputPath);
+  } catch (err) {
+    assert.fail(`ffprobe failed to parse VP-enabled WAV: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  assert.ok(info.durationMs > 0, `VP-enabled WAV duration must be > 0; got ${info.durationMs}ms`);
+  assert.ok(
+    info.durationMs > wallMs * 0.5,
+    `VP-enabled duration ${info.durationMs}ms should be at least 50% of wall ${wallMs}ms`
+  );
+
+  // Proximate gate: mic.wav must be mono. The buggy implementation read
+  // input.inputFormat(forBus: 0) after enabling VPIO, which on M-series
+  // MBPs surfaces a 9-channel mic-array layout. The downstream pipeline
+  // assumes mono everywhere — every ffmpeg filter chain has
+  // aformat=channel_layouts=mono — and ffmpeg refuses to remix a
+  // 9-channels-undefined-layout source to mono.
+  assert.equal(
+    info.channels, 1,
+    `VP-enabled mic.wav must be mono; got ${info.channels} channels. ` +
+      `VPIO surfaces a multi-channel mic-array layout — extract channel 0 (AEC output) explicitly in the tap callback.`
+  );
+
+  // End-to-end gate: the merge step that produces combined.wav must
+  // succeed. This is the user-facing failure mode.
+  const systemPath = path.join(tmpDir, "system.wav");
+  await generateToneWav(systemPath);
+  const combinedPath = path.join(tmpDir, "combined.wav");
+  try {
+    await mergeTimedAudioFiles(
+      [
+        { path: outputPath, offsetMs: 0, gainDb: 0 },
+        { path: systemPath, offsetMs: 0, gainDb: 0 },
+      ],
+      combinedPath
+    );
+  } catch (err) {
+    assert.fail(
+      `mergeTimedAudioFiles failed on a VP-enabled mic + synthetic system mix — ` +
+        `this is the user-visible "no combined audio file" regression. ` +
+        `Error: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+  assert.ok(fs.existsSync(combinedPath), "combined.wav should be written by mergeTimedAudioFiles");
+  const combinedInfo = await getAudioInfo(combinedPath);
+  assert.ok(
+    combinedInfo.durationMs > 1500,
+    `combined.wav duration should be > 1.5s; got ${combinedInfo.durationMs}ms`
+  );
+
+  // Also verify VP is actually doing AEC-style work: the captured WAV
+  // should NOT be pure silence on a real mic. (VPIO can suppress speaker
+  // bleed but should still pass ambient-room noise / voice through.) If
+  // the file is exactly -91 dB, the channel-0 extract is broken — that's
+  // the regression that produced an all-zeros WAV in the first iteration.
+  const levels = await checkAudioSilence(outputPath, -65);
+  if (levels.maxVolumeDb <= -90) {
+    assert.fail(
+      `VP-enabled mic.wav reads as pure silence (max=${levels.maxVolumeDb.toFixed(1)} dB). ` +
+        `This is the channel-0-extract-broken regression: every sample is zero.`
     );
   }
 
