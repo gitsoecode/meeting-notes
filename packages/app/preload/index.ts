@@ -171,6 +171,8 @@ const api: GistlistApi = {
     listAppEntries: (query?: AppLogQuery) =>
       ipcRenderer.invoke("logs:list-app-entries", query),
     listProcesses: () => ipcRenderer.invoke("logs:list-processes"),
+    revealApp: () => ipcRenderer.invoke("logs:reveal-app"),
+    revealOllama: () => ipcRenderer.invoke("logs:reveal-ollama"),
     reportRendererError: (payload) =>
       ipcRenderer.invoke("logs:renderer-error", payload),
   },

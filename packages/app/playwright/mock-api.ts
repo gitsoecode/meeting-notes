@@ -116,7 +116,29 @@ export async function installMockApi(page: Page) {
           failedOutputs: 0,
           totalOutputs: 1,
           currentOutputLabel: "Summary + Action Items",
+          steps: [],
         },
+      },
+      {
+        id: "job-failed",
+        kind: "run-prompt",
+        status: "failed",
+        title: "Decision log run",
+        subtitle: "Decision Log",
+        createdAt: "2026-04-08T18:55:00.000Z",
+        startedAt: "2026-04-08T18:55:01.000Z",
+        endedAt: "2026-04-08T18:56:30.000Z",
+        cancelable: false,
+        runFolder: "/runs/weekly-planning",
+        provider: "ollama",
+        model: "qwen3.5:9b",
+        progress: {
+          completedOutputs: 0,
+          failedOutputs: 1,
+          totalOutputs: 1,
+          steps: [],
+        },
+        error: "Ollama returned 500",
       },
     ];
     const appLogEntries = [
@@ -127,9 +149,12 @@ export async function installMockApi(page: Page) {
         component: "renderer",
         message: "Prompt run failed to render preview",
         detail: "TypeError: Cannot read properties of undefined",
+        stack: "TypeError: Cannot read properties of undefined\n    at PromptPreview.tsx:44:12",
         data: {
           stack: "TypeError: Cannot read properties of undefined\n    at PromptPreview.tsx:44:12",
           detail: "PromptPreview.tsx:44:12",
+          model: "qwen3.5:9b",
+          retries: 2,
         },
       },
       {
@@ -138,6 +163,8 @@ export async function installMockApi(page: Page) {
         level: "warn",
         component: "jobs",
         message: "Retrying pipeline section",
+        jobId: "job-1",
+        runFolder: "/runs/customer-call",
         data: {
           jobId: "job-1",
           runFolder: "/runs/customer-call",
@@ -686,6 +713,10 @@ export async function installMockApi(page: Page) {
       const promptIds = req.onlyIds ?? [];
       const selectedPrompts = promptIds.map((promptId) => getPromptDefinition(promptId));
       const totalOutputs = 1 + selectedPrompts.length;
+      if (run) {
+        run.status = "processing";
+        run.prompt_output_ids = promptIds;
+      }
       const job = {
         id: `job-${nextJobCounter++}`,
         kind: "process-recording",
@@ -710,10 +741,6 @@ export async function installMockApi(page: Page) {
 
       const execute = () => {
         ensureRunAvailable(req.runFolder, { prune: true });
-        if (run) {
-          run.status = "processing";
-          run.prompt_output_ids = promptIds;
-        }
         manifests[req.runFolder] ??= {
           description: null,
           participants: [],
@@ -750,86 +777,95 @@ export async function installMockApi(page: Page) {
           label: "Build transcript",
           filename: "transcript.md",
         });
-        docs[req.runFolder] ??= {};
-        docs[req.runFolder]["transcript.md"] =
-          "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:18` Let's lock the next steps before we wrap.\n";
-        files[req.runFolder] = [
-          ...(files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md"),
-          { name: "transcript.md", size: 120, kind: "document" },
-          ...((files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md")),
-        ].filter((file, index, all) => all.findIndex((candidate) => candidate.name === file.name) === index);
-        emit("pipelineProgress", {
-          type: "output-complete",
-          runFolder: req.runFolder,
-          promptOutputId: "__transcript__",
-          label: "Build transcript",
-          filename: "transcript.md",
-          latencyMs: 500,
-        });
 
-        selectedPrompts.forEach((prompt) => {
-          const failureKey = `${req.runFolder}::${prompt.id}`;
-          const configuredFailure = failedPromptOutputs[failureKey];
-          ensurePromptSection(req.runFolder, prompt.id, configuredFailure ? "failed" : "running");
+        const finishProcessing = () => {
+          docs[req.runFolder] ??= {};
+          docs[req.runFolder]["transcript.md"] =
+            "---\nsource: mock\n---\n### Me\n\n`00:00` Welcome everyone.\n\n`00:18` Let's lock the next steps before we wrap.\n";
+          files[req.runFolder] = [
+            ...(files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md"),
+            { name: "transcript.md", size: 120, kind: "document" },
+            ...((files[req.runFolder] ?? []).filter((file) => file.name !== "transcript.md")),
+          ].filter((file, index, all) => all.findIndex((candidate) => candidate.name === file.name) === index);
           emit("pipelineProgress", {
-            type: "output-start",
+            type: "output-complete",
             runFolder: req.runFolder,
-            promptOutputId: prompt.id,
-            label: prompt.label,
-            filename: prompt.filename,
-            model: prompt.model ?? undefined,
+            promptOutputId: "__transcript__",
+            label: "Build transcript",
+            filename: "transcript.md",
+            latencyMs: 500,
           });
-          if (configuredFailure) {
-            manifests[req.runFolder].prompt_outputs[prompt.id] = {
-              ...manifests[req.runFolder].prompt_outputs[prompt.id],
-              status: "failed",
-              error: configuredFailure,
-            };
+
+          selectedPrompts.forEach((prompt) => {
+            const failureKey = `${req.runFolder}::${prompt.id}`;
+            const configuredFailure = failedPromptOutputs[failureKey];
+            ensurePromptSection(req.runFolder, prompt.id, configuredFailure ? "failed" : "running");
             emit("pipelineProgress", {
-              type: "output-failed",
+              type: "output-start",
               runFolder: req.runFolder,
               promptOutputId: prompt.id,
               label: prompt.label,
               filename: prompt.filename,
-              error: configuredFailure,
+              model: prompt.model ?? undefined,
+            });
+            if (configuredFailure) {
+              manifests[req.runFolder].prompt_outputs[prompt.id] = {
+                ...manifests[req.runFolder].prompt_outputs[prompt.id],
+                status: "failed",
+                error: configuredFailure,
+              };
+              emit("pipelineProgress", {
+                type: "output-failed",
+                runFolder: req.runFolder,
+                promptOutputId: prompt.id,
+                label: prompt.label,
+                filename: prompt.filename,
+                error: configuredFailure,
+                latencyMs: 800,
+              });
+              return;
+            }
+            writePromptOutput(req.runFolder, prompt.id);
+            emit("pipelineProgress", {
+              type: "output-complete",
+              runFolder: req.runFolder,
+              promptOutputId: prompt.id,
+              label: prompt.label,
+              filename: prompt.filename,
               latencyMs: 800,
             });
-            return;
-          }
-          writePromptOutput(req.runFolder, prompt.id);
-          emit("pipelineProgress", {
-            type: "output-complete",
-            runFolder: req.runFolder,
-            promptOutputId: prompt.id,
-            label: prompt.label,
-            filename: prompt.filename,
-            latencyMs: 800,
           });
-        });
 
-        const failed = selectedPrompts
-          .map((prompt) => prompt.id)
-          .filter((promptId) => failedPromptOutputs[`${req.runFolder}::${promptId}`]);
-        const succeeded = selectedPrompts
-          .map((prompt) => prompt.id)
-          .filter((promptId) => !failedPromptOutputs[`${req.runFolder}::${promptId}`]);
-        if (run) run.status = failed.length > 0 ? "error" : "complete";
-        buildRunComplete(req.runFolder, succeeded, failed);
-        persistState();
-        upsertJob({
-          ...job,
-          status: failed.length > 0 ? "failed" : "completed",
-          cancelable: false,
-          endedAt: new Date().toISOString(),
-          progress: {
-            completedOutputs: 1 + succeeded.length,
-            failedOutputs: failed.length,
-            totalOutputs,
-            currentOutputLabel:
-              selectedPrompts[selectedPrompts.length - 1]?.label ?? "Build transcript",
-          },
-          error: failed.length > 0 ? failedPromptOutputs[`${req.runFolder}::${failed[0]}`] : undefined,
-        });
+          const failed = selectedPrompts
+            .map((prompt) => prompt.id)
+            .filter((promptId) => failedPromptOutputs[`${req.runFolder}::${promptId}`]);
+          const succeeded = selectedPrompts
+            .map((prompt) => prompt.id)
+            .filter((promptId) => !failedPromptOutputs[`${req.runFolder}::${promptId}`]);
+          if (run) run.status = failed.length > 0 ? "error" : "complete";
+          buildRunComplete(req.runFolder, succeeded, failed);
+          persistState();
+          upsertJob({
+            ...job,
+            status: failed.length > 0 ? "failed" : "completed",
+            cancelable: false,
+            endedAt: new Date().toISOString(),
+            progress: {
+              completedOutputs: 1 + succeeded.length,
+              failedOutputs: failed.length,
+              totalOutputs,
+              currentOutputLabel:
+                selectedPrompts[selectedPrompts.length - 1]?.label ?? "Build transcript",
+            },
+            error: failed.length > 0 ? failedPromptOutputs[`${req.runFolder}::${failed[0]}`] : undefined,
+          });
+        };
+
+        if (progressEmissionDelayMs > 0) {
+          setTimeout(finishProcessing, progressEmissionDelayMs);
+        } else {
+          finishProcessing();
+        }
       };
 
       if (background) {
@@ -1671,14 +1707,14 @@ export async function installMockApi(page: Page) {
         async runtime() {
           return {
             available: true,
-            source: "bundled-spawned",
+            source: "system-running",
             models: [
               {
                 model: "qwen3.5:9b",
                 name: "qwen3.5:9b",
                 size: 5400000000,
                 size_vram: 4100000000,
-                expires_at: "2026-04-08T20:15:00.000Z",
+                expires_at: new Date(Date.now() + 14 * 60 * 1000).toISOString(),
                 details: {
                   parameter_size: "9B",
                   quantization_level: "Q4_K_M",
@@ -1687,6 +1723,11 @@ export async function installMockApi(page: Page) {
                 },
               },
             ],
+            systemMemory: {
+              totalBytes: 32 * 1024 ** 3,
+              freeBytes: 18 * 1024 ** 3,
+              ollamaVramBytes: 4100000000,
+            },
           };
         },
       },
@@ -1776,6 +1817,12 @@ export async function installMockApi(page: Page) {
         },
         async listProcesses() {
           return clone(processes);
+        },
+        async revealApp() {
+          recordExternalAction("reveal-app-log");
+        },
+        async revealOllama() {
+          recordExternalAction("reveal-ollama-log");
         },
         async reportRendererError(payload) {
           pushLogEntry({

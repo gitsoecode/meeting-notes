@@ -862,6 +862,8 @@ export interface GistlistApi {
     appPath: () => Promise<string>;
     listAppEntries: (query?: AppLogQuery) => Promise<AppLogEntry[]>;
     listProcesses: () => Promise<ActivityProcess[]>;
+    revealApp: () => Promise<void>;
+    revealOllama: () => Promise<void>;
     reportRendererError: (payload: {
       source: string;
       message: string;

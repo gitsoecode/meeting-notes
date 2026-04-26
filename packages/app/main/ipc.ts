@@ -344,7 +344,9 @@ function startReprocessInBackground(req: ReprocessRequest): void {
 async function handleProcessRecording(req: ProcessRecordingRequest): Promise<ReprocessResult> {
   const config = loadConfig();
   const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
-  const manifest = getStore().loadManifest(validatedRunFolder);
+  const store = getStore();
+  const manifest = store.loadManifest(validatedRunFolder);
+  store.updateStatus(validatedRunFolder, "processing");
   const subtitle =
     req.onlyIds && req.onlyIds.length > 0
       ? "Processing selected meeting outputs"
@@ -385,6 +387,13 @@ async function handleProcessRecording(req: ProcessRecordingRequest): Promise<Rep
 function startProcessRecordingInBackground(req: ProcessRecordingRequest): void {
   void handleProcessRecording(req).catch((err) => {
     if (isAbortLikeError(err)) return;
+    try {
+      const config = loadConfig();
+      const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
+      getStore().updateStatus(validatedRunFolder, "error", { ended: new Date().toISOString() });
+    } catch {
+      // Best effort: the renderer still receives the run-failed event below.
+    }
     broadcastToAll("pipeline:progress", {
       type: "run-failed",
       runFolder: req.runFolder,
@@ -891,6 +900,13 @@ export function registerIpcHandlers(): void {
     } catch (err) {
       if (isAbortLikeError(err)) {
         throw err;
+      }
+      try {
+        const config = loadConfig();
+        const validatedRunFolder = resolveRunFolderPath(req.runFolder, config);
+        getStore().updateStatus(validatedRunFolder, "error", { ended: new Date().toISOString() });
+      } catch {
+        // Best effort: the renderer still receives the run-failed event below.
       }
       broadcastToAll("pipeline:progress", {
         type: "run-failed",
@@ -1678,6 +1694,12 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("logs:list-processes", async () => {
     return listProcesses();
   });
+  ipcMain.handle("logs:reveal-app", async () => {
+    revealLogFile(getAppLogPath());
+  });
+  ipcMain.handle("logs:reveal-ollama", async () => {
+    revealLogFile(path.join(getConfigDir(), "ollama.log"));
+  });
   ipcMain.handle("logs:renderer-error", async (_e, payload: {
     source: string;
     message: string;
@@ -1955,6 +1977,17 @@ function tailFile(filePath: string, lines: number): string {
   const content = fs.readFileSync(filePath, "utf-8");
   const all = content.split(/\r?\n/);
   return all.slice(Math.max(0, all.length - lines)).join("\n");
+}
+
+// Reveal a log file in Finder. Falls back to opening the config dir
+// when the exact file does not exist yet (fresh install, or daemon
+// hasn't written ollama.log) — silently no-oping would be confusing.
+function revealLogFile(filePath: string): void {
+  if (fs.existsSync(filePath)) {
+    shell.showItemInFolder(filePath);
+    return;
+  }
+  shell.openPath(getConfigDir());
 }
 
 async function whichCmd(cmd: string): Promise<string | null> {

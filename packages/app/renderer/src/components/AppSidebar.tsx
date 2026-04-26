@@ -1,9 +1,9 @@
 import {
+  Activity,
   AudioLines,
   ChevronDown,
   CirclePlay,
   FileUp,
-  FolderOpen,
   LayoutDashboard,
   MessageSquareText,
   NotebookPen,
@@ -49,7 +49,7 @@ const mainItems = [
 ];
 
 const secondaryItems = [
-  { id: "activity" as const, label: "Activity", icon: FolderOpen },
+  { id: "activity" as const, label: "Activity", icon: Activity },
   { id: "settings" as const, label: "Settings", icon: Settings2 },
 ];
 
