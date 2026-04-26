@@ -743,30 +743,6 @@ export function Settings({ config, onChange }: SettingsProps) {
               />
             </div>
           </section>
-
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Voice processing</h3>
-              <p className="text-sm leading-6 text-[var(--text-secondary)]">
-                Use Apple&apos;s built-in echo cancellation and noise suppression on the microphone. Recommended when recording with built-in speakers, which otherwise bleed into the mic and cause echoey playback. Turn off if voices sound clipped or processed.
-              </p>
-            </div>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm font-medium text-[var(--text-primary)]">Apple voice processing</div>
-                <p className="text-xs text-[var(--text-tertiary)]">Applied at capture time. Affects new recordings only.</p>
-              </div>
-              <Switch
-                checked={config.recording.voice_processing_enabled !== false}
-                onCheckedChange={(checked) =>
-                  void save({
-                    ...config,
-                    recording: { ...config.recording, voice_processing_enabled: checked },
-                  })
-                }
-              />
-            </div>
-          </section>
         </TabsContent>
 
         {/* ── Storage tab ── */}

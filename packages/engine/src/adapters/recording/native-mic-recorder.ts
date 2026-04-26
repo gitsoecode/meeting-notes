@@ -35,13 +35,6 @@ export interface NativeMicSessionOptions {
   logger?: DiagnosticLogger;
   /** Fires the first time the helper reports `FIRST_SAMPLE` on stderr. */
   onFirstSample?: () => void;
-  /**
-   * When `false`, the helper is started with
-   * `GISTLIST_DISABLE_VOICE_PROCESSING=1` so it skips
-   * `setVoiceProcessingEnabled(true)` on the AVAudioEngine input node.
-   * Defaults to `true` (voice processing enabled) when omitted.
-   */
-  voiceProcessingEnabled?: boolean;
 }
 
 export interface NativeMicSession {
@@ -93,17 +86,6 @@ export function startNativeMic(options: NativeMicSessionOptions): NativeMicSessi
   const spawnTimeMs = Date.now();
   const child: ChildProcess = spawn(options.binaryPath, [options.outputPath], {
     stdio: ["ignore", "ignore", "pipe"],
-    // The Settings → Audio toggle is the source of truth for voice
-    // processing. Always set the env var explicitly: "1" when disabled,
-    // undefined when enabled. `undefined` causes Node's spawn to drop
-    // the key from the child's environment, so a stray
-    // GISTLIST_DISABLE_VOICE_PROCESSING=1 in the parent shell can't
-    // override the UI when the user has the toggle on.
-    env: {
-      ...process.env,
-      GISTLIST_DISABLE_VOICE_PROCESSING:
-        options.voiceProcessingEnabled === false ? "1" : undefined,
-    },
   });
 
   const session: NativeMicSession = {
@@ -142,19 +124,7 @@ export function startNativeMic(options: NativeMicSessionOptions): NativeMicSessi
   // the callback lag from hardware first-sample to this Date.now() is
   // ~one audio buffer (≈10 ms at 4096 samples @ 48 kHz), i.e. tight
   // enough to be below the drift-correction threshold.
-  //
-  // The helper also prints exactly one `VOICE_PROCESSING_*` marker
-  // describing whether Apple's AEC initialized. We log the resolved
-  // state once per session against the accumulated `stderrTail` so a
-  // marker that lands across two stderr chunks still gets recognized.
-  const VP_MARKERS = [
-    "VOICE_PROCESSING_ENABLED",
-    "VOICE_PROCESSING_DISABLED_BY_ENV",
-    "VOICE_PROCESSING_FAILED",
-    "VOICE_PROCESSING_UNAVAILABLE",
-  ] as const;
   let stderrTail = "";
-  let voiceProcessingLogged = false;
   child.stderr?.on("data", (chunk: Buffer) => {
     const text = chunk.toString();
     stderrTail = (stderrTail + text).slice(-4000);
@@ -166,15 +136,6 @@ export function startNativeMic(options: NativeMicSessionOptions): NativeMicSessi
           options.onFirstSample?.();
         } catch {
           // swallow hook errors
-        }
-      }
-    }
-    if (!voiceProcessingLogged) {
-      for (const marker of VP_MARKERS) {
-        if (stderrTail.indexOf(marker) !== -1) {
-          voiceProcessingLogged = true;
-          options.logger?.info("mic-capture voice processing", { state: marker });
-          break;
         }
       }
     }

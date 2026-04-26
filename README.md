@@ -322,7 +322,7 @@ A quick reference for what's where. Settings opens from the sidebar.
 | Tab | What you do here |
 | --- | --- |
 | Models | Change the LLM and ASR providers, enter API keys, pick local Ollama models, edit the Chat Launcher prompt templates. |
-| Audio | Pick the microphone input device. Toggle Apple voice processing — Apple's built-in echo cancellation + noise suppression on the mic, on by default. Recommended when recording with built-in speakers (which otherwise bleed into the mic and cause echoey playback); turn off if voices sound clipped or processed. |
+| Audio | Pick the microphone input device. |
 | Meeting index | Install the embedding model (`nomic-embed-text`) and rebuild the local search index used by Claude Desktop MCP. |
 | Integrations | Install or remove the Gistlist extension for Claude Desktop; live status for the extension, Ollama, and the meeting index. |
 | Storage | Change the data folder, toggle Obsidian and pick a vault, choose audio storage mode and audio retention. |

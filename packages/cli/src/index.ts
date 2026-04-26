@@ -250,7 +250,6 @@ program
         system_device: systemDevice,
         aec_enabled: DEFAULT_CONFIG.recording.aec_enabled,
         dedup_me_against_others: DEFAULT_CONFIG.recording.dedup_me_against_others,
-        voice_processing_enabled: DEFAULT_CONFIG.recording.voice_processing_enabled,
       },
       shortcuts: DEFAULT_CONFIG.shortcuts,
       audio_storage_mode: DEFAULT_CONFIG.audio_storage_mode,

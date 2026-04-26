@@ -608,12 +608,6 @@ export interface AppConfigDTO {
   recording: {
     mic_device: string;
     system_device: string;
-    /**
-     * When true (default), enables Apple's voice processing
-     * (AEC + AGC + noise suppression) on the native mic-capture helper.
-     * Cancels speaker bleed when recording with built-in speakers.
-     */
-    voice_processing_enabled?: boolean;
   };
   shortcuts: {
     toggle_recording: string;

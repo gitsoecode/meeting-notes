@@ -30,33 +30,8 @@ guard CommandLine.arguments.count == 2 else {
 }
 let outputURL = URL(fileURLWithPath: CommandLine.arguments[1])
 
-let stderr = FileHandle.standardError
-
 let engine = AVAudioEngine()
 let input = engine.inputNode
-
-// Toggle Apple's voice processing (AEC + AGC + noise suppression) before
-// reading the input format — enabling it can change the negotiated sample
-// rate / channel count. The Node side passes
-// GISTLIST_DISABLE_VOICE_PROCESSING=1 when the user has turned the
-// Settings → Audio toggle off; otherwise voice processing is enabled.
-// All four resolved states are logged so support can tell from run.log
-// which path the helper actually took.
-let voiceProcessingDisabled =
-  ProcessInfo.processInfo.environment["GISTLIST_DISABLE_VOICE_PROCESSING"] == "1"
-if voiceProcessingDisabled {
-  stderr.write("VOICE_PROCESSING_DISABLED_BY_ENV\n".data(using: .utf8)!)
-} else if #available(macOS 10.15, *) {
-  do {
-    try input.setVoiceProcessingEnabled(true)
-    stderr.write("VOICE_PROCESSING_ENABLED\n".data(using: .utf8)!)
-  } catch {
-    stderr.write("VOICE_PROCESSING_FAILED \(error)\n".data(using: .utf8)!)
-  }
-} else {
-  stderr.write("VOICE_PROCESSING_UNAVAILABLE\n".data(using: .utf8)!)
-}
-
 let format = input.inputFormat(forBus: 0)
 
 // Write 16-bit PCM WAV at the input's native rate. Downstream (engine
@@ -80,6 +55,7 @@ do {
   exit(3)
 }
 
+let stderr = FileHandle.standardError
 var firstSamplePrinted = false
 let writeQueue = DispatchQueue(label: "mic-capture.writer")
 
