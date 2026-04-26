@@ -75,6 +75,18 @@ npm run package:mac --workspace @gistlist/app
 
 This runs the app build, checks bundled binaries, and produces a packaged `.app` under `packages/app/release/`.
 
+### Test the packaged app against a clean profile
+
+To exercise onboarding (or anything else) against a packaged build without touching your real Gistlist data, launch the app with a throwaway userData dir and a throwaway config dir:
+
+```bash
+GISTLIST_CONFIG_DIR="$HOME/Library/Application Support/Gistlist-onboarding-test/.gistlist" \
+  packages/app/release/mac-arm64/Gistlist.app/Contents/MacOS/Gistlist \
+  --user-data-dir="$HOME/Library/Application Support/Gistlist-onboarding-test"
+```
+
+The Chromium `--user-data-dir` flag isolates Electron state; `GISTLIST_CONFIG_DIR` redirects `~/.gistlist` (config, logs, `meetings.db`, Parakeet venv). Together they make the app boot as if it's never been run. Delete the directory to start over; your real `~/Library/Application Support/Gistlist` and `~/.gistlist` are untouched.
+
 ---
 
 ## Your first session
