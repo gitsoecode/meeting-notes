@@ -63,6 +63,7 @@ Gistlist is a local-first desktop meeting workspace for solo power users. The pr
 - When changing user-facing product copy, preserve the current positioning unless the task explicitly changes it:
   `desktop app`, `Obsidian optional`, `local-first`, `editable markdown`, `customizable outputs`, `source-available` (never "open source").
   Primary tagline: **"Your meetings stay on your machine."** See [`docs/private_plans/brand-and-direction.md`](docs/private_plans/brand-and-direction.md) for the full voice rules, banned-word list, and tone examples.
+- **Keep [`README.md`](README.md) current with shipped behavior.** The README is our only user-facing guide until the marketing docs site is live. When a change adds, removes, or renames anything user-visible — Settings tabs/sections, Setup Wizard steps, CLI commands, config keys, default prompts, on-disk run-folder layout, bundled binaries, or supported platforms — update [`README.md`](README.md) in the same task. Compact UI references are fine; aim for workflow guidance over exhaustive inventory so the README stays low-drift.
 
 ## Testing
 

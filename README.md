@@ -2,7 +2,7 @@
 
 > **Your meetings stay on your machine.**
 
-A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product; the CLI is a secondary surface for power users. Gistlist records mic + system audio, transcribes locally (or via OpenAI), runs prompts over the transcript to produce structured notes, and keeps the resulting files on disk.
+A local-first desktop meeting workspace with editable markdown, local control, and customizable prompt-driven outputs. The Electron app is the primary product; the CLI is a secondary surface for power users. Gistlist records mic + system audio, transcribes it (locally on-device or via OpenAI), runs analysis prompts over the transcript on Claude / OpenAI / local Ollama to produce structured notes, and keeps the resulting files on disk.
 
 No account. No cloud sync. No telemetry.
 
@@ -11,11 +11,15 @@ No account. No cloud sync. No telemetry.
 ## Features
 
 - **Recording.** Mic + system audio, with pause/resume, live audio meters, and recovery for runs interrupted by quit or crash.
+- **Import.** Drop an existing audio or video file onto the Meetings page (or use the file picker) and Gistlist runs the same pipeline against it.
 - **Transcription.** Fully local via Parakeet MLX (Apple Silicon) or whisper.cpp, or cloud via OpenAI. Swap providers in Settings.
-- **Prompt pipeline.** One default summary plus any number of user-defined prompts that run in parallel over the transcript. Outputs stream with live per-section progress.
+- **Audio quality.** Gistlist reduces system-audio bleed in the mic track and drops near-duplicate speaker segments when the same audio appears in both channels, so the transcript reads cleanly.
+- **Prompt pipeline.** One default summary plus any number of user-defined prompts that run in parallel over the transcript. Outputs stream with live per-section progress. Five extra prompt templates ship pre-installed and are one click away on the Analysis tab.
 - **Ask questions across your meetings.** Gistlist ships an MCP server that Claude Desktop spawns locally. Ask Claude anything about your library and it returns retrieval-grounded answers with click-to-seek audio citations — clicking a citation opens Gistlist at the exact transcript moment. See [docs/mcp-setup.md](docs/mcp-setup.md).
 - **Meeting prep.** A pre-meeting notes surface for staging context and prompts before a call.
-- **LLM provider.** Claude (cloud), OpenAI (cloud), or Ollama (fully local). Ollama is bundled in packaged macOS builds — no separate install required. Individual prompts can override the global provider, so you can mix (e.g. local for most prompts, Claude for one specific summary).
+- **Chat Launcher.** Send a meeting (or live transcript) to an external AI chat app with a configurable prompt template — completed-meeting, draft, and during-recording variants in Settings → Models.
+- **Auto-update.** Gistlist checks for new releases and shows a banner when one is ready; nothing installs without your consent. Toggle in Settings → Other → Updates.
+- **LLM provider.** Claude (cloud), OpenAI (cloud), or Ollama (fully local). If you pick local mode and don't already have Ollama installed, the Setup Wizard downloads a pinned, hash-verified Ollama binary into the app's data directory — no Homebrew required. Individual prompts can override the global provider, so you can mix (e.g. local for most prompts, Claude for one specific summary).
 - **Obsidian (optional).** Writes editable markdown into a vault, with a Dataview-powered dashboard for browsing runs.
 - **Native macOS posture.** Electron sandbox on by default, API keys in the macOS Keychain, no telemetry.
 
@@ -73,22 +77,85 @@ This runs the app build, checks bundled binaries, and produces a packaged `.app`
 
 ---
 
-## First-run setup
+## Your first session
 
-On first launch the app opens an in-app **Setup Wizard**. Follow it to configure:
+### Setup Wizard
 
-- LLM provider (Claude, Ollama, or a mix) and any required API keys
-- ASR provider (`parakeet-mlx` | `openai` | `whisper-local`) and microphone
-- Optional: Obsidian vault path and base folder for markdown outputs
-- Optional: installing the local Parakeet Python environment (the wizard runs this for you — no Homebrew needed)
+On first launch the app opens an in-app Setup Wizard. The five steps:
 
-API keys go into the macOS Keychain under the service name `gistlist`. Config is written to `~/.gistlist/config.yaml`. If you chose an Obsidian vault, the wizard bootstraps `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, a `Dashboard.md`, a notes template, and `Config/pipeline.json`.
+1. **Welcome.** A short overview, no input.
+2. **Obsidian (optional).** Toggle whether you use Obsidian, and pick the vault if so. Existing vaults on your machine are auto-detected. Skip the toggle and Gistlist works fine on its own.
+3. **Where to store meetings.** Pick a folder on disk (default `~/Documents/Gistlist`) and choose **Delete audio after**: Never (default), 7 days, 30 days, or a custom number of days.
+4. **Providers and keys.** Pick an LLM provider (Claude / OpenAI / Ollama) and an ASR provider (`parakeet-mlx` / `openai` / `whisper-local`), then enter any required API keys. Keys go into the macOS Keychain under the service name `gistlist`.
+5. **Dependencies.** The wizard guides you through installing whatever your choices require: the Parakeet Python environment, Ollama and the `nomic-embed-text` embedding model (used for semantic search via Claude Desktop), and macOS microphone + system-audio permissions. Conditional — only the bits you opted into get installed.
 
-You can re-open Settings at any time to switch providers, rotate keys, or change the ASR engine.
+Config is written to `~/.gistlist/config.yaml`. If you chose Obsidian, the wizard bootstraps `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, a `Dashboard.md`, a notes template, and `Config/pipeline.json` inside the vault. Re-open Settings at any time to switch providers, rotate keys, or change the ASR engine.
+
+### Pages you'll use
+
+The app has a small navigation. Most of your time is on the **Meetings list** and a **Meeting Details** page.
+
+| Page | What it's for |
+| --- | --- |
+| Record | Start, stop, pause, resume; live mic + system meters. |
+| Meetings | Your library. Drop an audio/video file here to import an existing recording. Search, bulk reprocess. |
+| Workspace | Pre-meeting prep notes for a staged or scheduled meeting (saved as `prep.md`). |
+| Details | Tabs for a finished meeting: Metadata, Summary, Analysis, Transcript, Recording, Files. |
+| Prompts | In-app editor for the prompts that turn transcripts into outputs. |
+| Settings | Providers, keys, audio, storage, integrations, updates. |
+| Activity | Background job log. |
+
+### Record or import
+
+- **Record.** Hit Record (or use the global shortcut from Settings → Other → Keyboard Shortcuts). Live meters show that mic + system audio are coming in. Stop when you're done; processing kicks off automatically.
+- **Import.** Drag an audio or video file onto the Meetings page, or use the file-picker on the same page. Gistlist creates a meeting from it and runs the same transcription + prompt pipeline.
+
+### Review the output
+
+After processing, the meeting opens on Details → Summary. From there:
+
+- **Analysis** tab — runs any of the shipped prompts on demand, plus your own.
+- **Transcript** tab — full speaker-attributed transcript with click-to-seek audio playback.
+- **Recording** tab — the audio file directly.
+- **Files** tab — anything you attached during prep.
+
+The notes are plain markdown on disk — see the next section for the layout.
 
 ---
 
-## Audio storage and reprocessing
+## Where your meetings live on disk
+
+Gistlist stores everything under the **data directory** you picked in the Setup Wizard (default `~/Documents/Gistlist`; canonical config key is `data_path`). Obsidian users see the same layout under their vault's chosen subfolder. App state — config, logs, the meeting-index database — lives in `~/.gistlist`.
+
+| What | Where |
+| --- | --- |
+| Meetings | `<data_path>/Runs/YYYY/MM/DD/<meeting>/` |
+| Pipeline config | `<data_path>/Config/pipeline.json` |
+| Prompt templates | `<data_path>/Templates/` (or `<data_path>/Config/prompts/` depending on layout) |
+| Dashboard (Obsidian) | `<vault_path>/<base_folder>/Dashboard.md` |
+| App config | `~/.gistlist/config.yaml` |
+| App log | `~/.gistlist/app.log` |
+| Parakeet venv | `~/.gistlist/parakeet-venv/` |
+| API keys | macOS Keychain, service `gistlist` |
+| Meeting index (FTS + vectors) | `~/.gistlist/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
+
+### A typical completed meeting folder
+
+```
+<data_path>/Runs/2026/04/25/<meeting-slug>/
+├── notes.md          # main editable note (consolidated output)
+├── prep.md           # pre-meeting prep notes (only present if you used Workspace)
+├── transcript.md     # full speaker-attributed transcript
+├── audio/
+│   ├── mic.{wav,ogg,flac}      # source channels; format follows the storage mode
+│   ├── system.{wav,ogg,flac}   # absent for mic-only recordings
+│   └── combined.{wav,ogg}      # playback file used for click-to-seek
+└── attachments/      # files attached during prep or notes (only when present)
+```
+
+After audio retention deletes, the `audio/` directory is gone but `notes.md`, `prep.md`, and `transcript.md` stay.
+
+### Audio storage modes
 
 Gistlist records and processes meetings as WAV first so capture, drift correction, acoustic echo cleanup, transcription, and click-to-seek alignment all work from stable local files. After a meeting has processed successfully, the app compacts the stored audio according to **Settings → Storage → Audio Storage**:
 
@@ -100,7 +167,9 @@ Gistlist records and processes meetings as WAV first so capture, drift correctio
 
 Compact is the default. It keeps separate source channels plus a combined playback file, usually around **60-70 MB per hour** for a two-channel voice meeting. Transcript reprocessing from Compact audio uses the compressed source channels, so results can differ slightly from the original WAV-based run; prompt-only reprocessing uses the existing transcript and is unaffected.
 
-Audio retention is separate. **Settings → Storage → Audio File Retention** deletes the whole `audio/` directory after the chosen number of days while preserving notes, transcripts, and prompt outputs.
+### Audio retention
+
+**Settings → Storage → Audio File Retention** controls how long audio files are kept. Pick **Delete audio after**: Never (default), 7 days, 30 days, or a custom number of days. Retention deletes the whole `audio/` directory while preserving notes, transcripts, and prompt outputs.
 
 ### Compact existing meetings
 
@@ -140,10 +209,10 @@ Gistlist can summarize meetings with **Anthropic Claude** (cloud, fastest, costs
 
 ### Local mode (Ollama)
 
-In development, Gistlist will prefer a system `ollama` on `PATH` if you already have one installed. For packaged macOS releases, we bundle the Ollama binary into the `.app` so end users don't need to install anything separately. On startup, Gistlist will:
+If you pick local mode and don't already have Ollama installed, the Setup Wizard downloads a pinned, hash-verified Ollama binary into the app's data directory (`<userData>/bin/ollama`) — no Homebrew or separate install needed. If you already have Ollama on `PATH`, Gistlist uses that instead and never duplicates the binary. On startup, Gistlist will:
 
 1. **Reuse a system Ollama daemon** if one is already running on `localhost:11434`. We just talk to it — no second daemon, no duplicate models.
-2. Otherwise, **spawn a daemon ourselves** — preferring a system `ollama` binary on `PATH` if one exists, falling back to the bundled binary in packaged builds — and stop it cleanly when you quit.
+2. Otherwise, **spawn a daemon ourselves** — preferring a system `ollama` on `PATH`, falling back to the bundled-by-the-wizard binary — and stop it cleanly when you quit.
 
 Models live in the standard `~/.ollama/models` directory regardless of which daemon ends up serving them. That means any models you've already pulled with Ollama are picked up automatically with **no duplicate downloads**, and anything you pull from inside Gistlist is also visible to a system Ollama install if you ever set one up.
 
@@ -168,9 +237,44 @@ Transcription is a separate path. Gistlist uses **Parakeet** (Apple Silicon MLX)
 
 ---
 
+## Customizing prompts
+
+Six prompt templates ship with Gistlist:
+
+- `summary` — runs automatically on every meeting.
+- `coaching`, `customer-call-recap`, `decision-log`, `next-steps-email`, `one-on-one-follow-up` — visible on each meeting's Analysis tab; run on demand when you click them.
+
+You can edit any of them in-app on the **Prompts** page, or directly in the prompt files on disk (`<data_path>/Templates/` for the desktop app; the CLI stores them in the same folder). Prompts are markdown files with YAML frontmatter:
+
+```markdown
+---
+id: next-steps-email
+label: Next-Steps Email
+description: Draft a follow-up email summarizing decisions and action items.
+sort_order: 40
+enabled: true
+auto: false
+---
+
+You are drafting a follow-up email after the meeting whose transcript follows.
+Cover decisions, owners, and dates. Keep it under 200 words.
+```
+
+Per-prompt overrides let you mix providers — set `provider: claude` or `model: gpt-4o` in the frontmatter and that one prompt will use the override even if your global LLM is Ollama. Useful when a single prompt benefits from a stronger model. Reset a built-in to its shipped default at any time from the Prompts page (or `gistlist prompts reset <id>`).
+
+---
+
 ## Asking questions across your meetings (Claude Desktop + MCP)
 
 Gistlist ships an MCP server — a small stdio subprocess that Claude Desktop spawns locally. Once installed, you can ask Claude anything about your library ("what did Lauren say about pricing last month?", "summarize my 1:1s with Alex this quarter") and it returns retrieval-grounded answers with clickable audio citations.
+
+What Claude can do once the extension is installed:
+
+- **List recent meetings** — filter by participant, date range, or status.
+- **Search meetings** — hybrid keyword + semantic search; returns snippets with clickable timestamps.
+- **Get meeting** — pull the full markdown for one meeting (notes + transcript + prep + summary) so Claude reasons from the source, not the snippet.
+
+Setup details:
 
 - **Install:** Settings → Integrations → Claude Desktop. One click; Gistlist writes the Claude Desktop config. Restart Claude.
 - **Private by default:** the MCP server is read-only over your local `meetings.db` and only talks to Ollama at `localhost:11434` for semantic search. No outbound network.
@@ -211,6 +315,21 @@ The vault gets `Meetings/Runs/`, `Meetings/Config/`, `Meetings/Templates/`, `Das
 
 ---
 
+## Settings — current tabs
+
+A quick reference for what's where. Settings opens from the sidebar.
+
+| Tab | What you do here |
+| --- | --- |
+| Models | Change the LLM and ASR providers, enter API keys, pick local Ollama models, edit the Chat Launcher prompt templates. |
+| Audio | Pick the microphone input device. |
+| Meeting index | Install the embedding model (`nomic-embed-text`) and rebuild the local search index used by Claude Desktop MCP. |
+| Integrations | Install or remove the Gistlist extension for Claude Desktop; live status for the extension, Ollama, and the meeting index. |
+| Storage | Change the data folder, toggle Obsidian and pick a vault, choose audio storage mode and audio retention. |
+| Other | Recording shortcut, system health checks, auto-update preferences, support links and logs. |
+
+---
+
 ## CLI (advanced / secondary)
 
 > The CLI lags behind the desktop app and doesn't support meeting prep, live prompt streaming, or the Claude Desktop MCP integration. New users should use the desktop app. The CLI is here for scripting, headless environments, and a few maintenance commands that aren't surfaced in the UI yet.
@@ -223,7 +342,7 @@ npm link
 gistlist --help
 ```
 
-After `npm link`, the `gistlist` command is on your `PATH`. You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change the `bin` entry in `package.json`, or move the project directory.
+After `npm link`, the `gistlist` command is on your `PATH`. If `gistlist` doesn't show up after `npm link` from the repo root (some npm versions don't propagate workspace `bin` entries), run `npm link --workspace @gistlist/cli` instead. You only need to re-run `npm link` if you delete `dist/`/`node_modules`, change the `bin` entry in `packages/cli/package.json`, or move the project directory.
 
 ### Commands
 
@@ -264,25 +383,22 @@ Records a short clip from each configured device, analyzes volume, and reports w
 
 ---
 
-## Testing
+## Repo / packages
 
-For the full list of test commands and when to use each, see the **Testing** section in [AGENTS.md](./AGENTS.md). That's the source of truth — the table covers `npm test`, the Playwright suites (full, fast, focused, live-Electron), and the native-module rebuild dance required when switching between the Node test runtime and the Electron runtime.
+This is a contributor footnote. The repo is an npm workspace with four packages:
+
+| Package | Purpose |
+| --- | --- |
+| `packages/app` | Electron desktop app (main process, preload bridge, renderer, IPC). |
+| `packages/engine` | Recording, transcription, prompt loading, run processing, on-disk layout. Shared by app, cli, and mcp-server. |
+| `packages/cli` | The `gistlist` Node CLI. |
+| `packages/mcp-server` | Stdio MCP server spawned by Claude Desktop; read-only over `meetings.db`. |
 
 ---
 
-## Where things live
+## Testing
 
-| What | Where |
-| --- | --- |
-| Config | `~/.gistlist/config.yaml` |
-| App log | `~/.gistlist/app.log` |
-| Parakeet venv | `~/.gistlist/parakeet-venv/` |
-| API keys | macOS Keychain, service `gistlist` |
-| Recordings & notes | `{vault_path}/{base_folder}/Runs/` |
-| Pipeline config | `{vault_path}/{base_folder}/Config/pipeline.json` |
-| Templates | `{vault_path}/{base_folder}/Templates/` |
-| Dashboard | `{vault_path}/{base_folder}/Dashboard.md` |
-| Meeting index (FTS + vectors) | `~/.gistlist/meetings.db` (`chat_chunks`, `chat_chunks_fts`, `chat_chunks_vec`) |
+For the full list of test commands and when to use each, see the **Testing** section in [AGENTS.md](./AGENTS.md). That's the source of truth — the table covers `npm test`, the Playwright suites (full, fast, focused, live-Electron), and the native-module rebuild dance required when switching between the Node test runtime and the Electron runtime.
 
 ---
 
