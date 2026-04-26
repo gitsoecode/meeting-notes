@@ -23,6 +23,13 @@ export interface RecorderOptions {
    * it falls back to ffmpeg AVFoundation (degraded mode).
    */
   micCaptureBinaryPath?: string;
+  /**
+   * When true (default if omitted), enables Apple's voice processing
+   * (AEC + AGC + noise suppression) on the native mic-capture helper.
+   * Only consumed by the native CoreAudio path; the ffmpeg fallback
+   * ignores this flag.
+   */
+  voiceProcessingEnabled?: boolean;
 }
 
 export interface RecordingStopResult {

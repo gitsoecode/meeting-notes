@@ -481,6 +481,7 @@ async function startCaptureIntoSegment(
     devices,
     audioTeeBinaryPath: resolveAudioTeeBinary(),
     micCaptureBinaryPath: resolveMicCaptureBinary(),
+    voiceProcessingEnabled: config.recording.voice_processing_enabled,
   });
 
   // Update manifest to add this segment
