@@ -55,6 +55,20 @@ if voiceProcessingEnabled {
   if #available(macOS 10.15, *) {
     do {
       try input.setVoiceProcessingEnabled(true)
+      // Tame the system-wide output ducking that VPIO triggers. Without
+      // this, macOS attenuates the speaker output so aggressively while
+      // VPIO is active that a YouTube clip playing during a recording
+      // becomes nearly inaudible (observed on M-series MBPs as ~80%
+      // → ~10% perceived loudness). Setting duckingLevel = .min and
+      // disabling advanced (context-aware) ducking keeps AEC working
+      // but removes most of the playback attenuation. Available on
+      // macOS 14+; older macOS gets the default aggressive ducking.
+      if #available(macOS 14.0, *) {
+        var ducking = input.voiceProcessingOtherAudioDuckingConfiguration
+        ducking.enableAdvancedDucking = false
+        ducking.duckingLevel = .min
+        input.voiceProcessingOtherAudioDuckingConfiguration = ducking
+      }
       stderr.write("VOICE_PROCESSING_ENABLED\n".data(using: .utf8)!)
     } catch {
       stderr.write("VOICE_PROCESSING_FAILED \(error)\n".data(using: .utf8)!)
