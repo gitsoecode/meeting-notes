@@ -21,12 +21,14 @@ export interface RecordingConfig {
    */
   dedup_me_against_others: boolean;
   /**
-   * When true (default), enables Apple's voice processing
-   * (AEC + AGC + noise suppression) on the native mic-capture helper.
-   * Cancels speaker bleed at capture time when recording with built-in
-   * speakers + built-in mic. Disable if voices sound clipped or
-   * "tunnely". Has no effect when using an external mic with its own
-   * DSP applied as the system default input.
+   * Enables Apple's voice processing (AEC + AGC + noise suppression) on
+   * the native mic-capture helper. Off by default — the existing
+   * offline AEC pass (`cancelSystemFromMic`) handles most cases, and
+   * VPIO has trade-offs (system-wide audio output ducking, slight
+   * processed character on voices) that aren't worth it as a default.
+   * Turn on for setups where speaker bleed into the mic is severe and
+   * the offline pass isn't enough — typically built-in mic + built-in
+   * speakers with loud system audio.
    */
   voice_processing_enabled: boolean;
 }
@@ -154,7 +156,7 @@ const DEFAULT_CONFIG: AppConfig = {
     system_device: "", // Deprecated: system audio is now captured automatically via AudioTee
     aec_enabled: true,
     dedup_me_against_others: true,
-    voice_processing_enabled: true,
+    voice_processing_enabled: false,
   },
   shortcuts: {
     toggle_recording: "CommandOrControl+Shift+M",

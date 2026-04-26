@@ -748,7 +748,7 @@ export function Settings({ config, onChange }: SettingsProps) {
             <div className="space-y-1">
               <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Voice processing</h3>
               <p className="text-sm leading-6 text-[var(--text-secondary)]">
-                Use Apple&apos;s built-in echo cancellation and noise suppression on the microphone. On by default. Recommended when recording with built-in speakers, which otherwise bleed into the mic and cause echoey playback. Turn off if voices sound clipped or processed.
+                Apple&apos;s built-in echo cancellation, automatic gain, and noise suppression on the microphone. Off by default — the engine&apos;s offline echo-cancellation pass handles most setups. Turn on if your built-in speakers bleed heavily into the mic and the offline pass isn&apos;t enough; expect a slight processed character on voices and lower system-audio playback volume while recording.
               </p>
             </div>
             <div className="flex items-center justify-between">
@@ -757,7 +757,7 @@ export function Settings({ config, onChange }: SettingsProps) {
                 <p className="text-xs text-[var(--text-tertiary)]">Applied at capture time. Affects new recordings only.</p>
               </div>
               <Switch
-                checked={config.recording.voice_processing_enabled !== false}
+                checked={config.recording.voice_processing_enabled === true}
                 onCheckedChange={(checked) =>
                   void save({
                     ...config,
