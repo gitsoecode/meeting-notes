@@ -96,6 +96,15 @@ export interface AppConfig {
    * deleted. `null` means audio is kept forever (the default).
    */
   audio_retention_days: number | null;
+  /**
+   * How meeting audio is stored after processing completes.
+   *
+   * - `compact`: speech-oriented Opus/Ogg archives for source channels and
+   *   combined playback. Smallest default for normal meeting use.
+   * - `lossless`: FLAC source channels plus Opus/Ogg combined playback.
+   * - `full-fidelity`: keep the current WAV files.
+   */
+  audio_storage_mode: "compact" | "lossless" | "full-fidelity";
 }
 
 /**
@@ -141,6 +150,7 @@ const DEFAULT_CONFIG: AppConfig = {
     toggle_recording: "CommandOrControl+Shift+M",
   },
   audio_retention_days: null,
+  audio_storage_mode: "compact",
 };
 
 export function getConfigDir(): string {

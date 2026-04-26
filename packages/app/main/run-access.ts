@@ -212,3 +212,54 @@ export function listRunFiles(
 
   return files;
 }
+
+export function inferAudioStorage(files: RunFileDescriptor[]) {
+  const media = files.filter((file) => file.kind === "media" && file.name.startsWith(`${RUN_AUDIO_DIR}/`));
+  const totalBytes = media.reduce((sum, file) => sum + file.size, 0);
+  if (media.length === 0) {
+    return {
+      mode: "none" as const,
+      sourceFormat: "none" as const,
+      combinedFormat: "none" as const,
+      totalBytes,
+      usesLossySources: false,
+    };
+  }
+
+  const sourceExts = new Set<string>();
+  let combinedFormat: "ogg" | "wav" | "none" = "none";
+  for (const file of media) {
+    const base = path.posix.basename(file.name);
+    const ext = path.posix.extname(base).slice(1).toLowerCase();
+    if (base === "combined.ogg") combinedFormat = "ogg";
+    else if (base === "combined.wav" && combinedFormat === "none") combinedFormat = "wav";
+    if (/^(mic|system)\.(wav|ogg|flac)$/.test(base)) {
+      sourceExts.add(ext);
+    }
+  }
+
+  const sourceFormat: "ogg" | "flac" | "wav" | "mixed" | "none" =
+    sourceExts.size === 0
+      ? "none"
+      : sourceExts.size === 1
+        ? (Array.from(sourceExts)[0] as "ogg" | "flac" | "wav")
+        : "mixed";
+  const mode: "compact" | "lossless" | "full-fidelity" | "mixed" | "none" =
+    sourceFormat === "ogg"
+      ? "compact"
+      : sourceFormat === "flac"
+        ? "lossless"
+        : sourceFormat === "wav"
+          ? "full-fidelity"
+          : sourceFormat === "none"
+            ? "none"
+            : "mixed";
+
+  return {
+    mode,
+    sourceFormat,
+    combinedFormat,
+    totalBytes,
+    usesLossySources: sourceFormat === "ogg" || sourceFormat === "mixed",
+  };
+}

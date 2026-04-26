@@ -88,6 +88,52 @@ You can re-open Settings at any time to switch providers, rotate keys, or change
 
 ---
 
+## Audio storage and reprocessing
+
+Gistlist records and processes meetings as WAV first so capture, drift correction, acoustic echo cleanup, transcription, and click-to-seek alignment all work from stable local files. After a meeting has processed successfully, the app compacts the stored audio according to **Settings → Storage → Audio Storage**:
+
+| Mode | Stored source channels | Stored playback | Best for |
+| --- | --- | --- | --- |
+| Compact | `mic.ogg` + `system.ogg` (Opus, 48 kbps mono) | `combined.ogg` (Opus, 32 kbps mono) | Normal voice meetings, replay, and future transcript reruns with much smaller files |
+| Lossless archive | `mic.flac` + `system.flac` | `combined.ogg` | Bit-exact source preservation with smaller playback |
+| Full fidelity | `mic.wav` + `system.wav` | `combined.wav` | Maximum preservation, largest storage use |
+
+Compact is the default. It keeps separate source channels plus a combined playback file, usually around **60-70 MB per hour** for a two-channel voice meeting. Transcript reprocessing from Compact audio uses the compressed source channels, so results can differ slightly from the original WAV-based run; prompt-only reprocessing uses the existing transcript and is unaffected.
+
+Audio retention is separate. **Settings → Storage → Audio File Retention** deletes the whole `audio/` directory after the chosen number of days while preserving notes, transcripts, and prompt outputs.
+
+### Compact existing meetings
+
+For existing WAV-heavy libraries, use the developer migration script. It is dry-run by default:
+
+```bash
+npm run compact:audio --workspace @gistlist/app
+```
+
+Apply compaction after reviewing the estimate:
+
+```bash
+npm run compact:audio --workspace @gistlist/app -- --apply --mode compact
+```
+
+Target one meeting folder:
+
+```bash
+npm run compact:audio --workspace @gistlist/app -- --run-folder "/path/to/Runs/2026/04/25/meeting" --apply
+```
+
+### Duplicate speaker regression
+
+If a transcript shows the same remote-speaker text under both `Me` and `Others`, run the real-pipeline regression against a private meeting that reproduces it:
+
+```bash
+npm run test:duplicate-speakers --workspace @gistlist/app -- --run-folder "/path/to/Runs/2026/04/25/meeting"
+```
+
+The script copies the meeting to a temp directory, reprocesses the transcript there, and fails if long near-duplicate `Me`/`Others` segments remain. It never mutates the original meeting.
+
+---
+
 ## LLM provider: cloud or local
 
 Gistlist can summarize meetings with **Anthropic Claude** (cloud, fastest, costs API credits), **OpenAI** (cloud, costs API credits), or a **local LLM via Ollama** (free, fully offline, slower per section). You can switch providers in **Settings → LLM** at any time, and individual prompts can override the default — useful if you want most outputs local but one specific prompt to hit Claude or OpenAI.

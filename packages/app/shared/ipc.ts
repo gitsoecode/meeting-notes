@@ -103,6 +103,15 @@ export interface RunManifest {
 export interface RunDetail extends RunSummary {
   manifest: RunManifest;
   files: Array<{ name: string; size: number; kind: "document" | "log" | "media" | "attachment" }>;
+  audioStorage?: AudioStorageSummary;
+}
+
+export interface AudioStorageSummary {
+  mode: "compact" | "lossless" | "full-fidelity" | "mixed" | "none";
+  sourceFormat: "ogg" | "flac" | "wav" | "mixed" | "none";
+  combinedFormat: "ogg" | "wav" | "none";
+  totalBytes: number;
+  usesLossySources: boolean;
 }
 
 export interface DownloadMediaResult {
@@ -609,6 +618,7 @@ export interface AppConfigDTO {
     recording_prompt?: string;
   };
   audio_retention_days: number | null;
+  audio_storage_mode: "compact" | "lossless" | "full-fidelity";
 }
 
 export interface InitConfigRequest {
@@ -627,6 +637,7 @@ export interface InitConfigRequest {
   claude_api_key?: string;
   openai_api_key?: string;
   audio_retention_days?: number | null;
+  audio_storage_mode?: AppConfigDTO["audio_storage_mode"];
 }
 
 /**

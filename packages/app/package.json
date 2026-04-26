@@ -16,6 +16,8 @@
     "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
     "build:renderer": "vite build",
     "check:bundle": "node scripts/check-bundled-binaries.mjs",
+    "compact:audio": "node scripts/compact-existing-audio.mjs",
+    "test:duplicate-speakers": "npm run build --workspace @gistlist/engine && node scripts/regress-duplicate-speakers.mjs",
     "package:mac": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
     "package:mac:sign": "npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release --config.mac.notarize=false && node scripts/notarize-release.mjs",
     "build:mcp": "npm run build:packaged --workspace @gistlist/mcp-server",

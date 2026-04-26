@@ -81,6 +81,7 @@ export async function installMockApi(page: Page) {
         toggle_recording: "CommandOrControl+Shift+M",
       },
       audio_retention_days: null,
+      audio_storage_mode: "compact",
     };
 
     let hasClaude = true;

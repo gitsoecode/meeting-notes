@@ -38,8 +38,9 @@ export function buildChunksFromRunFolder(
 ): ChunkInput[] {
   const chunks: ChunkInput[] = [];
 
-  const combinedPath = path.join(runFolder, "audio", "combined.wav");
-  const combinedAvailable = fs.existsSync(combinedPath);
+  const combinedAvailable =
+    fs.existsSync(path.join(runFolder, "audio", "combined.ogg")) ||
+    fs.existsSync(path.join(runFolder, "audio", "combined.wav"));
 
   // Transcript — prefer the in-memory result (ms-precise) when present.
   if (opts.transcriptResult) {

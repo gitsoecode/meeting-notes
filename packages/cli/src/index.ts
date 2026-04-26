@@ -252,6 +252,7 @@ program
         dedup_me_against_others: DEFAULT_CONFIG.recording.dedup_me_against_others,
       },
       shortcuts: DEFAULT_CONFIG.shortcuts,
+      audio_storage_mode: DEFAULT_CONFIG.audio_storage_mode,
       audio_retention_days: null,
     };
 

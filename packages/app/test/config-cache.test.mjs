@@ -19,3 +19,8 @@ test("loadConfig returns consistent results across calls (cache exercised)", asy
   assert.equal(typeof invalidateConfigCache, "function");
   invalidateConfigCache(); // should not throw
 });
+
+test("default config uses compact audio storage", async () => {
+  const { DEFAULT_CONFIG } = await import("@gistlist/engine");
+  assert.equal(DEFAULT_CONFIG.audio_storage_mode, "compact");
+});

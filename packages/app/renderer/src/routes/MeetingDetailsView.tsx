@@ -540,7 +540,8 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
           ) : (() => {
             const combinedFile = combinedAudioFileName
               ? recordingFiles.find((f) => f.name === combinedAudioFileName)
-              : recordingFiles.find((f) => f.name.endsWith("combined.wav"));
+              : recordingFiles.find((f) => f.name.endsWith("combined.ogg")) ??
+                recordingFiles.find((f) => f.name.endsWith("combined.wav"));
             const sourceFiles = recordingFiles.filter((f) => f !== combinedFile);
             const renderFileCard = (file: RunDetail["files"][number]) => {
               const source = recordingSources[file.name];

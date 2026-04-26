@@ -123,6 +123,7 @@ import {
   resolveRunAttachmentPath,
   partitionRunFoldersForBulkDelete,
   listRunFiles,
+  inferAudioStorage,
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
   RUN_PREP_FILE,
@@ -164,6 +165,7 @@ function configToDto(config: AppConfig): AppConfigDTO {
     shortcuts: config.shortcuts,
     chat_launcher: config.chat_launcher,
     audio_retention_days: config.audio_retention_days,
+    audio_storage_mode: config.audio_storage_mode,
   };
 }
 
@@ -193,6 +195,7 @@ function dtoToConfig(dto: AppConfigDTO): AppConfig {
     shortcuts: dto.shortcuts,
     chat_launcher: dto.chat_launcher,
     audio_retention_days: dto.audio_retention_days,
+    audio_storage_mode: dto.audio_storage_mode ?? "compact",
   };
 }
 
@@ -457,6 +460,7 @@ export function registerIpcHandlers(): void {
       },
       shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },
       audio_retention_days: req.audio_retention_days ?? null,
+      audio_storage_mode: req.audio_storage_mode ?? "compact",
     };
     if (req.claude_api_key) await setSecret("claude", req.claude_api_key);
     if (req.openai_api_key) await setSecret("openai", req.openai_api_key);
@@ -810,10 +814,12 @@ export function registerIpcHandlers(): void {
     }
     const store = getStore();
     const manifest = store.loadManifest(validatedRunFolder);
+    const files = listRunFiles(validatedRunFolder, config);
     return {
       ...toRunSummary(manifest, validatedRunFolder),
       manifest,
-      files: listRunFiles(validatedRunFolder, config),
+      files,
+      audioStorage: inferAudioStorage(files),
     };
   });
 
@@ -840,7 +846,7 @@ export function registerIpcHandlers(): void {
       const ext = path.extname(filePath).toLowerCase().slice(1);
       const mimeMap: Record<string, string> = {
         wav: "audio/wav", mp3: "audio/mpeg", m4a: "audio/mp4",
-        ogg: "audio/ogg", flac: "audio/flac", aiff: "audio/aiff",
+        ogg: "audio/ogg", opus: "audio/ogg", flac: "audio/flac", aiff: "audio/aiff",
         mp4: "video/mp4", mov: "video/quicktime", webm: "video/webm",
       };
       const mime = mimeMap[ext] ?? "application/octet-stream";

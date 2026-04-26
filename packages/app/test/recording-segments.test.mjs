@@ -86,3 +86,18 @@ test("collectRunAudioFiles: prefers mic.clean.wav over raw mic.wav within a segm
   assert.equal(files.length, 1);
   assert.equal(files[0].path, path.join(seg, "mic.clean.wav"));
 });
+
+test("collectRunAudioFiles: accepts compact ogg source channels", () => {
+  const { root, audio } = makeTempRun();
+  const seg = path.join(audio, "2026-04-16_14-00-05-100");
+  fs.mkdirSync(seg, { recursive: true });
+  fs.writeFileSync(path.join(seg, "mic.ogg"), "mic");
+  fs.writeFileSync(path.join(seg, "system.ogg"), "system");
+
+  const files = collectRunAudioFiles(root, "both");
+  assert.deepEqual(
+    files.map((f) => path.basename(f.path)),
+    ["mic.ogg", "system.ogg"]
+  );
+  assert.deepEqual(files.map((f) => f.speaker), ["me", "others"]);
+});

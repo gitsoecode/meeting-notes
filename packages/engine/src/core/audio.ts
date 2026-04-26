@@ -19,6 +19,8 @@ export interface AudioInfo {
   format: string;
 }
 
+export type AudioArchiveFormat = "ogg-opus" | "flac";
+
 export async function mediaHasAudioStream(mediaPath: string): Promise<boolean> {
   try {
     const { stdout } = await execFileAsync("ffprobe", [
@@ -248,6 +250,115 @@ export async function normalizeAudio(
   } catch {
     throw new Error(
       "ffmpeg not found or conversion failed. Install ffmpeg:\n  brew install ffmpeg"
+    );
+  }
+}
+
+export async function encodeAudioArchive(
+  inputPath: string,
+  outputPath: string,
+  format: AudioArchiveFormat,
+  opts: { bitrateKbps?: number } = {}
+): Promise<void> {
+  const dir = path.dirname(outputPath);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const ext = path.extname(outputPath);
+  const tmpPath = `${outputPath}.tmp-${process.pid}-${Date.now()}${ext}`;
+  const formatArgs =
+    format === "ogg-opus"
+      ? [
+          "-c:a",
+          "libopus",
+          "-b:a",
+          `${opts.bitrateKbps ?? 32}k`,
+          "-application",
+          "voip",
+          "-vbr",
+          "on",
+        ]
+      : ["-c:a", "flac", "-compression_level", "8"];
+
+  try {
+    await execFileAsync("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      inputPath,
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      ...formatArgs,
+      "-y",
+      tmpPath,
+    ]);
+
+    const [inputInfo, outputInfo] = await Promise.all([
+      getAudioInfo(inputPath),
+      getAudioInfo(tmpPath),
+    ]);
+    if (outputInfo.durationMs <= 0) {
+      throw new Error("encoded file has no duration");
+    }
+    const driftMs = Math.abs(outputInfo.durationMs - inputInfo.durationMs);
+    if (inputInfo.durationMs > 0 && driftMs > Math.max(1500, inputInfo.durationMs * 0.02)) {
+      throw new Error(
+        `encoded duration differs from source by ${driftMs}ms`
+      );
+    }
+
+    fs.renameSync(tmpPath, outputPath);
+  } catch (err) {
+    try {
+      fs.rmSync(tmpPath, { force: true });
+    } catch {
+      // Best effort.
+    }
+    throw new Error(
+      `Failed to encode audio archive: ${err instanceof Error ? err.message : String(err)}`
+    );
+  }
+}
+
+export async function decodeAudioToWav(
+  inputPath: string,
+  outputPath: string
+): Promise<void> {
+  const dir = path.dirname(outputPath);
+  fs.mkdirSync(dir, { recursive: true });
+  const ext = path.extname(outputPath);
+  const tmpPath = `${outputPath}.tmp-${process.pid}-${Date.now()}${ext}`;
+  try {
+    await execFileAsync("ffmpeg", [
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-i",
+      inputPath,
+      "-ar",
+      "48000",
+      "-ac",
+      "1",
+      "-c:a",
+      "pcm_s16le",
+      "-y",
+      tmpPath,
+    ]);
+    const info = await getAudioInfo(tmpPath);
+    if (info.durationMs <= 0) {
+      throw new Error("decoded WAV has no duration");
+    }
+    fs.renameSync(tmpPath, outputPath);
+  } catch (err) {
+    try {
+      fs.rmSync(tmpPath, { force: true });
+    } catch {
+      // Best effort.
+    }
+    throw new Error(
+      `Failed to decode audio archive: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 }

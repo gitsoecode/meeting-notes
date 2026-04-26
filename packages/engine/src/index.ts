@@ -75,7 +75,16 @@ export {
   RESERVED_PROMPT_OUTPUT_FILENAMES,
 } from "./core/prompt-validation.js";
 
-export { getAudioInfo, mediaHasAudioStream, checkAudioSilence, mergeAudioFiles, type SilenceCheckResult } from "./core/audio.js";
+export {
+  getAudioInfo,
+  mediaHasAudioStream,
+  checkAudioSilence,
+  mergeAudioFiles,
+  encodeAudioArchive,
+  decodeAudioToWav,
+  type AudioArchiveFormat,
+  type SilenceCheckResult,
+} from "./core/audio.js";
 export { testAudioCapture, type AudioTestReport, type DeviceTestResult } from "./core/audio-test.js";
 
 export {

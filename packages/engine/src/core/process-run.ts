@@ -47,6 +47,8 @@ import {
   writeAecSidecar,
   mergeTimedAudioFiles,
   concatWavFiles,
+  encodeAudioArchive,
+  decodeAudioToWav,
   analyzeAudioLevels,
   chooseConservativeGainDb,
   correctStreamDrift,
@@ -60,6 +62,7 @@ import {
   buildTranscriptForLlm,
   buildSpeakerExcerpts,
   dedupOverlappingSpeakers,
+  findDuplicateSpeakerSegments,
   applyOthersOffset,
 } from "./transcript.js";
 import { writeMarkdownFile } from "./markdown.js";
@@ -316,6 +319,11 @@ type AudioSpeaker = "me" | "others" | "unknown";
 type OffsetSource = "aec-sidecar" | "capture-meta" | "none";
 type AudioSourceKind = "raw-mic" | "denoised-mic" | "cleaned-mic" | "system" | "unknown";
 
+interface PreparedAudioFiles {
+  audioFiles: { path: string; speaker: AudioSpeaker }[];
+  scratchDir: string | null;
+}
+
 interface AudioTrackContext {
   path: string;
   speaker: AudioSpeaker;
@@ -335,6 +343,81 @@ function classifyAudioSourceKind(audioPath: string, speaker: AudioSpeaker): Audi
   if (base === "system.wav" || speaker === "others") return "system";
   if (base === "mic.wav" || speaker === "me") return "raw-mic";
   return "unknown";
+}
+
+function isWavPath(audioPath: string): boolean {
+  return path.extname(audioPath).toLowerCase() === ".wav";
+}
+
+function sourceRoleName(speaker: AudioSpeaker): string {
+  if (speaker === "me") return "mic";
+  if (speaker === "others") return "system";
+  return "unknown";
+}
+
+export async function prepareAudioFilesForProcessing(
+  audioFiles: { path: string; speaker: AudioSpeaker }[],
+  runFolder: string,
+  logger: Logger
+): Promise<PreparedAudioFiles> {
+  if (audioFiles.every((audioFile) => isWavPath(audioFile.path))) {
+    return { audioFiles, scratchDir: null };
+  }
+
+  const scratchDir = path.join(runFolder, ".processing-work", "audio");
+  fs.rmSync(scratchDir, { recursive: true, force: true });
+  fs.mkdirSync(scratchDir, { recursive: true });
+
+  const dirOrder = new Map<string, number>();
+  const prepared: { path: string; speaker: AudioSpeaker }[] = [];
+  for (const audioFile of audioFiles) {
+    const sourceDir = path.dirname(audioFile.path);
+    let index = dirOrder.get(sourceDir);
+    if (index === undefined) {
+      index = dirOrder.size;
+      dirOrder.set(sourceDir, index);
+      const targetDir = path.join(scratchDir, `segment-${String(index).padStart(3, "0")}`);
+      fs.mkdirSync(targetDir, { recursive: true });
+      for (const sidecar of ["capture-meta.json", "aec.json"]) {
+        const src = path.join(sourceDir, sidecar);
+        if (fs.existsSync(src)) {
+          try {
+            fs.copyFileSync(src, path.join(targetDir, sidecar));
+          } catch {
+            // Sidecars are best-effort hints.
+          }
+        }
+      }
+    }
+
+    const role = sourceRoleName(audioFile.speaker);
+    const targetPath = path.join(
+      scratchDir,
+      `segment-${String(index).padStart(3, "0")}`,
+      `${role}.wav`
+    );
+    if (isWavPath(audioFile.path)) {
+      fs.copyFileSync(audioFile.path, targetPath);
+    } else {
+      await decodeAudioToWav(audioFile.path, targetPath);
+    }
+    prepared.push({ path: targetPath, speaker: audioFile.speaker });
+  }
+
+  logger.info("Prepared archived audio for processing", {
+    scratchDir,
+    inputs: audioFiles.length,
+  });
+  return { audioFiles: prepared, scratchDir };
+}
+
+function cleanupPreparedAudio(prepared: PreparedAudioFiles): void {
+  if (!prepared.scratchDir) return;
+  try {
+    fs.rmSync(prepared.scratchDir, { recursive: true, force: true });
+  } catch {
+    // Best effort.
+  }
 }
 
 function readAecOffset(dir: string): { found: boolean; offsetMs: number } {
@@ -439,19 +522,24 @@ async function correctDriftFromCaptureMeta(
   signal?: AbortSignal
 ): Promise<void> {
   const audioRoot = path.join(runFolder, "audio");
-  const metaPath = path.join(audioRoot, "capture-meta.json");
-  if (!fs.existsSync(metaPath)) return;
-  let meta: {
+  const loadMeta = (dir: string): {
     mic?: { firstSampleAtMs?: number; stoppedAtMs?: number };
     system?: { firstSampleAtMs?: number; stoppedAtMs?: number };
+  } | null => {
+    const metaPath = path.join(dir, "capture-meta.json");
+    if (!fs.existsSync(metaPath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+    } catch {
+      return null;
+    }
   };
-  try {
-    meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-  } catch {
-    return;
-  }
 
   const wallClock = (
+    meta: {
+      mic?: { firstSampleAtMs?: number; stoppedAtMs?: number };
+      system?: { firstSampleAtMs?: number; stoppedAtMs?: number };
+    },
     stream: "mic" | "system"
   ): number | null => {
     const s = meta[stream];
@@ -471,7 +559,11 @@ async function correctDriftFromCaptureMeta(
     else if (base === "system.wav" || af.speaker === "others") streamKey = "system";
     if (!streamKey) continue;
 
-    const wall = wallClock(streamKey);
+    const dir = path.dirname(af.path);
+    const meta = loadMeta(dir) ?? (dir !== audioRoot ? loadMeta(audioRoot) : null);
+    if (!meta) continue;
+
+    const wall = wallClock(meta, streamKey);
     if (wall === null) continue;
 
     try {
@@ -780,6 +872,76 @@ function collapseAudioArtifacts(
   }
 }
 
+export async function compactProcessedAudio(
+  opts: {
+    config: AppConfig;
+    runFolder: string;
+    trackContexts: AudioTrackContext[];
+    compactSources: boolean;
+    logger: Logger;
+  }
+): Promise<void> {
+  const mode = opts.config.audio_storage_mode ?? "compact";
+  if (mode === "full-fidelity") return;
+
+  const combinedWav = path.join(opts.runFolder, "audio", "combined.wav");
+  const combinedOgg = path.join(opts.runFolder, "audio", "combined.ogg");
+  if (fs.existsSync(combinedWav)) {
+    try {
+      await encodeAudioArchive(combinedWav, combinedOgg, "ogg-opus", { bitrateKbps: 32 });
+      fs.rmSync(combinedWav, { force: true });
+      opts.logger.info("Compacted combined playback audio", {
+        from: combinedWav,
+        to: combinedOgg,
+        mode,
+      });
+    } catch (err) {
+      opts.logger.warn("Failed to compact combined playback audio", {
+        path: combinedWav,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  if (!opts.compactSources) return;
+
+  const sourcePaths = Array.from(
+    new Set(
+      opts.trackContexts
+        .filter((track) => track.speaker === "me" || track.speaker === "others")
+        .map((track) => track.path)
+        .filter((p) => path.extname(p).toLowerCase() === ".wav")
+    )
+  );
+
+  for (const sourcePath of sourcePaths) {
+    if (!fs.existsSync(sourcePath)) continue;
+    const role = path.basename(sourcePath, path.extname(sourcePath));
+    if (role !== "mic" && role !== "system") continue;
+    const targetExt = mode === "lossless" ? ".flac" : ".ogg";
+    const targetPath = path.join(path.dirname(sourcePath), `${role}${targetExt}`);
+    try {
+      if (mode === "lossless") {
+        await encodeAudioArchive(sourcePath, targetPath, "flac");
+      } else {
+        await encodeAudioArchive(sourcePath, targetPath, "ogg-opus", { bitrateKbps: 48 });
+      }
+      fs.rmSync(sourcePath, { force: true });
+      opts.logger.info("Compacted source audio", {
+        from: sourcePath,
+        to: targetPath,
+        mode,
+      });
+    } catch (err) {
+      opts.logger.warn("Failed to compact source audio", {
+        path: sourcePath,
+        mode,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+}
+
 /**
  * Best-effort combined playback file covering the cleaned mic + system
  * across every recording segment. Non-blocking / non-fatal.
@@ -967,6 +1129,9 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     filename: transcriptStep.filename,
   });
 
+  const preparedAudio = await prepareAudioFilesForProcessing(audioFiles, runFolder, logger);
+  const processingAudioFiles = preparedAudio.audioFiles;
+
   // --- Speech cleanup: remove steady room/background noise from the mic ---
   //
   // We denoise the mic before alignment so cross-correlation and ASR both
@@ -981,9 +1146,9 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   // drifts apart over the length of the recording. Stretch each stream
   // back to its wall-clock duration so downstream steps (denoise, AEC,
   // ASR, mix) operate on time-correct audio.
-  await correctDriftFromCaptureMeta(audioFiles, runFolder, logger, signal);
+  await correctDriftFromCaptureMeta(processingAudioFiles, runFolder, logger, signal);
 
-  const cleanupQualityByPath = await preprocessMicForSpeech(audioFiles, logger, signal);
+  const cleanupQualityByPath = await preprocessMicForSpeech(processingAudioFiles, logger, signal);
 
   // --- AEC preprocessing: remove re-captured system audio from the mic ---
   //
@@ -993,10 +1158,10 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   // and route it through ASR instead of the denoised-only mic. Best-effort:
   // if any step fails, we keep the speech-cleaned mic.
   if (config.recording.aec_enabled !== false) {
-    await preprocessMicForAec(audioFiles, runFolder, logger, signal);
+    await preprocessMicForAec(processingAudioFiles, runFolder, logger, signal);
     // Propagate cleanup quality through the AEC step: if mic.voice.wav was
     // the input, mic.clean.wav inherits the same cleanup provenance.
-    for (const af of audioFiles) {
+    for (const af of processingAudioFiles) {
       if (af.speaker === "me") {
         const existing = cleanupQualityByPath.get(af.path);
         if (!existing) {
@@ -1011,7 +1176,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
   }
 
   const trackContexts = await buildAudioTrackContexts(
-    audioFiles,
+    processingAudioFiles,
     runFolder,
     cleanupQualityByPath
   );
@@ -1119,11 +1284,20 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
         : mergeTranscripts(rebasedTranscripts);
     if (config.recording.dedup_me_against_others !== false) {
       const before = transcriptResult.segments.length;
+      const duplicateCandidates = findDuplicateSpeakerSegments(transcriptResult);
       transcriptResult = dedupOverlappingSpeakers(transcriptResult);
       const dropped = before - transcriptResult.segments.length;
       if (dropped > 0) {
         logger.info("Transcript dedup: dropped me-segments overlapping others", {
           dropped,
+          examples: duplicateCandidates.slice(0, 5).map((candidate) => ({
+            reason: candidate.reason,
+            score: +candidate.score.toFixed(2),
+            meStartMs: candidate.me.start_ms,
+            othersStartMs: candidate.others[0]?.start_ms ?? null,
+            meText: candidate.me.text.slice(0, 80),
+            othersText: candidate.others.map((s) => s.text).join(" ").slice(0, 80),
+          })),
         });
       }
     }
@@ -1168,6 +1342,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
         duration_minutes: computeDurationMinutes(runFolder, endedIso, store),
       }, store);
     }
+    cleanupPreparedAudio(preparedAudio);
     throw err;
   }
 
@@ -1213,6 +1388,22 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     logger.warn("collapseAudioArtifacts failed", {
       error: err instanceof Error ? err.message : String(err),
     });
+  }
+
+  try {
+    await compactProcessedAudio({
+      config,
+      runFolder,
+      trackContexts,
+      compactSources: preparedAudio.scratchDir === null,
+      logger,
+    });
+  } catch (err) {
+    logger.warn("compactProcessedAudio failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    cleanupPreparedAudio(preparedAudio);
   }
 
   // --- LLM Pipeline ---

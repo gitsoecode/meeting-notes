@@ -620,17 +620,20 @@ export function MeetingShell({
 
   const recordingFiles = useMemo(() => (detail ? detail.files.filter((f) => f.kind === "media") : []), [detail]);
 
-  // Combined playback file drives click-to-seek from the transcript. We
-  // require an exact `combined.wav` match (not a fallback) — transcript
-  // timestamps are aligned to that specific file; any other recording has
-  // different offsets and mis-seeking would be misleading. See
-  // engine/process-run.ts writeCombinedPlayback.
+  // Combined playback file drives click-to-seek from the transcript.
+  // `combined.ogg` is the Opus re-encode of `combined.wav` and shares the
+  // same transcript-aligned timeline; keep the WAV fallback for older meetings.
   const combinedAudioFileName = useMemo(() => {
-    const match = recordingFiles.find((f) => {
+    const combinedOgg = recordingFiles.find((f) => {
+      const base = f.name.split("/").pop() ?? f.name;
+      return base === "combined.ogg";
+    });
+    if (combinedOgg) return combinedOgg.name;
+    const combinedWav = recordingFiles.find((f) => {
       const base = f.name.split("/").pop() ?? f.name;
       return base === "combined.wav";
     });
-    return match?.name ?? null;
+    return combinedWav?.name ?? null;
   }, [recordingFiles]);
 
   // ---- Process steps (for end-meeting dialog) ----
@@ -1414,6 +1417,7 @@ export function MeetingShell({
       {reprocessOpen && (
         <ReprocessModal
           hasAudio={detail ? detail.files.some((f) => f.kind === "media") : false}
+          usesLossySources={detail?.audioStorage?.usesLossySources === true}
           onClose={() => setReprocessOpen(false)}
           onStart={async ({ transcript, summary }) => {
             if (transcript) {
@@ -1658,10 +1662,12 @@ export function MeetingShell({
 
 function ReprocessModal({
   hasAudio,
+  usesLossySources,
   onClose,
   onStart,
 }: {
   hasAudio: boolean;
+  usesLossySources: boolean;
   onClose: () => void;
   onStart: (opts: { transcript: boolean; summary: boolean }) => Promise<void>;
 }) {
@@ -1706,6 +1712,12 @@ function ReprocessModal({
               </div>
             </div>
           </label>
+
+          {transcript && usesLossySources ? (
+            <div className="rounded-lg border border-[var(--warning)]/30 bg-[var(--warning-muted)] px-4 py-3 text-sm leading-6 text-[var(--warning-text)]">
+              This meeting&apos;s source audio was compacted after the first transcript. Reprocessing will use compressed audio, so results may differ from the original WAV-based transcript. Speaker channels are still preserved.
+            </div>
+          ) : null}
 
           <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-[var(--border-default)] bg-white px-4 py-3 transition-colors hover:bg-[var(--bg-secondary)]/30">
             <Checkbox

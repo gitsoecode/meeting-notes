@@ -1,5 +1,12 @@
 import type { TranscriptResult, TranscriptSegment } from "../adapters/asr/provider.js";
 
+export interface DuplicateSpeakerCandidate {
+  me: TranscriptSegment;
+  others: TranscriptSegment[];
+  reason: "similarity" | "containment" | "token-overlap";
+  score: number;
+}
+
 /**
  * Drop `me` segments whose text near-matches a concurrent `others` segment.
  *
@@ -22,8 +29,30 @@ export function dedupOverlappingSpeakers(
     minTextLength?: number;
     /** Min normalized-length ratio to accept a substring/containment match. */
     containmentMinRatio?: number;
+    tokenOverlapThreshold?: number;
   }
 ): TranscriptResult {
+  const candidates = findDuplicateSpeakerSegments(result, opts);
+  if (candidates.length === 0) return result;
+  const drop = new Set(candidates.map((c) => c.me));
+  const kept = result.segments.filter((seg) => !drop.has(seg));
+  return {
+    ...result,
+    segments: kept,
+    fullText: kept.map((s) => s.text).join(" "),
+  };
+}
+
+export function findDuplicateSpeakerSegments(
+  result: TranscriptResult,
+  opts?: {
+    overlapToleranceMs?: number;
+    similarityThreshold?: number;
+    minTextLength?: number;
+    containmentMinRatio?: number;
+    tokenOverlapThreshold?: number;
+  }
+): DuplicateSpeakerCandidate[] {
   // Pipeline latency between avfoundation (mic) and AudioTee (system) plus
   // ASR segmentation differences can easily put "the same content" 3–5s
   // apart. Bias toward catching real bleed; the minTextLength + similarity
@@ -32,82 +61,78 @@ export function dedupOverlappingSpeakers(
   const similarityThreshold = opts?.similarityThreshold ?? 0.6;
   const minTextLength = opts?.minTextLength ?? 12;
   const containmentMinRatio = opts?.containmentMinRatio ?? 0.55;
+  const tokenOverlapThreshold = opts?.tokenOverlapThreshold ?? 0.74;
 
   const othersSegments = result.segments.filter((s) => s.speaker === "others");
-  if (othersSegments.length === 0) return result;
+  if (othersSegments.length === 0) return [];
 
   // Precompute a normalized version of each others segment so we can also
   // check substring containment across the entire `others` transcript —
   // useful when ASR splits the same utterance differently on each channel.
   const normOthers = othersSegments.map((o) => ({ seg: o, norm: normalizeText(o.text) }));
-  const allOthersText = normOthers.map((o) => o.norm).join(" ");
-
-  const kept: TranscriptSegment[] = [];
-  let dropped = 0;
+  const candidates: DuplicateSpeakerCandidate[] = [];
 
   for (const seg of result.segments) {
     if (seg.speaker !== "me") {
-      kept.push(seg);
       continue;
     }
     const normMe = normalizeText(seg.text);
     if (normMe.length < minTextLength) {
-      kept.push(seg);
       continue;
     }
 
-    // Full-similarity match against any overlapping `others` segment.
-    const similarOverlap = normOthers.some(({ seg: other, norm }) => {
-      if (!segmentsOverlap(seg, other, overlapToleranceMs)) return false;
-      if (norm.length < minTextLength) return false;
-      return textSimilarity(normMe, norm) >= similarityThreshold;
-    });
+    const nearby = normOthers.filter(({ seg: other, norm }) =>
+      norm.length >= minTextLength && segmentsOverlap(seg, other, overlapToleranceMs)
+    );
+    if (nearby.length === 0) continue;
 
-    // Containment match: the me-text is a large-fraction substring of the
-    // full others transcript. This catches cases where ASR splits the
-    // bleed into smaller pieces than the clean system track, so per-segment
-    // similarity undershoots but the content is unambiguously duplicated.
-    const contained =
-      !similarOverlap &&
-      normMe.length >= minTextLength &&
-      allOthersText.includes(normMe) &&
-      normMe.length / Math.max(1, allOthersText.length) > 0 &&
-      hasNearbyOthers(seg, othersSegments, overlapToleranceMs);
+    const nearbyText = nearby.map(({ norm }) => norm).join(" ");
+    let best: DuplicateSpeakerCandidate | null = null;
 
-    // Partial-containment match: accept when a majority of normMe (>= ratio)
-    // is a substring of some overlapping others segment. Handles
-    // mic-splits-into-two-pieces-of-one-others-segment.
-    const partialContained =
-      !similarOverlap &&
-      !contained &&
-      normOthers.some(({ seg: other, norm }) => {
-        if (!segmentsOverlap(seg, other, overlapToleranceMs)) return false;
-        if (norm.length < minTextLength) return false;
-        return norm.includes(normMe) && normMe.length / norm.length >= containmentMinRatio;
+    for (const other of nearby) {
+      const score = textSimilarity(normMe, other.norm);
+      if (score >= similarityThreshold) {
+        best = chooseBetterCandidate(best, {
+          me: seg,
+          others: [other.seg],
+          reason: "similarity",
+          score,
+        });
+      }
+    }
+
+    const containmentScore = containmentRatio(normMe, nearbyText);
+    if (containmentScore >= containmentMinRatio) {
+      best = chooseBetterCandidate(best, {
+        me: seg,
+        others: nearby.map((o) => o.seg),
+        reason: "containment",
+        score: containmentScore,
       });
-
-    if (similarOverlap || contained || partialContained) {
-      dropped += 1;
-      continue;
     }
-    kept.push(seg);
+
+    const tokenScore = tokenOverlap(normMe, nearbyText);
+    if (tokenScore >= tokenOverlapThreshold) {
+      best = chooseBetterCandidate(best, {
+        me: seg,
+        others: nearby.map((o) => o.seg),
+        reason: "token-overlap",
+        score: tokenScore,
+      });
+    }
+
+    if (best) candidates.push(best);
   }
 
-  if (dropped === 0) return result;
-
-  return {
-    ...result,
-    segments: kept,
-    fullText: kept.map((s) => s.text).join(" "),
-  };
+  return candidates;
 }
 
-function hasNearbyOthers(
-  seg: TranscriptSegment,
-  others: TranscriptSegment[],
-  toleranceMs: number
-): boolean {
-  return others.some((o) => segmentsOverlap(seg, o, toleranceMs));
+function chooseBetterCandidate(
+  current: DuplicateSpeakerCandidate | null,
+  next: DuplicateSpeakerCandidate
+): DuplicateSpeakerCandidate {
+  if (!current || next.score > current.score) return next;
+  return current;
 }
 
 function segmentsOverlap(
@@ -123,6 +148,24 @@ function segmentsOverlap(
 
 function normalizeText(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+function containmentRatio(a: string, b: string): number {
+  if (!a || !b) return 0;
+  if (a.includes(b)) return b.length / a.length;
+  if (b.includes(a)) return a.length / b.length;
+  return 0;
+}
+
+function tokenOverlap(a: string, b: string): number {
+  const aTokens = new Set(a.split(" ").filter((t) => t.length > 2));
+  const bTokens = new Set(b.split(" ").filter((t) => t.length > 2));
+  if (aTokens.size === 0 || bTokens.size === 0) return 0;
+  let shared = 0;
+  for (const token of aTokens) {
+    if (bTokens.has(token)) shared += 1;
+  }
+  return shared / Math.min(aTokens.size, bTokens.size);
 }
 
 /**

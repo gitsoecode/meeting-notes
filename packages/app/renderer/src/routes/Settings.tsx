@@ -809,6 +809,10 @@ export function Settings({ config, onChange }: SettingsProps) {
 
           <Separator />
 
+          <AudioStorageSection config={config} onSave={save} />
+
+          <Separator />
+
           <AudioRetentionSection config={config} onSave={save} />
         </TabsContent>
 
@@ -1252,6 +1256,56 @@ function retentionMode(days: number | null): string {
   if (days === 7) return "7";
   if (days === 30) return "30";
   return "custom";
+}
+
+function AudioStorageSection({
+  config,
+  onSave,
+}: {
+  config: AppConfigDTO;
+  onSave: (next: AppConfigDTO) => Promise<void>;
+}) {
+  const mode = config.audio_storage_mode ?? "compact";
+  return (
+    <section className="space-y-4">
+      <div className="space-y-1">
+        <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Audio Storage</h3>
+        <p className="text-sm leading-6 text-[var(--text-secondary)]">
+          Choose how recordings are stored after processing. Recording still uses WAV while the meeting is captured and transcribed.
+        </p>
+      </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-[var(--text-secondary)]">
+          Storage mode
+        </label>
+        <Select
+          value={mode}
+          onValueChange={(value) =>
+            void onSave({
+              ...config,
+              audio_storage_mode: value as AppConfigDTO["audio_storage_mode"],
+            })
+          }
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="compact">Compact</SelectItem>
+            <SelectItem value="lossless">Lossless archive</SelectItem>
+            <SelectItem value="full-fidelity">Full fidelity</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs leading-5 text-[var(--text-tertiary)]">
+          {mode === "lossless"
+            ? "Source channels are stored as FLAC for bit-exact reprocessing; combined playback is stored as Opus."
+            : mode === "full-fidelity"
+              ? "Keeps WAV source and playback files. This uses the most disk space."
+              : "Stores voice audio as Opus/Ogg, about 60-70 MB per hour for mic, system, and combined playback."}
+        </p>
+      </div>
+    </section>
+  );
 }
 
 function AudioRetentionSection({

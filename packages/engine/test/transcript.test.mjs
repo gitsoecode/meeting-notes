@@ -5,6 +5,7 @@ import {
   buildSpeakerExcerpts,
   buildTranscriptForLlm,
   dedupOverlappingSpeakers,
+  findDuplicateSpeakerSegments,
   applyOthersOffset,
 } from "../dist/core/transcript.js";
 
@@ -262,6 +263,8 @@ test("dedupOverlappingSpeakers: keeps short fillers even when overlapping", () =
     provider: "test",
     durationMs: 2000,
   };
+  const candidates = findDuplicateSpeakerSegments(result);
+  assert.equal(candidates.length, 0, "short fillers should not become duplicate candidates");
   const deduped = dedupOverlappingSpeakers(result);
   assert.equal(deduped.segments.length, 2, "short fillers below min-length should not be dedup'd");
 });
@@ -277,4 +280,39 @@ test("dedupOverlappingSpeakers: no-op when no others segments", () => {
   };
   const deduped = dedupOverlappingSpeakers(result);
   assert.equal(deduped, result, "should return the same object when nothing to compare against");
+});
+
+test("dedupOverlappingSpeakers: drops me segment contained in nearby multi-segment others window", () => {
+  const result = {
+    segments: [
+      { start_ms: 1000, end_ms: 2200, text: "I think we should", speaker: "others" },
+      { start_ms: 2300, end_ms: 4200, text: "ship the feature next week", speaker: "others" },
+      { start_ms: 1600, end_ms: 3900, text: "we should ship the feature next week", speaker: "me" },
+    ],
+    fullText: "",
+    provider: "test",
+    durationMs: 5000,
+  };
+  const candidates = findDuplicateSpeakerSegments(result);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].reason, "token-overlap");
+  const deduped = dedupOverlappingSpeakers(result);
+  assert.equal(deduped.segments.filter((s) => s.speaker === "me").length, 0);
+});
+
+test("dedupOverlappingSpeakers: handles symmetric containment when me has extra words", () => {
+  const result = {
+    segments: [
+      { start_ms: 1000, end_ms: 3500, text: "ship the feature next week", speaker: "others" },
+      { start_ms: 900, end_ms: 3800, text: "I think we should ship the feature next week", speaker: "me" },
+    ],
+    fullText: "",
+    provider: "test",
+    durationMs: 5000,
+  };
+  const candidates = findDuplicateSpeakerSegments(result);
+  assert.equal(candidates.length, 1);
+  const deduped = dedupOverlappingSpeakers(result);
+  assert.equal(deduped.segments.length, 1);
+  assert.equal(deduped.segments[0].speaker, "others");
 });

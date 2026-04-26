@@ -294,13 +294,25 @@ export function collectRunAudioFiles(runFolder: string, sourceMode: string) {
   // processing job writes `mic.clean.wav` alongside `mic.wav` after removing
   // re-captured system audio; reprocessing should read the cleaned file so
   // speaker attribution stays consistent with the first run.
-  const preferredMic = (dir: string): string | null => {
-    const cleaned = path.join(dir, "mic.clean.wav");
-    if (fs.existsSync(cleaned)) return cleaned;
-    const raw = path.join(dir, "mic.wav");
-    if (fs.existsSync(raw)) return raw;
+  const firstExisting = (dir: string, bases: string[]): string | null => {
+    for (const base of bases) {
+      const candidate = path.join(dir, base);
+      if (fs.existsSync(candidate)) return candidate;
+    }
     return null;
   };
+  const preferredMic = (dir: string): string | null => {
+    const mic = firstExisting(dir, [
+      "mic.clean.wav",
+      "mic.wav",
+      "mic.ogg",
+      "mic.flac",
+    ]);
+    if (mic) return mic;
+    return null;
+  };
+  const preferredSystem = (dir: string): string | null =>
+    firstExisting(dir, ["system.wav", "system.ogg", "system.flac"]);
 
   // Walk timestamped segment subdirectories first (segment layout is the
   // default; the flat layout is a legacy fallback). Sorting alphabetically
@@ -313,18 +325,18 @@ export function collectRunAudioFiles(runFolder: string, sourceMode: string) {
   for (const segDir of segmentDirs) {
     const segPath = path.join(audioDir, segDir.name);
     const segMic = preferredMic(segPath);
-    const segSystem = path.join(segPath, "system.wav");
+    const segSystem = preferredSystem(segPath);
     if (segMic) audioFiles.push({ path: segMic, speaker: "me" });
-    if (fs.existsSync(segSystem)) audioFiles.push({ path: segSystem, speaker: "others" });
+    if (segSystem) audioFiles.push({ path: segSystem, speaker: "others" });
   }
   if (audioFiles.length > 0) return audioFiles;
 
   // Legacy flat layout fallback (mic[.clean].wav / system.wav directly in audio/).
   const flatMic = preferredMic(audioDir);
-  const flatSystem = path.join(audioDir, "system.wav");
-  if (flatMic || fs.existsSync(flatSystem)) {
+  const flatSystem = preferredSystem(audioDir);
+  if (flatMic || flatSystem) {
     if (flatMic) audioFiles.push({ path: flatMic, speaker: "me" });
-    if (fs.existsSync(flatSystem)) audioFiles.push({ path: flatSystem, speaker: "others" });
+    if (flatSystem) audioFiles.push({ path: flatSystem, speaker: "others" });
     return audioFiles;
   }
 

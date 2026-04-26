@@ -240,6 +240,21 @@ test.describe("Settings", () => {
     await expect(select).toContainText("30 days");
   });
 
+  test("audio storage mode defaults to Compact and can switch to lossless", async ({
+    settings,
+    page,
+  }) => {
+    await settings.openTab("Storage");
+    const select = settings.audioStorageModeSelect();
+    await expect(select).toBeVisible();
+    await expect(select).toContainText("Compact");
+
+    await select.click();
+    await page.getByRole("option", { name: "Lossless archive" }).click();
+    await expect(select).toContainText("Lossless archive");
+    await expect(settings.audioStorageCard()).toContainText(/FLAC/);
+  });
+
   test("audio retention custom option shows number input", async ({
     settings,
     page,

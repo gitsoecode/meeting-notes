@@ -160,6 +160,14 @@ export class SettingsPage {
   }
 
   // Audio retention card (on Storage tab)
+  audioStorageCard() {
+    return this.card("Audio Storage");
+  }
+
+  audioStorageModeSelect() {
+    return this.audioStorageCard().getByRole("combobox");
+  }
+
   audioRetentionCard() {
     return this.card("Audio File Retention");
   }

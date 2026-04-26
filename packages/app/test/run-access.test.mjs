@@ -8,6 +8,7 @@ import {
   isAllowedRunDocumentName,
   isAllowedRunMediaName,
   listRunFiles,
+  inferAudioStorage,
   resolveRunDocumentPath,
   resolveRunFolderPath,
   resolveRunMediaPath,
@@ -26,6 +27,20 @@ test("assertPathInsideRoot rejects traversal outside the allowed root", () => {
     () => assertPathInsideRoot(root, "/tmp/other-place/file.md", "Run document"),
     /outside the allowed directory/
   );
+});
+
+test("inferAudioStorage flags mixed source archives as lossy", () => {
+  const summary = inferAudioStorage([
+    { name: "audio/2026-04-25_10-00-00/mic.ogg", kind: "media", size: 10 },
+    { name: "audio/2026-04-25_10-00-00/system.wav", kind: "media", size: 100 },
+    { name: "audio/combined.ogg", kind: "media", size: 5 },
+  ]);
+
+  assert.equal(summary.mode, "mixed");
+  assert.equal(summary.sourceFormat, "mixed");
+  assert.equal(summary.combinedFormat, "ogg");
+  assert.equal(summary.totalBytes, 115);
+  assert.equal(summary.usesLossySources, true);
 });
 
 test("resolveRunFolderPath and resolveRunDocumentPath keep access scoped to a run folder", () => {
