@@ -83,6 +83,7 @@ export interface RunSummary {
   prompt_output_ids: string[];
   scheduled_time?: string | null;
   updated_at: string | null;
+  folder_size_bytes: number | null;
 }
 
 export interface RunPromptOutputState {

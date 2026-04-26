@@ -366,11 +366,6 @@ export async function stopRecording(
         title: state.title,
         subtitle: "Processing captured meeting locally",
         runFolder: state.runFolder,
-        provider: state.config.llm_provider,
-        model:
-          state.config.llm_provider === "ollama"
-            ? state.config.ollama.model
-            : state.config.claude.model,
         task: async ({ signal, updateProgress }) => {
           const result = await processRun({
             config: state.config,

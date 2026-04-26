@@ -274,6 +274,7 @@ export async function installMockApi(page: Page) {
         tags: ["planning"],
         folder_path: "/runs/weekly-planning",
         prompt_output_ids: ["summary", "decision-log"],
+        folder_size_bytes: 12_400_000,
       },
       {
         run_id: "run-2",
@@ -288,6 +289,7 @@ export async function installMockApi(page: Page) {
         tags: ["customer"],
         folder_path: "/runs/customer-call",
         prompt_output_ids: ["summary"],
+        folder_size_bytes: 8_700_000,
       },
       {
         run_id: "run-3",
@@ -302,6 +304,7 @@ export async function installMockApi(page: Page) {
         tags: [],
         folder_path: "/runs/draft-standup",
         prompt_output_ids: [],
+        folder_size_bytes: 1_200,
       },
       {
         run_id: "run-4",
@@ -316,6 +319,7 @@ export async function installMockApi(page: Page) {
         tags: ["import"],
         folder_path: "/runs/failed-import",
         prompt_output_ids: ["summary"],
+        folder_size_bytes: 3_300_000,
       },
     ];
 
@@ -728,8 +732,6 @@ export async function installMockApi(page: Page) {
         cancelable: true,
         runFolder: req.runFolder,
         promptIds,
-        provider: "ollama",
-        model: "qwen3.5:9b",
         progress: {
           completedOutputs: 0,
           failedOutputs: 0,
@@ -1096,6 +1098,7 @@ export async function installMockApi(page: Page) {
             tags: existingRun?.tags ?? [],
             folder_path: currentFolder,
             prompt_output_ids: req?.mode === "process" || !req?.mode ? ["summary"] : [],
+            folder_size_bytes: existingRun?.folder_size_bytes ?? 5_500_000,
           };
           if (existingRun) Object.assign(existingRun, liveRun);
           else runs.unshift(liveRun);
@@ -1452,6 +1455,7 @@ export async function installMockApi(page: Page) {
             tags: [],
             folder_path: folder,
             prompt_output_ids: [],
+            folder_size_bytes: 11_400_128,
           });
           manifests[folder] = {
             description: "Imported meeting",
@@ -1528,6 +1532,7 @@ export async function installMockApi(page: Page) {
             folder_path: folder,
             prompt_output_ids: [],
             scheduled_time: req.scheduledTime ?? null,
+            folder_size_bytes: 0,
           };
           runs.unshift(run);
           manifests[folder] = {

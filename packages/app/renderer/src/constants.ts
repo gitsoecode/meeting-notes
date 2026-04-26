@@ -69,6 +69,21 @@ export function relativeTimeLabel(iso: string): string {
   return new Date(t).toLocaleDateString();
 }
 
+/** Format a byte count as a compact label like "12.3 MB" / "640 KB". */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const precision = value >= 100 ? 0 : value >= 10 ? 1 : 2;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+}
+
 /** Format an ISO scheduled time as a compact label like "Apr 15, 2:00 PM". */
 export function formatScheduledTime(iso: string | null | undefined): string {
   if (!iso) return "—";

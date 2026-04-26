@@ -123,6 +123,7 @@ import {
   resolveRunAttachmentPath,
   partitionRunFoldersForBulkDelete,
   listRunFiles,
+  computeRunFolderSize,
   inferAudioStorage,
   RUN_LOG_FILE,
   RUN_NOTES_FILE,
@@ -212,7 +213,12 @@ function isAbortLikeError(err: unknown): boolean {
   return err instanceof OperationAbortedError || (err instanceof Error && err.name === "AbortError");
 }
 
-function toRunSummary(manifest: RunManifest, folderPath: string, updatedAt?: string | null): RunSummary {
+function toRunSummary(
+  manifest: RunManifest,
+  folderPath: string,
+  updatedAt?: string | null,
+  folderSizeBytes?: number | null
+): RunSummary {
   return {
     run_id: manifest.run_id,
     title: manifest.title,
@@ -228,7 +234,16 @@ function toRunSummary(manifest: RunManifest, folderPath: string, updatedAt?: str
     prompt_output_ids: Object.keys(manifest.prompt_outputs),
     scheduled_time: manifest.scheduled_time ?? null,
     updated_at: updatedAt ?? null,
+    folder_size_bytes: folderSizeBytes ?? null,
   };
+}
+
+function safeFolderSize(folderPath: string): number | null {
+  try {
+    return computeRunFolderSize(folderPath);
+  } catch {
+    return null;
+  }
 }
 
 function walkRunFolders(runsRoot: string): string[] {
@@ -301,11 +316,6 @@ async function handleReprocess(req: ReprocessRequest): Promise<ReprocessResult> 
     subtitle,
     runFolder: req.runFolder,
     promptIds: req.onlyIds,
-    provider: config.llm_provider,
-    model:
-      config.llm_provider === "ollama"
-        ? config.ollama.model
-        : config.claude.model,
     task: async ({ signal, updateProgress }) => {
       const result = await reprocessRun(
         req,
@@ -358,8 +368,6 @@ async function handleProcessRecording(req: ProcessRecordingRequest): Promise<Rep
     subtitle,
     runFolder: req.runFolder,
     promptIds: req.onlyIds,
-    provider: config.llm_provider,
-    model: config.llm_provider === "ollama" ? config.ollama.model : config.claude.model,
     task: async ({ signal, updateProgress }) => {
       const result = await processRecordedRun(
         req,
@@ -797,7 +805,7 @@ export function registerIpcHandlers(): void {
       const valid: RunSummary[] = [];
       for (const { manifest, folderPath, updatedAt } of all) {
         if (fs.existsSync(path.join(folderPath, "index.md"))) {
-          valid.push(toRunSummary(manifest, folderPath, updatedAt));
+          valid.push(toRunSummary(manifest, folderPath, updatedAt, safeFolderSize(folderPath)));
         } else {
           stale.push(folderPath);
         }
@@ -826,8 +834,9 @@ export function registerIpcHandlers(): void {
     const store = getStore();
     const manifest = store.loadManifest(validatedRunFolder);
     const files = listRunFiles(validatedRunFolder, config);
+    const folderSizeBytes = files.reduce((sum, file) => sum + file.size, 0);
     return {
-      ...toRunSummary(manifest, validatedRunFolder),
+      ...toRunSummary(manifest, validatedRunFolder, null, folderSizeBytes),
       manifest,
       files,
       audioStorage: inferAudioStorage(files),
@@ -977,8 +986,6 @@ export function registerIpcHandlers(): void {
       title,
       subtitle: "Processing imported media",
       runFolder: runContext.folderPath,
-      provider: config.llm_provider,
-      model: config.llm_provider === "ollama" ? config.ollama.model : config.claude.model,
       task: async ({ signal, updateProgress }) => {
         try {
           const result = await processRun({

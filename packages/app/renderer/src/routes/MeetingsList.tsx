@@ -29,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "../components/ui/table";
-import { formatScheduledTime, relativeDateLabel, relativeTimeLabel } from "../constants";
+import { formatBytes, formatScheduledTime, relativeDateLabel, relativeTimeLabel } from "../constants";
 import { getRunSortValue } from "../../../shared/sort";
 import { getDefaultPromptModel } from "../lib/prompt-metadata";
 
@@ -264,8 +264,9 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                   </TableHead>
                   <TableHead>Meeting</TableHead>
                   <TableHead className="hidden lg:table-cell">Scheduled</TableHead>
-                  <TableHead>Last Updated</TableHead>
+                  <TableHead>Last updated</TableHead>
                   <TableHead>Duration</TableHead>
+                  <TableHead className="hidden md:table-cell">Size</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -318,6 +319,9 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                         </TableCell>
                         <TableCell className="text-sm text-[var(--text-secondary)]">
                           {run.duration_minutes != null ? `${run.duration_minutes.toFixed(1)}m` : "—"}
+                        </TableCell>
+                        <TableCell className="hidden text-sm text-[var(--text-secondary)] md:table-cell">
+                          {formatBytes(run.folder_size_bytes)}
                         </TableCell>
                         <TableCell>
                           <Badge

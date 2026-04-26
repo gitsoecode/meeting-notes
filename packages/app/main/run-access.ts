@@ -148,6 +148,37 @@ export function resolveRunAttachmentPath(
   );
 }
 
+export function computeRunFolderSize(
+  runFolder: string,
+  config: AppConfig = loadConfig()
+): number {
+  const resolvedRunFolder = resolveRunFolderPath(runFolder, config);
+  return sumDirectorySize(resolvedRunFolder);
+}
+
+function sumDirectorySize(dir: string): number {
+  let total = 0;
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isFile()) {
+      try {
+        total += fs.statSync(full).size;
+      } catch {
+        // skip unreadable files
+      }
+    } else if (entry.isDirectory()) {
+      total += sumDirectorySize(full);
+    }
+  }
+  return total;
+}
+
 export function listRunFiles(
   runFolder: string,
   config: AppConfig = loadConfig()
