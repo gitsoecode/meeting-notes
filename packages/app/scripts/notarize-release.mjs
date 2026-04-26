@@ -1,14 +1,33 @@
 #!/usr/bin/env node
 /**
- * Submit the already-signed macOS app for notarization, staple the
- * accepted ticket, and rebuild the release zip from the stapled app.
+ * Submit the already-signed macOS artifacts for notarization, staple the
+ * accepted ticket onto every artifact, and rebuild the release zip from
+ * the stapled .app.
  *
  * electron-builder v25 notarizes inside its signing step, before the
  * `afterSign` hook runs. Gistlist's `afterSign` hook must re-sign
- * Contents/MacOS/audiotee with `com.apple.security.inherit`, so
- * notarization lives here instead: after electron-builder signs, after
- * our hook repairs AudioTee, and before the release zip is considered
- * final.
+ * Contents/MacOS/audiotee with `com.apple.security.inherit` and re-seal
+ * the bundle, so notarization lives here instead — after electron-builder
+ * signs, after our hook repairs AudioTee, and before the release zip is
+ * considered final.
+ *
+ * What we submit, and why:
+ *
+ * Apple's notary ticket service is keyed by the SHA-256 of each binary
+ * it inspects, not by submission. When you submit a .dmg, Apple unpacks
+ * it, validates and notarizes the dmg AND every binary inside (the .app,
+ * its helpers, audiotee, etc.) — and registers a ticket for each hash.
+ * Stapling then works for the .dmg AND for the standalone .app at
+ * release/mac-arm64/Gistlist.app, because the standalone .app is
+ * byte-identical to the .app inside the dmg, so they share a hash.
+ *
+ * Submitting the .app directly (as we used to) only registers tickets
+ * for the .app and its inner binaries. The .dmg's hash isn't on file,
+ * and `stapler staple foo.dmg` fails with "Record not found".
+ *
+ * If no .dmg exists (e.g. someone temporarily drops dmg from the build
+ * targets), fall back to submitting the .app. Stapling the .app still
+ * works in that case; the dmg-staple step just becomes a no-op.
  */
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -34,7 +53,7 @@ const releaseDir = path.join(APP_PKG_ROOT, "release");
 const macOutDir = path.join(releaseDir, `mac-${arch}`);
 const appName = `${productName}.app`;
 const appPath = path.join(macOutDir, appName);
-const submitZip = path.join(
+const appSubmitZip = path.join(
   os.tmpdir(),
   `${productName}-${version}-${arch}-notary-submit.zip`
 );
@@ -72,25 +91,46 @@ if (!fs.existsSync(appPath)) {
   throw new Error(`[notarize-release] missing app bundle: ${appPath}`);
 }
 
+const dmgCandidates = fs
+  .readdirSync(releaseDir)
+  .filter((name) => name.endsWith(".dmg") && name.includes(arch))
+  .map((name) => path.join(releaseDir, name));
+
+if (dmgCandidates.length > 1) {
+  throw new Error(
+    `[notarize-release] expected at most one .dmg for arch ${arch}, found: ${dmgCandidates.join(", ")}`
+  );
+}
+
+const dmgPath = dmgCandidates[0] ?? null;
+
+let submitTarget;
+let submitTargetLabel;
+if (dmgPath) {
+  submitTarget = dmgPath;
+  submitTargetLabel = `dmg ${path.basename(dmgPath)}`;
+} else {
+  log(`no .dmg in ${releaseDir}; falling back to .app submission`);
+  // ditto-zip the .app for upload — notarytool wants .zip/.dmg/.pkg.
+  run(
+    "ditto",
+    ["-c", "-k", "--keepParent", "--sequesterRsrc", appName, appSubmitZip],
+    { cwd: macOutDir }
+  );
+  submitTarget = appSubmitZip;
+  submitTargetLabel = `app (zipped) ${appName}`;
+}
+
 let submissionId = process.env.GISTLIST_NOTARY_SUBMISSION_ID;
 
 if (submissionId) {
   log(`resuming existing notary submission ${submissionId}`);
 } else {
-  log(`submitting ${appPath} with keychain profile "${keychainProfile}"`);
-  run("ditto", [
-    "-c",
-    "-k",
-    "--keepParent",
-    "--sequesterRsrc",
-    appName,
-    submitZip,
-  ], { cwd: macOutDir });
-
+  log(`submitting ${submitTargetLabel} with keychain profile "${keychainProfile}"`);
   const submitJson = read("xcrun", [
     "notarytool",
     "submit",
-    submitZip,
+    submitTarget,
     "--keychain-profile",
     keychainProfile,
     "--output-format",
@@ -147,30 +187,22 @@ if (status !== "Accepted") {
   );
 }
 
+// Staple the .app first. Works whether we submitted the .dmg (the .app's
+// hash was registered too) or submitted the .app directly.
 run("xcrun", ["stapler", "staple", appPath]);
 run("xcrun", ["stapler", "validate", appPath]);
 
-const dmgCandidates = fs
-  .readdirSync(releaseDir)
-  .filter((name) => name.endsWith(".dmg") && name.includes(arch))
-  .map((name) => path.join(releaseDir, name));
-for (const dmgPath of dmgCandidates) {
-  log(`stapling dmg ${dmgPath}`);
+if (dmgPath) {
+  log(`stapling ${dmgPath}`);
   run("xcrun", ["stapler", "staple", dmgPath]);
   run("xcrun", ["stapler", "validate", dmgPath]);
 }
-if (dmgCandidates.length === 0) {
-  log("no .dmg found in release/ — skipping dmg staple");
-}
 
 log(`rebuilding stapled release zip at ${finalZip}`);
-run("ditto", [
-  "-c",
-  "-k",
-  "--keepParent",
-  "--sequesterRsrc",
-  appName,
-  finalZip,
-], { cwd: macOutDir });
+run(
+  "ditto",
+  ["-c", "-k", "--keepParent", "--sequesterRsrc", appName, finalZip],
+  { cwd: macOutDir }
+);
 
 log("notarization, stapling, and release zip rebuild complete");
