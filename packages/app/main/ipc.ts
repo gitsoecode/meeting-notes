@@ -62,6 +62,7 @@ import { dispatchSimulator } from "./updater-dev.js";
 import { openFeedbackMail, revealLogsInFinder, openLicensesFile } from "./feedback.js";
 import { startAudioMonitor, stopAudioMonitor, switchMonitorMic } from "./audio-monitor.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
+import { resolveMicCaptureBinary } from "./mic-capture-binary.js";
 import { listAppEntries, listProcesses, trackChildProcess } from "./activity-monitor.js";
 import { detectHardware, isSystemAudioSupported } from "./system.js";
 import { registerMeetingIndexIpc } from "./meeting-index/ipc.js";
@@ -595,10 +596,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("recording:test-audio", async () => {
     const config = loadConfig();
+    // Thread both bundled-binary paths through so Diagnose Audio
+    // exercises the same code path production recording uses
+    // (recording.ts:472-480). Without this the packaged app's diagnose
+    // can pass while real recording fails (or vice versa) because the
+    // engine falls back to npm-shipped audiotee / engine-defaults
+    // mic-capture paths that don't match resourcesPath/bin/.
     return testAudioCapture({
       micDevice: config.recording.mic_device,
       systemDevice: config.recording.system_device,
       durationMs: 4000,
+      audioTeeBinaryPath: resolveAudioTeeBinary(),
+      micCaptureBinaryPath: resolveMicCaptureBinary(),
     });
   });
 

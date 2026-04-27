@@ -34,6 +34,14 @@ export async function testAudioCapture(opts: {
   micDevice: string;
   systemDevice: string;
   durationMs?: number;
+  // Optional bundled-binary paths. Production recording threads these in
+  // from the main process via resolveAudioTeeBinary() / resolveMicCaptureBinary()
+  // so the packaged app uses the helpers shipped under
+  // process.resourcesPath/bin/ instead of whatever happens to be on PATH.
+  // Diagnose Audio must do the same or its verdict can disagree with what
+  // real recording will see in a packaged build.
+  audioTeeBinaryPath?: string;
+  micCaptureBinaryPath?: string;
 }): Promise<AudioTestReport> {
   const durationMs = opts.durationMs ?? 4000;
   const recorder = new FfmpegRecorder();
@@ -50,10 +58,15 @@ export async function testAudioCapture(opts: {
 
   try {
     // Test mic device via ffmpeg
-    results.push(await testMicDevice(recorder, devices, micDevice, tmpDir, durationMs));
+    results.push(
+      await testMicDevice(recorder, devices, micDevice, tmpDir, durationMs, {
+        audioTeeBinaryPath: opts.audioTeeBinaryPath,
+        micCaptureBinaryPath: opts.micCaptureBinaryPath,
+      })
+    );
 
     // Test system audio via AudioTee (not device-based anymore)
-    results.push(await testSystemAudioTee(tmpDir, durationMs));
+    results.push(await testSystemAudioTee(tmpDir, durationMs, opts.audioTeeBinaryPath));
   } finally {
     // Clean up temp files
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -72,7 +85,11 @@ async function testMicDevice(
   knownDevices: string[],
   deviceName: string,
   tmpDir: string,
-  durationMs: number
+  durationMs: number,
+  binaryPaths: {
+    audioTeeBinaryPath?: string;
+    micCaptureBinaryPath?: string;
+  }
 ): Promise<DeviceTestResult> {
   const found = knownDevices.some(
     (d) => d === deviceName || d.includes(deviceName)
@@ -101,6 +118,8 @@ async function testMicDevice(
       systemDevice: "",
       outputDir: tmpDir,
       devices: knownDevices,
+      audioTeeBinaryPath: binaryPaths.audioTeeBinaryPath,
+      micCaptureBinaryPath: binaryPaths.micCaptureBinaryPath,
     });
 
     // Wait for the test duration
@@ -160,7 +179,8 @@ async function testMicDevice(
  */
 async function testSystemAudioTee(
   tmpDir: string,
-  durationMs: number
+  durationMs: number,
+  audioTeeBinaryPath: string | undefined
 ): Promise<DeviceTestResult> {
   const deviceName = "AudioTee (CoreAudio tap)";
   const systemDir = path.join(tmpDir, "system-test");
@@ -169,6 +189,7 @@ async function testSystemAudioTee(
     const session = await startAudioTeeCapture({
       outputDir: systemDir,
       sampleRate: 48000,
+      binaryPath: audioTeeBinaryPath,
       onError: (err) => {
         // captured below via session.started
         void err;

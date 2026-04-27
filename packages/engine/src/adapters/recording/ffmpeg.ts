@@ -6,6 +6,7 @@ import path from "node:path";
 import type { Recorder, RecorderOptions, RecordingSession } from "./recorder.js";
 import { startAudioTeeCapture, type AudioTeeSession } from "./audiotee-recorder.js";
 import { getFfmpegPath } from "../../core/ffmpeg-path.js";
+import { getFfprobePath } from "../../core/ffprobe-path.js";
 import {
   resolveNativeMicBinary,
   startNativeMic,
@@ -337,7 +338,7 @@ async function moveFile(src: string, dst: string): Promise<void> {
 }
 
 async function probeDurationMs(audioPath: string): Promise<number> {
-  const { stdout } = await execFileAsync("ffprobe", [
+  const { stdout } = await execFileAsync(getFfprobePath(), [
     "-v", "quiet",
     "-show_entries", "format=duration",
     "-of", "default=nokey=1:noprint_wrappers=1",
