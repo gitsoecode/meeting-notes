@@ -112,9 +112,13 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
   }, []);
 
   const handleCheckForUpdates = async () => {
+    // Floor the visible duration so a fast network check (often <300ms)
+    // still registers as a deliberate action — without this, the spinner
+    // can flash so quickly that the click feels like a no-op.
     setCheckingUpdate(true);
+    const minVisible = new Promise((r) => setTimeout(r, 600));
     try {
-      const next = await api.updater.check();
+      const [next] = await Promise.all([api.updater.check(), minVisible]);
       setUpdaterStatus(next);
     } finally {
       setCheckingUpdate(false);
@@ -980,26 +984,26 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                         Current version
                       </div>
                       <div className="text-xs text-[var(--text-secondary)]">
-                        {updaterStatus.kind === "available" && updaterStatus.version
-                          ? `Update ${updaterStatus.version} is available`
-                          : updaterStatus.kind === "downloading"
-                            ? `Downloading ${updaterStatus.version ?? "update"}…${
-                                updaterStatus.bytesTotal
-                                  ? ` ${Math.round(
-                                      ((updaterStatus.bytesDone ?? 0) /
-                                        updaterStatus.bytesTotal) *
-                                        100
-                                    )}%`
-                                  : ""
-                              }`
-                            : updaterStatus.kind === "downloaded"
-                              ? `Update ${updaterStatus.version ?? ""} is ready to install`
-                              : updaterStatus.kind === "deferred-recording"
-                                ? "Update deferred — finishing your recording first"
-                                : updaterStatus.kind === "error"
-                                  ? `Last check failed: ${updaterStatus.error ?? "unknown"}`
-                                  : updaterStatus.kind === "checking"
-                                    ? "Checking for updates…"
+                        {checkingUpdate || updaterStatus.kind === "checking"
+                          ? "Checking for updates…"
+                          : updaterStatus.kind === "available" && updaterStatus.version
+                            ? `Update ${updaterStatus.version} is available`
+                            : updaterStatus.kind === "downloading"
+                              ? `Downloading ${updaterStatus.version ?? "update"}…${
+                                  updaterStatus.bytesTotal
+                                    ? ` ${Math.round(
+                                        ((updaterStatus.bytesDone ?? 0) /
+                                          updaterStatus.bytesTotal) *
+                                          100
+                                      )}%`
+                                    : ""
+                                }`
+                              : updaterStatus.kind === "downloaded"
+                                ? `Update ${updaterStatus.version ?? ""} is ready to install`
+                                : updaterStatus.kind === "deferred-recording"
+                                  ? "Update deferred — finishing your recording first"
+                                  : updaterStatus.kind === "error"
+                                    ? `Last check failed: ${updaterStatus.error ?? "unknown"}`
                                     : updaterStatus.lastChecked
                                       ? `Up to date · last checked ${new Date(updaterStatus.lastChecked).toLocaleString()}`
                                       : "Up to date"}
