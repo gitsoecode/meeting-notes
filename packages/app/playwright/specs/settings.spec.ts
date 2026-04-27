@@ -152,13 +152,6 @@ test.describe("Settings", () => {
     await expect(page.getByText("Ollama", { exact: true })).toBeVisible();
   });
 
-  test("shortcut section is visible", async ({ page, settings }) => {
-    await settings.openTab("Other");
-    await expect(page.getByText("Toggle recording")).toBeVisible();
-    // The shortcut recorder should show current binding
-    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible();
-  });
-
   test("storage actions update paths and record external directory opens", async ({
     app,
     settings,
@@ -217,7 +210,7 @@ test.describe("Settings", () => {
     await settings.setupParakeetCloseButton().click();
   });
 
-  test("settings page can scroll past shortcuts to system health", async ({ page, settings }) => {
+  test("settings page can scroll to system health", async ({ page, settings }) => {
     await settings.openTab("Other");
     const systemHealth = page.getByText("System Health", { exact: true });
     await systemHealth.scrollIntoViewIfNeeded();
