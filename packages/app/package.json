@@ -19,7 +19,7 @@
     "compact:audio": "node scripts/compact-existing-audio.mjs",
     "test:duplicate-speakers": "npm run build --workspace @gistlist/engine && node scripts/regress-duplicate-speakers.mjs",
     "package:mac": "node scripts/clean-release-arch.mjs && npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release",
-    "package:mac:sign": "node scripts/clean-release-arch.mjs && npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release --config.mac.notarize=false && node scripts/notarize-release.mjs",
+    "package:mac:sign": "node scripts/clean-release-arch.mjs && npm run build && npm run rebuild:native && npm run build:mcp && npm run check:bundle && node scripts/check-notarize-env.mjs && node scripts/package-with-engine-staged.mjs --mac --publish never --config.directories.output=release --config.mac.notarize=false && node scripts/notarize-release.mjs && node scripts/check-release-artifacts.mjs",
     "build:mcp": "npm run build:packaged --workspace @gistlist/mcp-server",
     "patch:audiotee": "node scripts/patch-audiotee.mjs",
     "postinstall": "node scripts/patch-audiotee.mjs",
@@ -91,7 +91,8 @@
     "tailwindcss": "^4.2.2",
     "typescript": "^5.8.0",
     "vite": "^6.0.3",
-    "wait-on": "^8.0.1"
+    "wait-on": "^8.0.1",
+    "yaml": "^2.7.1"
   },
   "build": {
     "appId": "app.gistlist.desktop",
