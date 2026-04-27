@@ -1,6 +1,6 @@
 {
   "name": "@gistlist/app",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Gistlist desktop app",
   "private": true,
   "type": "module",
