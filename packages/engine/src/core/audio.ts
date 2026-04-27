@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { getFfmpegPath } from "./ffmpeg-path.js";
+import { getFfprobePath } from "./ffprobe-path.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,7 +25,7 @@ export type AudioArchiveFormat = "ogg-opus" | "flac";
 
 export async function mediaHasAudioStream(mediaPath: string): Promise<boolean> {
   try {
-    const { stdout } = await execFileAsync("ffprobe", [
+    const { stdout } = await execFileAsync(getFfprobePath(), [
       "-v", "quiet",
       "-select_streams", "a:0",
       "-show_entries", "stream=index",
@@ -41,7 +42,7 @@ export async function mediaHasAudioStream(mediaPath: string): Promise<boolean> {
 
 export async function getAudioInfo(audioPath: string): Promise<AudioInfo> {
   try {
-    const { stdout } = await execFileAsync("ffprobe", [
+    const { stdout } = await execFileAsync(getFfprobePath(), [
       "-v", "quiet",
       "-print_format", "json",
       "-show_format",

@@ -11,7 +11,7 @@
  * that forgets to update the hash fails the check before merge.
  */
 
-export type ToolName = "ffmpeg" | "ollama" | "whisper-cli";
+export type ToolName = "ffmpeg" | "ffprobe" | "ollama" | "whisper-cli";
 export type ArchTag = "arm64" | "x64" | "universal";
 export type ArchiveType = "tgz" | "zip" | "raw";
 export type SignatureCheckPolicy = "codesign-verify" | "none";
@@ -134,6 +134,34 @@ export const TOOL_MANIFEST: ToolManifestEntry[] = [
     verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
     notes:
       "x86_64 only — Apple Silicon runs it via Rosetta 2 (auto-installed by macOS on first invocation). Native arm64 ffmpeg is a follow-up; ffbinaries.com and evermeet.cx don't currently ship arm64 builds.",
+  },
+  {
+    // Paired with ffmpeg above. The wizard installs both as a unit when
+    // the user clicks "Install ffmpeg" — the System Health row says
+    // "ffmpeg" but its ok-status reflects both binaries because the
+    // engine's audio.ts uses ffprobe for duration / stream info and
+    // would silently fail if ffprobe were missing.
+    tool: "ffprobe",
+    version: "7.1.1",
+    platform: "darwin",
+    arch: "x64",
+    minMacOS: "11.0",
+    url: "https://evermeet.cx/ffmpeg/ffprobe-7.1.1.zip",
+    sha256:
+      "5a0a77d5e0c689f7b577788e286dd46b2c6120babd14301cce7a79fcfd3f7d28",
+    archiveType: "zip",
+    binaryPathInArchive: "ffprobe",
+    installLayout: "single-binary",
+    signatureCheck: "none",
+    license: {
+      spdx: "LGPL-2.1-or-later",
+      url: "https://www.ffmpeg.org/legal.html",
+      buildVariant:
+        "evermeet.cx LGPL static build (no GPL components, ~25 MB zip → 79 MB binary)",
+    },
+    verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
+    notes:
+      "Same upstream as ffmpeg above; same Rosetta caveat for Apple Silicon. Installed as a side effect of installDep('ffmpeg') in the IPC handler — never user-installable on its own.",
   },
   {
     tool: "ollama",

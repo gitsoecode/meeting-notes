@@ -115,6 +115,7 @@ export { migrateVaultPromptsToHome } from "./core/migrate-prompts.js";
 
 export { FfmpegRecorder, pickPhysicalMic } from "./adapters/recording/ffmpeg.js";
 export { setFfmpegPath, getFfmpegPath } from "./core/ffmpeg-path.js";
+export { setFfprobePath, getFfprobePath } from "./core/ffprobe-path.js";
 export { startAudioTeeCapture, recoverRawFile, type AudioTeeSession } from "./adapters/recording/audiotee-recorder.js";
 export type {
   Recorder,

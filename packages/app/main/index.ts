@@ -28,7 +28,7 @@ import {
 } from "@gistlist/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { resolveBin } from "./bundled.js";
-import { setFfmpegPath } from "@gistlist/engine";
+import { setFfmpegPath, setFfprobePath } from "@gistlist/engine";
 import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
 import { getCachedAudioDevices } from "./device-cache.js";
@@ -211,8 +211,10 @@ app.whenReady().then(async () => {
   try {
     const ffmpegBin = await resolveBin("ffmpeg");
     if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
+    const ffprobeBin = await resolveBin("ffprobe");
+    if (ffprobeBin) setFfprobePath(ffprobeBin.path);
   } catch {
-    // Non-fatal: engine falls back to bare "ffmpeg" via PATH.
+    // Non-fatal: engine falls back to bare "ffmpeg"/"ffprobe" via PATH.
   }
 
   registerIpcHandlers();

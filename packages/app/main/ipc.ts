@@ -38,6 +38,7 @@ import {
   OperationAbortedError,
   testAudioCapture,
   setFfmpegPath,
+  setFfprobePath,
   type AppConfig,
   type LlmProvider,
   type PipelineProgressEvent,
@@ -1486,20 +1487,76 @@ export function registerIpcHandlers(): void {
         },
       });
 
-      if (result.ok) {
-        broadcastToAll("deps-install:log", `✓ ${target} installed`);
-        createAppLogger(false).info("Dependency install completed", {
+      if (!result.ok) {
+        createAppLogger(false).error("Dependency install failed", {
           processType: "wizard-install",
           detail: target,
+          message: result.error,
         });
-        return { ok: true };
+        return { ok: false, error: result.error, failedPhase: result.phase };
       }
-      createAppLogger(false).error("Dependency install failed", {
+
+      broadcastToAll("deps-install:log", `✓ ${target} installed`);
+      createAppLogger(false).info("Dependency install completed", {
         processType: "wizard-install",
         detail: target,
-        message: result.error,
       });
-      return { ok: false, error: result.error, failedPhase: result.phase };
+
+      // ffmpeg is paired with ffprobe — same upstream zip from evermeet.cx,
+      // and engine code (audio.ts duration / stream-info) requires both.
+      // Install ffprobe as a follow-up so users who click "Install ffmpeg"
+      // get a fully functional audio toolchain without a second click.
+      // ffprobe is intentionally NOT exposed in DepsInstallTarget (renderer
+      // can never request it directly); the manifest-driven install path is
+      // the only way it lands on disk.
+      if (target === "ffmpeg") {
+        broadcastToAll("deps-install:log", `→ installing ffprobe (paired with ffmpeg)`);
+        const ffprobeResult = await installTool({
+          tool: "ffprobe",
+          onProgress: (event: InstallerProgressEvent) => {
+            broadcastToAll("installer-progress", event);
+            if (event.phase === "download" && event.bytesDone !== undefined) {
+              const total = event.bytesTotal
+                ? ` / ${humanBytes(event.bytesTotal)}`
+                : "";
+              broadcastToAll(
+                "deps-install:log",
+                `  ${event.phase}: ${humanBytes(event.bytesDone)}${total}`
+              );
+            } else if (event.phase === "failed") {
+              broadcastToAll(
+                "deps-install:log",
+                `✘ ffprobe install failed: ${event.error ?? "unknown"}`
+              );
+            } else {
+              broadcastToAll("deps-install:log", `  ${event.phase}…`);
+            }
+          },
+        });
+        if (!ffprobeResult.ok) {
+          // Partial success: ffmpeg landed, ffprobe didn't. Surface the
+          // ffprobe failure clearly. Resolver tolerates partial state —
+          // each binary is checked independently — so the user can retry
+          // by re-clicking Install (which is idempotent for ffmpeg).
+          createAppLogger(false).error("Paired ffprobe install failed", {
+            processType: "wizard-install",
+            detail: "ffprobe",
+            message: ffprobeResult.error,
+          });
+          return {
+            ok: false,
+            error: `ffmpeg installed but ffprobe install failed: ${ffprobeResult.error ?? "unknown"}`,
+            failedPhase: ffprobeResult.phase,
+          };
+        }
+        broadcastToAll("deps-install:log", `✓ ffprobe installed`);
+        createAppLogger(false).info("Paired ffprobe install completed", {
+          processType: "wizard-install",
+          detail: "ffprobe",
+        });
+      }
+
+      return { ok: true };
     }
   );
 
@@ -1776,6 +1833,27 @@ export function registerIpcHandlers(): void {
       version: ffmpegVersion,
     };
 
+    // ffprobe — paired with ffmpeg in the wizard installer (same upstream
+    // zip from evermeet.cx, same SHA-anchored trust). The engine's audio
+    // duration / stream-info code uses ffprobe specifically, so a missing
+    // ffprobe makes the System Health "ffmpeg" row not-ok even when ffmpeg
+    // itself is present. Sync the engine's ffprobe path injection too.
+    const ffprobeBin = await resolveBin("ffprobe");
+    let ffprobeVersion: string | null = null;
+    if (ffprobeBin) {
+      setFfprobePath(ffprobeBin.path);
+      try {
+        const { stdout } = await execFileAsync(ffprobeBin.path, ["-version"]);
+        const m = stdout.match(/ffprobe version (\S+)/);
+        if (m) ffprobeVersion = m[1];
+      } catch { /* ignore */ }
+    }
+    const ffprobe: ResolvedTool = {
+      path: ffprobeBin?.path ?? null,
+      source: ffprobeBin?.source ?? null,
+      version: ffprobeVersion,
+    };
+
     // Python — system-only. We never install Python ourselves.
     const pythonPath =
       (await whichCmd("python3.12")) ??
@@ -1873,6 +1951,7 @@ export function registerIpcHandlers(): void {
     }
     return {
       ffmpeg,
+      ffprobe,
       python,
       blackhole: "missing" as const,
       systemAudioSupported,

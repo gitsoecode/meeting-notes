@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
  * (Phase 2 onward) — except for AudioTee and mic-capture, which are
  * bundled inside the .app and have their own dedicated resolvers.
  */
-export type BinName = "ollama" | "ffmpeg" | "whisper-cli";
+export type BinName = "ollama" | "ffmpeg" | "ffprobe" | "whisper-cli";
 export type BinSource = "app-installed" | "bundled" | "system";
 
 export interface ResolvedBin {

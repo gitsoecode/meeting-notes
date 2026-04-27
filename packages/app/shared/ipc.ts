@@ -413,6 +413,14 @@ export interface ResolvedTool {
 export interface DepsCheckResult {
   /** ffmpeg via wizard install, bundle, or system PATH. */
   ffmpeg: ResolvedTool;
+  /**
+   * ffprobe — installed as a paired follow-up to ffmpeg by the wizard
+   * (see manifest.ts). The renderer's System Health row labels the
+   * combined "ffmpeg" status and renders this field's path inline so
+   * users can tell a half-installed state ("ffmpeg present · ffprobe
+   * missing") apart from a fully-resolved one.
+   */
+  ffprobe: ResolvedTool;
   /** @deprecated Kept for type compatibility. Always "missing" in new code. */
   blackhole: BlackHoleStatus;
   /** True when macOS 14.2+ supports automatic system audio capture via CoreAudio taps. */

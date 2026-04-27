@@ -404,6 +404,8 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     if (busy || installing || restartingAudio) return true;
     if (!deps) return true;
     if (!deps.ffmpeg.path) return true;
+    // ffprobe is paired with ffmpeg — engine audio code requires both.
+    if (!deps.ffprobe.path) return true;
     if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
     // BlackHole no longer required — system audio is captured via AudioTee
     if (llmProvider === "ollama") {
@@ -877,20 +879,24 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                 <div className="space-y-3">
                   <DependencyRow
                     name="ffmpeg"
-                    ok={!!deps.ffmpeg.path}
+                    ok={!!deps.ffmpeg.path && !!deps.ffprobe.path}
                     value={
-                      deps.ffmpeg.path
+                      deps.ffmpeg.path && deps.ffprobe.path
                         ? `${deps.ffmpeg.path}${deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : ""}`
-                        : undefined
+                        : deps.ffmpeg.path && !deps.ffprobe.path
+                          ? "ffmpeg present · ffprobe missing"
+                          : !deps.ffmpeg.path && deps.ffprobe.path
+                            ? "ffprobe present · ffmpeg missing"
+                            : undefined
                     }
-                    installLabel="Install ffmpeg"
+                    installLabel="Install ffmpeg + ffprobe"
                     installing={installing === "ffmpeg"}
                     anyInstalling={installing !== null}
                     brewAvailable={true}
                     onInstall={() => installDep("ffmpeg")}
                     footerNote={
-                      !deps.ffmpeg.path
-                        ? "Downloads ~25 MB from evermeet.cx (LGPL static build). On Apple Silicon, runs via Rosetta 2 — first invocation may prompt for a one-time Rosetta install."
+                      !deps.ffmpeg.path || !deps.ffprobe.path
+                        ? "Downloads ~50 MB from evermeet.cx (LGPL static builds — ffmpeg + ffprobe). On Apple Silicon, runs via Rosetta 2 — first invocation may prompt for a one-time Rosetta install."
                         : undefined
                     }
                   />

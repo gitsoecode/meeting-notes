@@ -191,7 +191,12 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
-    await app.setDependencyState({ ffmpeg: null });
+    // ffmpeg + ffprobe are reported as a paired System Health row. Setting
+    // only ffmpeg to null surfaces "ffprobe present · ffmpeg missing" — to
+    // exercise the canonical "not found" copy, both have to be missing
+    // (which is the realistic shape on a fresh install where neither has
+    // been downloaded yet).
+    await app.setDependencyState({ ffmpeg: null, ffprobe: null });
     await page.reload();
     await settings.openTab("Other");
     await expect(settings.dependenciesCard().getByText(/not found/i).first()).toBeVisible();

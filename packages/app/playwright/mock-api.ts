@@ -452,6 +452,8 @@ export async function installMockApi(page: Page) {
     const depsState = {
       ffmpeg: "/opt/homebrew/bin/ffmpeg",
       ffmpegVersion: "7.1-mock",
+      ffprobe: "/opt/homebrew/bin/ffprobe",
+      ffprobeVersion: "7.1-mock",
       blackhole: "missing",
       systemAudioSupported: true,
       python: "/usr/bin/python3",
@@ -463,6 +465,8 @@ export async function installMockApi(page: Page) {
     } as {
       ffmpeg: string | null;
       ffmpegVersion: string | null;
+      ffprobe: string | null;
+      ffprobeVersion: string | null;
       blackhole: "missing" | "installed-not-loaded" | "loaded";
       systemAudioSupported: boolean;
       python: string | null;
@@ -1902,6 +1906,7 @@ export async function installMockApi(page: Page) {
         });
         return {
           ffmpeg: wrap(depsState.ffmpeg, "system", depsState.ffmpegVersion),
+          ffprobe: wrap(depsState.ffprobe, "system", depsState.ffprobeVersion),
           blackhole: depsState.blackhole,
           systemAudioSupported: depsState.systemAudioSupported,
           python: wrap(depsState.python, "system", depsState.pythonVersion),

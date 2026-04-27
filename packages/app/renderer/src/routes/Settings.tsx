@@ -281,18 +281,35 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
     deps == null
       ? []
       : [
-          {
-            label: "ffmpeg",
-            value:
-              deps.ffmpeg.path
-                ? `${deps.ffmpeg.path}${deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : ""}`
-                : "not found",
-            version: deps.ffmpeg.version,
-            ok: !!deps.ffmpeg.path,
-            install: deps.ffmpeg.path
-              ? undefined
-              : { run: () => void installFfmpeg(), busy: installingFfmpeg, label: "Install" },
-          },
+          (() => {
+            // Combined ffmpeg + ffprobe row. The wizard installs them as
+            // a unit, so the row is "ok" only when both resolve. The
+            // displayed value spells out both states so a half-installed
+            // condition is visible (e.g. user manually rm'd ffprobe).
+            const fmHas = Boolean(deps.ffmpeg.path);
+            const fpHas = Boolean(deps.ffprobe.path);
+            let value: string;
+            if (fmHas && fpHas) {
+              const sourceLabel = deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : "";
+              value = `${deps.ffmpeg.path}${sourceLabel}`;
+            } else if (fmHas && !fpHas) {
+              value = `ffmpeg present · ffprobe missing`;
+            } else if (!fmHas && fpHas) {
+              value = `ffprobe present · ffmpeg missing`;
+            } else {
+              value = "not found";
+            }
+            return {
+              label: "ffmpeg",
+              value,
+              version: deps.ffmpeg.version,
+              ok: fmHas && fpHas,
+              install:
+                fmHas && fpHas
+                  ? undefined
+                  : { run: () => void installFfmpeg(), busy: installingFfmpeg, label: "Install" },
+            };
+          })(),
           {
             label: "Python",
             value: deps.python.path ?? "not found",
