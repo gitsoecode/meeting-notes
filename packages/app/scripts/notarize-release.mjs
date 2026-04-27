@@ -233,4 +233,18 @@ if (builtZipPath) {
   log("no .zip in release/ — skipping zip rebuild");
 }
 
-log("notarization, stapling, and release zip rebuild complete");
+// Regenerate latest-mac.yml. electron-builder wrote it BEFORE we stapled
+// the dmg and rebuilt the zip, so its sha512 + size fields are now stale.
+// Publishing the stale manifest silently breaks auto-update on every
+// existing user (electron-updater downloads the zip, hashes it, sees the
+// mismatch, aborts). v0.1.1 dodged this — it was the first auto-updating
+// release — but every subsequent version needs this step.
+const latestMacYmlPath = path.join(releaseDir, "latest-mac.yml");
+if (fs.existsSync(latestMacYmlPath)) {
+  log("regenerating latest-mac.yml against stapled artifacts");
+  run("node", [path.join(APP_PKG_ROOT, "scripts/regen-latest-mac-yml.mjs")]);
+} else {
+  log("no latest-mac.yml found — skipping regen (was electron-builder publish=never with no manifest output?)");
+}
+
+log("notarization, stapling, release zip rebuild, and manifest regen complete");
