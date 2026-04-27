@@ -163,6 +163,13 @@ openChild = spawn(
     appDir,
     "--env",
     `GISTLIST_USER_DATA_DIR=${tmpUserData}`,
+    // Two-factor gate paired with the --smoke-audio CLI flag. The
+    // entrypoint refuses to enter smoke mode without this env var, so
+    // a Dock/Finder launch (which can pass --args but cannot inject
+    // env) never reaches the mic/system tap path even if the flag
+    // leaks.
+    "--env",
+    "GISTLIST_ALLOW_SMOKE_AUDIO=1",
     "--stdout",
     stdoutLogPath,
     "--stderr",

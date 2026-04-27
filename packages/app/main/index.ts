@@ -297,7 +297,17 @@ app.whenReady().then(async () => {
   // under macOS hardened runtime + TCC. Skips all normal startup —
   // no window, no IPC handlers, no Ollama, no DB. See runAudioSmoke
   // and packages/app/scripts/smoke-packaged-audio.mjs.
-  if (process.argv.includes("--smoke-audio")) {
+  //
+  // Two-factor gate: --smoke-audio CLI arg AND GISTLIST_ALLOW_SMOKE_AUDIO=1
+  // env var. The env var is set by the smoke driver via
+  // `open --env GISTLIST_ALLOW_SMOKE_AUDIO=1` and is therefore not present
+  // on a normal Dock/Finder launch even if someone discovers the flag.
+  // Belt-and-suspenders for a code path that briefly opens the mic and
+  // system-audio tap on a production-signed binary.
+  if (
+    process.argv.includes("--smoke-audio") &&
+    process.env.GISTLIST_ALLOW_SMOKE_AUDIO === "1"
+  ) {
     await runAudioSmoke();
     return;
   }
