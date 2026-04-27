@@ -77,6 +77,19 @@ export async function startAudioTeeCapture(
   try {
     tee = new AudioTee({ sampleRate, binaryPath: opts.binaryPath });
     writeStream = fs.createWriteStream(rawPath);
+    // Critical: the WriteStream's underlying open() is async — if the
+    // parent dir gets unlinked between mkdirSync above and the open
+    // (e.g. test cleanup races), or if the path is otherwise invalid,
+    // the resulting `error` event bubbles to the process as an
+    // uncaught exception and triggers Electron's "JavaScript error
+    // occurred in the main process" dialog. That dialog appeared in
+    // v0.1.3 when the diagnose-audio test cleaned up its tmp dir
+    // while AudioTee's stream still had a pending open. Swallowing it
+    // here is safe — caller already gets `started: false` from the
+    // outer try/catch, and any data we'd have written is best-effort.
+    writeStream.on("error", (err) => {
+      opts.onError?.(err);
+    });
 
     tee.on("data", (chunk: AudioChunk) => {
       if (!stopped && chunk.data) {

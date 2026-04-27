@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { execFile, spawn } from "node:child_process";
+import { execFile, spawn, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
 import { ipcMain, dialog, shell, clipboard, app, systemPreferences } from "electron";
 import matter from "gray-matter";
@@ -746,11 +746,21 @@ export function registerIpcHandlers(): void {
     // AudioTee has no pre-flight permission check — when the "System Audio
     // Recording Only" TCC permission isn't granted it happily streams buffers
     // of all-zero bytes instead of erroring. Probe by starting a brief
-    // capture and checking whether *any* non-zero sample arrives. Used by
-    // the setup wizard and the Settings meter.
+    // capture and checking whether *any* non-zero sample arrives.
+    //
+    // The catch: if NOTHING is playing on the system, we also get all zeros
+    // even with permission granted — there's literally no audio to capture.
+    // That made the old probe useless unless the user happened to have a
+    // YouTube video running.
+    //
+    // Fix: play a built-in macOS sound (Tink.aiff) via afplay during the
+    // capture window. We control the source, so absence of non-zero samples
+    // after that proves permission is missing — not just that the room is
+    // quiet.
     if (process.platform !== "darwin") {
       return { status: "unsupported" as const };
     }
+    let tonePlayer: ChildProcess | null = null;
     try {
       const { AudioTee } = await import("audiotee");
       const tee = new AudioTee({ sampleRate: 16000, binaryPath: resolveAudioTeeBinary() });
@@ -769,8 +779,18 @@ export function registerIpcHandlers(): void {
         }
       });
       await tee.start();
-      // Give AudioTee a chance to deliver data. ~1.6 s is enough at 16k.
-      await new Promise((resolve) => setTimeout(resolve, 1600));
+      // Play a known audio source through the system mixer so AudioTee has
+      // something to capture. Tink.aiff is short (~150ms); we loop the play
+      // calls during the probe window. afplay exits when the file finishes,
+      // so we kick off two back-to-back plays to span ~1.6s.
+      const afplayBin = "/usr/bin/afplay";
+      const tonePath = "/System/Library/Sounds/Tink.aiff";
+      tonePlayer = spawn(afplayBin, ["-v", "0.5", tonePath], { stdio: "ignore" });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      // Replay so the second half of the window also has signal.
+      const tonePlayer2 = spawn(afplayBin, ["-v", "0.5", tonePath], { stdio: "ignore" });
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      try { tonePlayer2.kill(); } catch { /* ignore */ }
       await tee.stop();
       if (totalBytes === 0) {
         return { status: "failed" as const, error: "AudioTee started but never produced data." };
@@ -784,6 +804,8 @@ export function registerIpcHandlers(): void {
         status: "failed" as const,
         error: err instanceof Error ? err.message : String(err),
       };
+    } finally {
+      try { tonePlayer?.kill(); } catch { /* ignore */ }
     }
   });
 

@@ -68,16 +68,31 @@ export class Logger {
       }
     }
 
+    // File writes are best-effort. Logging must never bring down the
+    // process — bad GISTLIST_CONFIG_DIR (e.g., points at a non-writable
+    // path), full disk, permission errors, etc. all bubble up here as
+    // uncaught exceptions that crash the main process. Catch and
+    // fall through to console (if enabled) so the app stays alive.
     if (this.logFile) {
-      const dir = path.dirname(this.logFile);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(this.logFile, line + "\n", "utf-8");
+      try {
+        const dir = path.dirname(this.logFile);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(this.logFile, line + "\n", "utf-8");
+      } catch (err) {
+        if (this.consoleEnabled) {
+          console.warn(`[logger] file write failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
     }
 
     if (this.structuredFile) {
-      const dir = path.dirname(this.structuredFile);
-      fs.mkdirSync(dir, { recursive: true });
-      fs.appendFileSync(this.structuredFile, JSON.stringify(structuredEntry) + "\n", "utf-8");
+      try {
+        const dir = path.dirname(this.structuredFile);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.appendFileSync(this.structuredFile, JSON.stringify(structuredEntry) + "\n", "utf-8");
+      } catch {
+        // Already warned above; structured-file failures share the cause.
+      }
     }
 
     this.onEntry?.(structuredEntry);

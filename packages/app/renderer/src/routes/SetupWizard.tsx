@@ -215,7 +215,18 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
   useEffect(() => {
     if (step === 4) {
-      api.depsCheck().then(setDeps).catch(() => {});
+      api.depsCheck().then((d) => {
+        setDeps(d);
+        // Auto-run the system-audio probe as soon as we know the host
+        // supports it (macOS 14.2+). The probe plays its own test tone
+        // server-side, so the user doesn't have to play a YouTube video
+        // or click "Check system audio" — the result is deterministic
+        // and immediate. Skip if a previous run already produced a
+        // verdict so the user can see the latest state without flicker.
+        if (d?.systemAudioSupported && systemAudioProbe.status === "unknown") {
+          void probeSystemAudio();
+        }
+      }).catch(() => {});
       api.deps.checkBrew().then(setBrewAvailable).catch(() => setBrewAvailable(false));
       // Load app identity so we can tell the user what to look for in
       // System Settings (e.g., "Electron" in dev, "Gistlist" in prod).
@@ -412,6 +423,17 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     // ffprobe is paired with ffmpeg — engine audio code requires both.
     if (!deps.ffprobe.path) return true;
     if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
+    // System audio probe must produce a verdict before Finish. The probe
+    // auto-runs on step entry and resolves in ~2s; this gate just ensures
+    // users wait for it to complete instead of finishing with a stale
+    // unknown state. "denied" doesn't block — the user can intentionally
+    // choose mic-only recording — but they have to know about it first.
+    if (
+      deps.systemAudioSupported &&
+      (systemAudioProbe.status === "unknown" || systemAudioProbe.status === "probing")
+    ) {
+      return true;
+    }
     // BlackHole no longer required — system audio is captured via AudioTee
     if (llmProvider === "ollama") {
       if (!localLlmModel) return true;
@@ -423,6 +445,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     installing,
     restartingAudio,
     deps,
+    systemAudioProbe.status,
     asrProvider,
     llmProvider,
     localLlmModel,
@@ -1390,9 +1413,9 @@ function AudioPermissionsPanel({
               Not yet checked
             </Badge>
           )}
-          {systemAudioSupported && systemAudioProbe.status !== "granted" && systemAudioProbe.status !== "probing" ? (
+          {systemAudioSupported && systemAudioProbe.status !== "probing" ? (
             <Button size="sm" variant="secondary" onClick={onProbeSystemAudio}>
-              Check system audio
+              {systemAudioProbe.status === "granted" ? "Re-test" : "Test again"}
             </Button>
           ) : null}
         </div>
