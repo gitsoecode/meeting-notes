@@ -50,13 +50,18 @@ interface SetupWizardProps {
   onCancel?: () => void;
 }
 
-const RETENTION_PRESETS = new Set([30, 90, 180, 365]);
+// Must match the SelectItem values rendered in step 2's retention dropdown
+// (see the Select around line 597). Drift between this set and the rendered
+// options would surface as a blank/invalid value when the wizard reopens
+// against a config whose retention number isn't a real preset.
+const RETENTION_PRESETS = new Set([7, 30]);
 
 /**
  * Map an `audio_retention_days` value to the wizard's three-way control:
  *   - null → "never"
- *   - one of the preset numbers → that number stringified
- *   - any other number → "custom" (with the integer surfaced separately)
+ *   - 7 or 30 → that number stringified (matches a real SelectItem)
+ *   - any other positive number (e.g. 90, 180, 365 from older configs) →
+ *     "custom" with the integer surfaced in the custom-days input
  */
 function retentionFromConfig(days: number | null): {
   value: string;

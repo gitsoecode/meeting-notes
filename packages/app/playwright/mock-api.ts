@@ -987,14 +987,20 @@ export async function installMockApi(page: Page) {
           lastInitProjectRequest = clone(req);
           // Mirror the request into the mock's stored config so a
           // subsequent config.get() returns what the wizard wrote.
-          // Otherwise reopening the wizard a second time would still see
-          // the seed defaults.
+          // Mock must mirror the real IPC handler's merge semantics —
+          // see ipc.ts config:init handler — otherwise tests catch mock
+          // bugs instead of production regressions.
           config.data_path = req.data_path;
           config.obsidian_integration = clone(req.obsidian_integration);
           config.asr_provider = req.asr_provider;
           if (req.llm_provider) config.llm_provider = req.llm_provider;
           if (req.ollama_model) config.ollama.model = req.ollama_model;
-          config.recording.mic_device = req.recording.mic_device;
+          // Empty mic_device means "wizard didn't change it" — preserve
+          // existing on rerun, only auto-fill on first run. Mirrors
+          // ipc.ts:config:init.
+          if (req.recording.mic_device) {
+            config.recording.mic_device = req.recording.mic_device;
+          }
           config.recording.system_device = req.recording.system_device;
           config.audio_retention_days = req.audio_retention_days;
           if (req.audio_storage_mode)

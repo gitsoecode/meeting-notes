@@ -292,6 +292,47 @@ appTest.describe("Setup Wizard — reopened from Settings", () => {
     ).toHaveValue("/Users/test/Gistlist");
   });
 
+  appTest("rerun preserves the configured mic_device", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    // Mock default config has mic_device "Built-in Mic". The wizard sends
+    // an empty mic_device on finish (it doesn't expose a mic picker on
+    // rerun), and the IPC must NOT auto-detect-and-overwrite when an
+    // existing config already has a configured mic. Otherwise re-running
+    // setup silently swaps the user's mic to whatever AVFoundation lists
+    // first.
+    await app.navigateTo("Settings");
+    await settings.openTab("Other");
+    await page.getByTestId("settings-rerun-wizard").click();
+    await appExpect(page.getByText("Gistlist setup")).toBeVisible();
+
+    // Click through every step to Finish. Mic field is never touched.
+    await page.getByRole("button", { name: "Get started" }).click(); // step 0
+    await page.getByRole("button", { name: "Next" }).click(); // step 1 (Obsidian)
+    await page.getByRole("button", { name: "Next" }).click(); // step 2 (data dir + retention)
+    await page.getByRole("button", { name: "Next" }).click(); // step 3 (providers)
+    // Step 4 (deps) — mock has all deps OK, finish is enabled.
+    await page.getByRole("button", { name: /finish setup/i }).click();
+
+    // The IPC should preserve the existing mic, not the empty string the
+    // wizard sent and not "Built-in Mic" auto-detected as default.
+    const lastReq = await page.evaluate(() =>
+      (window as any).__MEETING_NOTES_TEST.getLastInitProjectRequest()
+    );
+    appExpect(lastReq).not.toBeNull();
+    // The wizard's request payload itself contains the empty string
+    // (wizard doesn't pre-fill mic state). The fix lives in the IPC,
+    // which substitutes the existing config's mic when the request is
+    // empty AND an existing config is present.
+    appExpect(lastReq.recording.mic_device).toBe("");
+
+    // Verify the saved config still has the original mic.
+    const savedConfig = await page.evaluate(() => (window as any).api.config.get());
+    appExpect(savedConfig.recording.mic_device).toBe("Built-in Mic");
+  });
+
   appTest("Cancel returns to Settings without writing config", async ({
     app,
     settings,

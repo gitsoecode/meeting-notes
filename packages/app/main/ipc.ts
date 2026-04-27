@@ -438,28 +438,36 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("config:init", async (_e, req: InitConfigRequest) => {
-    // Auto-detect the default mic from AVFoundation. System audio is
-    // captured automatically via AudioTee — no device name needed.
-    let micDevice = req.recording.mic_device;
-    if (!micDevice) {
-      try {
-        const recorder = new FfmpegRecorder();
-        const devices = await recorder.listAudioDevices();
-        if (!micDevice) micDevice = devices[0] ?? "";
-      } catch {
-        // ffmpeg missing — leave fields empty; deps step will flag ffmpeg.
-      }
-    }
-    const systemDevice = ""; // System audio handled by AudioTee, not a device
-
-    const llmProvider = req.llm_provider ?? "claude";
-
     // Re-running the wizard from Settings should not blow away customized
     // shortcuts, voice processing, AEC, etc. Merge wizard fields into the
     // existing config when one is present; fall back to defaults on first
     // run. Anything the wizard explicitly collects wins; anything it
     // doesn't touch is preserved.
     const existing = safeLoadConfig();
+
+    // Auto-detect the default mic from AVFoundation only on FIRST RUN. On
+    // a wizard rerun (existing config present) an empty mic_device in the
+    // request means "wizard didn't change it" — preserve whatever the user
+    // had configured. Without this, every rerun would silently overwrite
+    // the user's selected mic with whichever device AVFoundation lists
+    // first, defeating the non-destructive-rerun guarantee.
+    let micDevice = req.recording.mic_device;
+    if (!micDevice) {
+      if (existing?.recording.mic_device) {
+        micDevice = existing.recording.mic_device;
+      } else {
+        try {
+          const recorder = new FfmpegRecorder();
+          const devices = await recorder.listAudioDevices();
+          if (!micDevice) micDevice = devices[0] ?? "";
+        } catch {
+          // ffmpeg missing — leave fields empty; deps step will flag ffmpeg.
+        }
+      }
+    }
+    const systemDevice = ""; // System audio handled by AudioTee, not a device
+
+    const llmProvider = req.llm_provider ?? "claude";
     const config: AppConfig = {
       ...(existing ?? {}),
       data_path: req.data_path.replace(/^~/, os.homedir()),

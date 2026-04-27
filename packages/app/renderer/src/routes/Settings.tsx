@@ -73,7 +73,6 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
   const [pullOpen, setPullOpen] = useState(false);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmState | null>(null);
   const [confirmingAction, setConfirmingAction] = useState(false);
-  const [installingWhisper, setInstallingWhisper] = useState(false);
   const [installingFfmpeg, setInstallingFfmpeg] = useState(false);
 
   const apiKeysRef = useRef<HTMLElement>(null);
@@ -247,27 +246,6 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
     }
   };
 
-  const installWhisper = async () => {
-    setInstallingWhisper(true);
-    try {
-      // The wizard installer pulls a pinned, SHA-256-verified whisper-cli
-      // binary directly — no Homebrew. The DepsInstallTarget union became
-      // "whisper-cli" in Phase 2; the old "whisper-cpp" Homebrew formula
-      // name no longer applies.
-      const result = await api.deps.install("whisper-cli");
-      if (!result.ok) {
-        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
-        setError(
-          `Failed to install whisper-cli${phase}: ${result.error ?? "unknown error"}`
-        );
-      }
-      refreshDeps();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setInstallingWhisper(false);
-    }
-  };
 
   type DepRow = {
     label: string;
@@ -324,15 +302,19 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
           },
           {
             label: "whisper.cpp",
+            // Optional ASR — only used when the user explicitly picks it
+            // as the transcription provider, which the wizard hides for
+            // first beta. Render it as a status-only row (no install
+            // button): whisper.cpp v1.8.4 ships only Windows/Linux/iOS
+            // binaries, not a signed macOS CLI, so the manifest
+            // intentionally has no whisper-cli entry. Surfacing an
+            // Install button would dispatch to a tool we can't fetch.
             value:
               deps.whisper.path
                 ? `${deps.whisper.path}${deps.whisper.source ? ` (${deps.whisper.source})` : ""}`
-                : "not found",
+                : "not installed (optional)",
             version: deps.whisper.version,
             ok: !!deps.whisper.path,
-            install: deps.whisper.path
-              ? undefined
-              : { run: () => void installWhisper(), busy: installingWhisper, label: "Install" },
           },
           {
             label: "Ollama",
