@@ -58,7 +58,7 @@ const notarize = pkg?.build?.mac?.notarize ?? null;
 // env var (set by scripts/package-with-engine-staged.mjs in the spawn
 // env). The preflight defaults to the same profile name the wrapper
 // uses ("gistlist-notary"), which is what the docs walk users through
-// in beta-release-checklist.md.
+// in release/beta-release-checklist.md.
 if (notarize && typeof notarize === "object" && notarize.teamId) {
   const keychainProfile =
     process.env.APPLE_KEYCHAIN_PROFILE ?? "gistlist-notary";
@@ -176,7 +176,7 @@ if (failed) {
   console.error("");
   console.error(
     "[check-notarize-env] One or more preflight checks failed. " +
-      "Read docs/private_plans/beta-release-checklist.md §1 for the " +
+      "Read docs/private_plans/release/beta-release-checklist.md §1 for the " +
       "secure-credential-handling walkthrough."
   );
   process.exit(1);

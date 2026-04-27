@@ -100,7 +100,7 @@ Quick reference. See "How To Work In This Repo" above for the policy around when
 - [`docs/private_plans/smoke-flow.md`](docs/private_plans/smoke-flow.md) — Manual QA checklist. Run before shipping changes to recording, processing, prompts, import, settings, or quit behavior.
 - [`docs/private_plans/chat-architecture.md`](docs/private_plans/chat-architecture.md) — Why the meeting-index is shaped the way it is (writer path, FTS+vec schema, backfill, engine retrieval primitives consumed by MCP). Read before refactoring chunking, embedding, or citation playback. The in-app Chat UI described in earlier versions was removed in 2026-04 — the surface now lives in Claude Desktop via MCP.
 - [`docs/private_plans/privacy-posture-analysis.md`](docs/private_plans/privacy-posture-analysis.md) — Complete outbound-network audit and defensible privacy claims. Read before changing any code that makes a network call or writing privacy-facing copy.
-- [`docs/private_plans/DMG-bundling-and-update-system.md`](docs/private_plans/DMG-bundling-and-update-system.md) — Dependency inventory and packaging/update story. Read before changing `package:mac`, bundled binaries, or `check-bundled-binaries.mjs`.
+- [`docs/private_plans/release/`](docs/private_plans/release/) — Release/notarization/auto-update docs. Read [`release-playbook.md`](docs/private_plans/release/release-playbook.md) before cutting a release; [`DMG-bundling-and-update-system.md`](docs/private_plans/release/DMG-bundling-and-update-system.md) for the dependency inventory and bundling story before changing `package:mac`, bundled binaries, or `check-bundled-binaries.mjs`.
 
 ### Optional background — only if the task is explicitly about this area
 

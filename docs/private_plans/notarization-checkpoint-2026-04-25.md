@@ -1,5 +1,7 @@
 # Notarization checkpoint — 2026-04-25
 
+> **Historical snapshot — superseded.** This document records the *first* notarization attempt and the state mid-flight. The pipeline has since shipped (`v0.1.0-notarized-20260426`, `v0.1.1-notarized-20260426`) and many of the issues described as "in flight" here have been resolved. For the current release process, see [release-playbook.md](./release-playbook.md). This file is preserved for the audit trail of the first submission.
+
 This note records the first Apple Developer ID notarization attempt for
 Gistlist. At the time of this checkpoint, no Gistlist build has ever been
 notarized for this Apple Developer team.
