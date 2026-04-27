@@ -89,18 +89,41 @@ export function bundledBinExists(name: BinName): boolean {
 }
 
 /**
+ * Well-known macOS install prefixes we probe directly when `which` comes
+ * up empty. Even with the startup PATH augmentation in main/index.ts, this
+ * is a belt-and-suspenders fallback for non-default Homebrew prefixes,
+ * unusual launchers, and CLI invocations that bypass the GUI startup path.
+ */
+const DARWIN_FALLBACK_PREFIXES = [
+  "/opt/homebrew/bin",
+  "/usr/local/bin",
+  "/opt/local/bin",
+];
+
+/**
  * `which` wrapper. Promoted out of ipc.ts so installers and the
  * resolver don't have to duplicate the spawn boilerplate. Returns
  * null on any failure (no system `which`, command not found, etc.).
+ *
+ * On macOS, falls back to probing well-known Homebrew/MacPorts prefixes
+ * before giving up — packaged apps can have a stripped PATH that misses
+ * these even when the binary is installed.
  */
 export async function whichCmd(cmd: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync("/usr/bin/env", ["which", cmd]);
     const trimmed = stdout.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    if (trimmed.length > 0) return trimmed;
   } catch {
-    return null;
+    /* fall through to absolute-path probe */
   }
+  if (process.platform === "darwin") {
+    for (const prefix of DARWIN_FALLBACK_PREFIXES) {
+      const candidate = path.join(prefix, cmd);
+      if (isExecutableFile(candidate)) return candidate;
+    }
+  }
+  return null;
 }
 
 /** True when the file exists, is a regular file, and has any executable bit set. */

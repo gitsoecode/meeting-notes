@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Recorder, RecorderOptions, RecordingSession } from "./recorder.js";
 import { startAudioTeeCapture, type AudioTeeSession } from "./audiotee-recorder.js";
+import { getFfmpegPath } from "../../core/ffmpeg-path.js";
 import {
   resolveNativeMicBinary,
   startNativeMic,
@@ -30,7 +31,7 @@ export class FfmpegRecorder implements Recorder {
     try {
       // ffmpeg writes device list to stderr, exits with non-zero
       const result = await execFileAsync(
-        "ffmpeg",
+        getFfmpegPath(),
         ["-f", "avfoundation", "-list_devices", "true", "-i", ""],
         { encoding: "utf-8" }
       ).catch((e) => ({ stderr: e.stderr as string }));
@@ -374,7 +375,7 @@ function spawnFfmpegRecord(
     outputPath,
   ];
 
-  const child = spawn("ffmpeg", args, {
+  const child = spawn(getFfmpegPath(), args, {
     stdio: ["ignore", "ignore", "pipe"],
   });
 

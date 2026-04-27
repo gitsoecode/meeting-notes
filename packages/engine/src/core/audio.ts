@@ -3,6 +3,7 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { getFfmpegPath } from "./ffmpeg-path.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -148,7 +149,7 @@ export async function checkAudioSilence(
   thresholdDb = -70
 ): Promise<SilenceCheckResult> {
   try {
-    const { stderr } = await execFileAsync("ffmpeg", [
+    const { stderr } = await execFileAsync(getFfmpegPath(), [
       "-i", audioPath,
       "-af", "volumedetect",
       "-f", "null",
@@ -240,7 +241,7 @@ export async function normalizeAudio(
       : [];
 
   try {
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(getFfmpegPath(), [
       ...commonArgs,
       ...filterArgs,
       ...formatArgs,
@@ -280,7 +281,7 @@ export async function encodeAudioArchive(
       : ["-c:a", "flac", "-compression_level", "8"];
 
   try {
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(getFfmpegPath(), [
       "-hide_banner",
       "-loglevel",
       "error",
@@ -331,7 +332,7 @@ export async function decodeAudioToWav(
   const ext = path.extname(outputPath);
   const tmpPath = `${outputPath}.tmp-${process.pid}-${Date.now()}${ext}`;
   try {
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(getFfmpegPath(), [
       "-hide_banner",
       "-loglevel",
       "error",
@@ -428,7 +429,7 @@ async function runSpeechCleanupFilter(
   plan: SpeechCleanupPlan
 ): Promise<void> {
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-  await execFileAsync("ffmpeg", [
+  await execFileAsync(getFfmpegPath(), [
     "-hide_banner",
     "-loglevel", "error",
     "-i", inputPath,
@@ -571,7 +572,7 @@ export async function correctStreamDrift(
 
   const tmpPath = audioPath + ".drift.tmp.wav";
   try {
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(getFfmpegPath(), [
       "-hide_banner",
       "-loglevel", "error",
       "-i", audioPath,
@@ -629,7 +630,7 @@ async function readMonoF32(
   windowSec: number
 ): Promise<Float32Array> {
   return new Promise((resolve, reject) => {
-    const child = spawn("ffmpeg", [
+    const child = spawn(getFfmpegPath(), [
       "-hide_banner",
       "-loglevel", "error",
       "-t", String(windowSec),
@@ -869,7 +870,7 @@ export async function cancelSystemFromMic(
   ];
 
   try {
-    await execFileAsync("ffmpeg", args);
+    await execFileAsync(getFfmpegPath(), args);
     logger?.info("AEC: cleaned mic written", { cleanedMicPath, offsetMs });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -963,7 +964,7 @@ export async function mergeTimedAudioFiles(
   const mixInputs = inputs.map((_, i) => `[a${i}]`).join("");
   const filterGraph = `${resampleChain};${mixInputs}amix=inputs=${inputs.length}:duration=longest[out]`;
   try {
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(getFfmpegPath(), [
       ...inputArgs,
       "-filter_complex", filterGraph,
       "-map", "[out]",
@@ -1012,7 +1013,7 @@ export async function concatWavFiles(
     `concat=n=${inputPaths.length}:v=0:a=1[out]`;
 
   try {
-    await execFileAsync("ffmpeg", [
+    await execFileAsync(getFfmpegPath(), [
       ...inputArgs,
       "-filter_complex", filter,
       "-map", "[out]",

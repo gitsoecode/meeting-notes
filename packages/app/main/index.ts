@@ -1,10 +1,11 @@
-import { app, BrowserWindow, globalShortcut, nativeImage } from "electron";
+import { app, BrowserWindow, globalShortcut, nativeImage, shell } from "electron";
 // Must be called before app.whenReady() to have any chance of taking effect.
 // In dev this cosmetically renames the app (menu bar, dock tooltip) but TCC
 // still identifies the bundle as "Electron" because we're running the stock
 // Electron.app from node_modules. In a packaged build the bundle itself is
 // named "Gistlist" so TCC agrees.
 app.setName("Gistlist");
+augmentPathForPackagedDarwin();
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,6 +27,8 @@ import {
   type AppConfig,
 } from "@gistlist/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
+import { resolveBin } from "./bundled.js";
+import { setFfmpegPath } from "@gistlist/engine";
 import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
 import { getCachedAudioDevices } from "./device-cache.js";
@@ -71,6 +74,26 @@ async function ensureMeetingIndexEmbeddingModel(config: AppConfig): Promise<void
 }
 
 let appLoggerRef: ReturnType<typeof createAppLogger> | null = null;
+
+/**
+ * Packaged macOS apps launched from Finder/Dock/DMG inherit a minimal PATH
+ * (typically `/usr/bin:/bin:/usr/sbin:/sbin`) — Homebrew's `/opt/homebrew/bin`
+ * (Apple Silicon) and `/usr/local/bin` (Intel), and MacPorts' `/opt/local/bin`,
+ * are absent. Without this, `whichCmd("ffmpeg")` reports "not found" for users
+ * who installed via brew, even though the binary is right there. Dev builds
+ * launched via `npm run dev` inherit the shell PATH so don't see this.
+ *
+ * Prepend the well-known Homebrew/MacPorts prefixes so any later PATH lookup
+ * (and any subprocess we spawn) can find user-installed tools.
+ */
+function augmentPathForPackagedDarwin(): void {
+  if (process.platform !== "darwin") return;
+  if (!app.isPackaged) return;
+  const extras = ["/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin"];
+  const current = (process.env.PATH ?? "").split(":").filter(Boolean);
+  const merged = [...extras.filter((p) => !current.includes(p)), ...current];
+  process.env.PATH = merged.join(":");
+}
 
 // Paths: when Vite's dev server env var is set, load from it; otherwise load
 // the built index.html. This makes `electron .` work against dist without
@@ -118,6 +141,17 @@ function createMainWindow(): BrowserWindow {
   });
 
   registerWindowContextMenu(win);
+
+  // Route any `target="_blank"` (or window.open) navigations to https/http
+  // URLs out to the user's default browser, and deny the in-app new
+  // window. Keeps Settings doc/legal links from popping up a chromeless
+  // Electron window. Anything else is denied for safety.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://") || url.startsWith("http://")) {
+      void shell.openExternal(url);
+    }
+    return { action: "deny" };
+  });
 
   if (IS_DEV && DEV_URL) {
     void win.loadURL(DEV_URL);
@@ -167,6 +201,18 @@ app.whenReady().then(async () => {
   const dockIcon = loadAppIcon();
   if (process.platform === "darwin" && app.dock && dockIcon) {
     app.dock.setIcon(dockIcon);
+  }
+
+  // Resolve ffmpeg via our resolver (app-installed → bundled → PATH) and
+  // tell the engine the absolute path. Without this the engine spawns the
+  // bare `ffmpeg` command, which can fail in packaged GUI apps that miss
+  // a Homebrew prefix on PATH even though the binary exists at a known
+  // location like ~/Library/Application Support/Gistlist/bin/ffmpeg.
+  try {
+    const ffmpegBin = await resolveBin("ffmpeg");
+    if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
+  } catch {
+    // Non-fatal: engine falls back to bare "ffmpeg" via PATH.
   }
 
   registerIpcHandlers();

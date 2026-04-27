@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { loadConfig, saveConfig, getConfigDir } from "./config.js";
+import { getFfmpegPath } from "./ffmpeg-path.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -88,6 +89,11 @@ async function findPython3(): Promise<string> {
 }
 
 async function ensureFfmpeg(): Promise<string> {
+  // Prefer the host-injected absolute path (Electron sets this after
+  // resolving via its own resolver). Falls through to PATH lookup for
+  // standalone CLI usage.
+  const injected = getFfmpegPath();
+  if (injected !== "ffmpeg" && fs.existsSync(injected)) return injected;
   const found = await which("ffmpeg");
   if (!found) {
     throw new Error(
