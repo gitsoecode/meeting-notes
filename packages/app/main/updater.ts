@@ -151,8 +151,28 @@ export function getStatus(): UpdaterStatus {
 async function ensureAutoUpdater(): Promise<AutoUpdaterShape> {
   if (autoUpdater) return autoUpdater;
   // Dynamic import keeps the disabled build path from loading the dep.
-  const mod = await import("electron-updater");
-  const au = (mod as { autoUpdater: AutoUpdaterShape }).autoUpdater;
+  // electron-updater is CJS and exposes `autoUpdater` via
+  // Object.defineProperty(...{ get: ... }). Node's ESM-from-CJS interop
+  // doesn't reliably surface getter-based named exports at the top
+  // level — `mod.autoUpdater` is `undefined` in some Node versions,
+  // even though the underlying CJS exports object is fine. The CJS
+  // exports object is always available as `mod.default`, so prefer
+  // that and fall back to the top level for newer Node.
+  //
+  // Without this fallback, Settings → Other → Updates → Check Now fails
+  // with "Cannot set properties of undefined (setting 'autoDownload')"
+  // and the entire updater is dead. v0.1.1 + v0.1.2 (cut before this
+  // fix) both have this latent bug.
+  const mod = (await import("electron-updater")) as {
+    autoUpdater?: AutoUpdaterShape;
+    default?: { autoUpdater?: AutoUpdaterShape };
+  };
+  const au = mod.autoUpdater ?? mod.default?.autoUpdater;
+  if (!au) {
+    throw new Error(
+      "[updater] electron-updater loaded but autoUpdater export is missing — check ESM/CJS interop"
+    );
+  }
   au.autoDownload = false;
   au.autoInstallOnAppQuit = false;
 
