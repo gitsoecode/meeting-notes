@@ -28,7 +28,9 @@ import {
 } from "@gistlist/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { resolveBin } from "./bundled.js";
-import { setFfmpegPath, setFfprobePath } from "@gistlist/engine";
+import { resolveAudioTeeBinary } from "./audiotee-binary.js";
+import { resolveMicCaptureBinary } from "./mic-capture-binary.js";
+import { setFfmpegPath, setFfprobePath, testAudioCapture } from "@gistlist/engine";
 import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
 import { getCachedAudioDevices } from "./device-cache.js";
@@ -197,7 +199,70 @@ async function dispatchWindowAction(source: "shortcut" | "tray"): Promise<void> 
   win.focus();
 }
 
+/**
+ * Hidden packaged smoke entrypoint. Invoked by
+ * `packages/app/scripts/smoke-packaged-audio.mjs` to prove the
+ * signed/notarized binary actually captures non-silent mic + system
+ * audio under macOS hardened runtime + TCC enforcement, not just that
+ * static entitlement keys look right. No UI surface — runs the same
+ * code path as the recording:test-audio IPC handler, prints a single
+ * line of JSON to stdout, exits.
+ */
+async function runAudioSmoke(): Promise<void> {
+  // Resolve ffmpeg/ffprobe the same way the normal startup path does
+  // so the packaged smoke uses bundled binaries (not whatever happens
+  // to be on PATH).
+  try {
+    const ffmpegBin = await resolveBin("ffmpeg");
+    if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
+    const ffprobeBin = await resolveBin("ffprobe");
+    if (ffprobeBin) setFfprobePath(ffprobeBin.path);
+  } catch {
+    // Non-fatal — fall back to PATH; smoke driver will catch silent capture.
+  }
+
+  try {
+    let micDevice = "";
+    let systemDevice = "";
+    try {
+      const config = loadConfig();
+      micDevice = config.recording.mic_device ?? "";
+      systemDevice = config.recording.system_device ?? "";
+    } catch {
+      // Smoke driver points GISTLIST_USER_DATA_DIR at a fresh tempdir,
+      // so loadConfig may surface no file — testAudioCapture's
+      // pickPhysicalMic fallback handles empty mic_device.
+    }
+    const report = await testAudioCapture({
+      micDevice,
+      systemDevice,
+      durationMs: 6000,
+      audioTeeBinaryPath: resolveAudioTeeBinary(),
+      micCaptureBinaryPath: resolveMicCaptureBinary(),
+    });
+    process.stdout.write(JSON.stringify(report) + "\n");
+    app.exit(0);
+  } catch (err) {
+    process.stdout.write(
+      JSON.stringify({
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      }) + "\n"
+    );
+    app.exit(1);
+  }
+}
+
 app.whenReady().then(async () => {
+  // Hidden flag: prove the signed binary can actually capture audio
+  // under macOS hardened runtime + TCC. Skips all normal startup —
+  // no window, no IPC handlers, no Ollama, no DB. See runAudioSmoke
+  // and packages/app/scripts/smoke-packaged-audio.mjs.
+  if (process.argv.includes("--smoke-audio")) {
+    await runAudioSmoke();
+    return;
+  }
+
   const dockIcon = loadAppIcon();
   if (process.platform === "darwin" && app.dock && dockIcon) {
     app.dock.setIcon(dockIcon);
