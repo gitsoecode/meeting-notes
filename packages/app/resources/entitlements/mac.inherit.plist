@@ -3,14 +3,38 @@
 <plist version="1.0">
 <dict>
 	<!--
-	  Inherit entitlements for child processes (audiotee, helper apps,
+	  Inherit entitlements for child processes (helper apps,
 	  ffmpeg when spawned via posix_spawn). com.apple.security.inherit
 	  tells macOS to attribute TCC checks to the parent's identity, so
 	  the user's Microphone / System Audio Recording grant on Gistlist
 	  applies to these children. Without it the child is its own TCC
 	  subject and silently gets denied.
+
+	  audiotee is re-signed separately by after-sign.mjs with
+	  resources/audiotee-inherit.entitlements (just `inherit`, no JIT)
+	  because audiotee doesn't run V8.
 	-->
 	<key>com.apple.security.inherit</key>
+	<true/>
+
+	<!--
+	  V8 JIT support for renderer/GPU/Plugin/utility helpers, which
+	  each spin up their own V8 isolate. Without these the renderer
+	  helper SIGTRAPs in cppgc::internal::CagedHeapBase during isolate
+	  init and the window paints blank.
+
+	  Lost in v0.1.4 when this file replaced electron-builder's default
+	  helper template. v0.1.3 had these only because we were silently
+	  using app-builder-lib's templates/entitlements.mac.plist
+	  (com.apple.security.cs.allow-jit + allow-unsigned-executable-memory
+	  + disable-library-validation). Mirroring that set here so the
+	  helpers can run V8 again while keeping our explicit inherit.
+	-->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 </dict>
 </plist>
