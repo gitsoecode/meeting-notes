@@ -140,6 +140,7 @@
       "notarize": {
         "teamId": "UZ8554JSAM"
       },
+      "artifactName": "${productName}-${arch}.${ext}",
       "target": [
         "zip",
         "dmg"

@@ -57,10 +57,29 @@ const appSubmitZip = path.join(
   os.tmpdir(),
   `${productName}-${version}-${arch}-notary-submit.zip`
 );
-const finalZip = path.join(
-  releaseDir,
-  `${productName}-${version}-${arch}-mac.zip`
-);
+
+/**
+ * Find the single .dmg/.zip electron-builder produced for this arch.
+ *
+ * Avoids hardcoding a filename pattern: we used to assume
+ * `${productName}-${version}-${arch}-mac.zip`, but that breaks when
+ * `build.mac.artifactName` is customized (e.g. dropped to versionless
+ * `${productName}-${arch}.${ext}` so /releases/latest/download/<file>
+ * works as a stable URL). Globbing for any single arch-matching file
+ * is robust to both naming styles.
+ */
+function findSingleArtifact(dir, ext, archMarker) {
+  const matches = fs
+    .readdirSync(dir)
+    .filter((name) => name.endsWith(`.${ext}`) && name.includes(archMarker));
+  if (matches.length > 1) {
+    throw new Error(
+      `[notarize-release] expected at most one .${ext} for arch ${archMarker} in ${dir}, found: ${matches.join(", ")}. ` +
+        `Clean stale artifacts before building.`
+    );
+  }
+  return matches[0] ? path.join(dir, matches[0]) : null;
+}
 
 function log(message) {
   console.log(`[notarize-release] ${message}`);
@@ -91,26 +110,8 @@ if (!fs.existsSync(appPath)) {
   throw new Error(`[notarize-release] missing app bundle: ${appPath}`);
 }
 
-// Match by version too — old releases (e.g. Gistlist-0.1.0-arm64.dmg) often
-// linger in release/ alongside the current build. Filtering only by arch
-// would falsely error on those.
-const dmgCandidates = fs
-  .readdirSync(releaseDir)
-  .filter(
-    (name) =>
-      name.endsWith(".dmg") &&
-      name.includes(arch) &&
-      name.includes(version)
-  )
-  .map((name) => path.join(releaseDir, name));
-
-if (dmgCandidates.length > 1) {
-  throw new Error(
-    `[notarize-release] expected at most one .dmg for ${productName}-${version}-${arch}, found: ${dmgCandidates.join(", ")}`
-  );
-}
-
-const dmgPath = dmgCandidates[0] ?? null;
+const dmgPath = findSingleArtifact(releaseDir, "dmg", arch);
+const builtZipPath = findSingleArtifact(releaseDir, "zip", arch);
 
 let submitTarget;
 let submitTargetLabel;
@@ -206,11 +207,18 @@ if (dmgPath) {
   run("xcrun", ["stapler", "validate", dmgPath]);
 }
 
-log(`rebuilding stapled release zip at ${finalZip}`);
-run(
-  "ditto",
-  ["-c", "-k", "--keepParent", "--sequesterRsrc", appName, finalZip],
-  { cwd: macOutDir }
-);
+// Overwrite the .zip electron-builder produced (which contains the
+// pre-staple .app) with one ditto'd from the now-stapled .app. Path is
+// whatever electron-builder's artifactName template emitted.
+if (builtZipPath) {
+  log(`rebuilding stapled release zip at ${builtZipPath}`);
+  run(
+    "ditto",
+    ["-c", "-k", "--keepParent", "--sequesterRsrc", appName, builtZipPath],
+    { cwd: macOutDir }
+  );
+} else {
+  log("no .zip in release/ — skipping zip rebuild");
+}
 
 log("notarization, stapling, and release zip rebuild complete");
