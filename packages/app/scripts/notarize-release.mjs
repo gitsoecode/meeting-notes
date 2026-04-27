@@ -91,14 +91,22 @@ if (!fs.existsSync(appPath)) {
   throw new Error(`[notarize-release] missing app bundle: ${appPath}`);
 }
 
+// Match by version too — old releases (e.g. Gistlist-0.1.0-arm64.dmg) often
+// linger in release/ alongside the current build. Filtering only by arch
+// would falsely error on those.
 const dmgCandidates = fs
   .readdirSync(releaseDir)
-  .filter((name) => name.endsWith(".dmg") && name.includes(arch))
+  .filter(
+    (name) =>
+      name.endsWith(".dmg") &&
+      name.includes(arch) &&
+      name.includes(version)
+  )
   .map((name) => path.join(releaseDir, name));
 
 if (dmgCandidates.length > 1) {
   throw new Error(
-    `[notarize-release] expected at most one .dmg for arch ${arch}, found: ${dmgCandidates.join(", ")}`
+    `[notarize-release] expected at most one .dmg for ${productName}-${version}-${arch}, found: ${dmgCandidates.join(", ")}`
   );
 }
 
