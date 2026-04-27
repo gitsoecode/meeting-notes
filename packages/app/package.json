@@ -29,6 +29,7 @@
     "test:e2e:fast": "playwright test --timeout=8000 --max-failures=5 --workers=4 --reporter=line --project=desktop",
     "test:e2e:focus": "playwright test --timeout=8000 --workers=4 --reporter=line --project=desktop",
     "capture:marketing": "npm run build:renderer && node scripts/build-og-image.mjs && playwright test --config=playwright.marketing.config.ts",
+    "capture:docs": "npm run build:renderer && playwright test --config=playwright.docs.config.ts",
     "dev": "npm run patch:audiotee && npm run build:mic-capture && npm run build:assets && concurrently -k -r \"npm run dev:main\" \"npm run dev:preload\" \"npm run dev:renderer\" \"npm run start:electron\"",
     "dev:main": "node scripts/write-build-flags.mjs && tsc -p tsconfig.main.json --watch --preserveWatchOutput",
     "dev:preload": "tsc -p tsconfig.preload.json --watch --preserveWatchOutput",
@@ -101,7 +102,9 @@
       "package.json"
     ],
     "asarUnpack": [
-      "node_modules/@gistlist/engine/dist/defaults/audio/**/*"
+      "node_modules/@gistlist/engine/dist/defaults/audio/**/*",
+      "**/node_modules/sqlite-vec/**",
+      "**/node_modules/sqlite-vec-*/**"
     ],
     "extraResources": [
       {
