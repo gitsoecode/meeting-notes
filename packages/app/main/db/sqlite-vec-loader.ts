@@ -48,16 +48,36 @@ export async function loadSqliteVec(db: Database.Database): Promise<void> {
   try {
     // Dynamic import so tests that don't need vec (or platforms where the
     // native binary is missing) don't hard-fail at module load.
-    const sqliteVec = await import("sqlite-vec");
-    const getLoadablePath = (sqliteVec as { getLoadablePath?: () => string }).getLoadablePath;
+    //
+    // sqlite-vec is CJS (`module.exports = { getLoadablePath, load }`).
+    // Node's ESM-from-CJS static analysis sometimes surfaces those keys as
+    // top-level named exports and sometimes doesn't, depending on Node
+    // version. The CJS exports object IS always available via `.default`,
+    // so prefer that and fall back to the top level. Without this, the
+    // packaged build silently fell through to `sqliteVec.load(db)`, which
+    // bypasses our asar→app.asar.unpacked path rewrite and fails with
+    // dlopen ENOTDIR — sqlite-vec ended up FTS-only in every release.
+    const mod = (await import("sqlite-vec")) as {
+      getLoadablePath?: () => string;
+      load?: (d: Database.Database) => void;
+      default?: {
+        getLoadablePath?: () => string;
+        load?: (d: Database.Database) => void;
+      };
+    };
+    const getLoadablePath =
+      mod.getLoadablePath ?? mod.default?.getLoadablePath;
+    const loadFn = mod.load ?? mod.default?.load;
     if (typeof getLoadablePath === "function") {
       // Resolve via sqlite-vec's helper, then route through asar.unpacked
       // so dlopen sees a real on-disk file (see comment above).
       const dylibPath = unpackAsarPath(getLoadablePath());
       db.loadExtension(dylibPath);
-    } else if (typeof (sqliteVec as { load?: unknown }).load === "function") {
+    } else if (typeof loadFn === "function") {
       // Fallback for older sqlite-vec versions that only expose load(db).
-      (sqliteVec as { load: (d: Database.Database) => void }).load(db);
+      // Note: this path won't survive packaging because `load()` doesn't
+      // route through unpackAsarPath. Reaching it in production is a bug.
+      loadFn(db);
     } else {
       throw new Error("sqlite-vec package exposes neither getLoadablePath() nor load()");
     }
