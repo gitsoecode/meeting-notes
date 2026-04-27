@@ -10,10 +10,22 @@
  * (entitlement keys present, signature valid, manifest matches)
  * prove the build *should* work; this proves it *does*.
  *
+ * Why we launch via `open -n -W` instead of spawning the binary
+ * directly: macOS TCC walks up the process tree to find the
+ * "responsible" app for permission attribution. If we spawn the
+ * Gistlist binary as a child of node (driver) — which is itself a
+ * child of whatever shell or agent harness invoked the driver —
+ * macOS attributes TCC checks to that ancestor and Gistlist's own
+ * Microphone / System Audio Recording grants do not apply. The
+ * symptom is captured-but-flat-silence audio, identical to the
+ * v0.1.1–v0.1.3 fingerprint we are trying to detect. `open` routes
+ * through LaunchServices/launchd and establishes the launched bundle
+ * as its own responsible TCC session, so user grants apply normally.
+ *
  * Plays /System/Library/Sounds/Tink.aiff in a loop during the
  * capture window so AudioTee has signal. Uses GISTLIST_USER_DATA_DIR
- * pointed at a tempdir so the smoke does not touch the user's real
- * library.
+ * pointed at a tempdir (passed via `open --env`) so the smoke does
+ * not touch the user's real library.
  *
  * Exits 0 on pass, 1 on any failure with a clear message. Runs at
  * the end of `package:mac:sign`. Can be re-run standalone after
@@ -21,7 +33,7 @@
  *
  *   node packages/app/scripts/smoke-packaged-audio.mjs
  */
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -44,9 +56,10 @@ const appDir = path.join(releaseDir, `mac-${arch}`, `${productName}.app`);
 const exePath = path.join(appDir, "Contents", "MacOS", productName);
 const TINK_AIFF = "/System/Library/Sounds/Tink.aiff";
 
-// 6s engine capture window; allow generous wall-clock for spawn /
-// CoreAudio init / TCC dialog rendering before forcing kill.
-const SMOKE_TIMEOUT_MS = 30_000;
+// Wall-clock cap on `open -W`. The entrypoint itself watchdogs at
+// 25s, so the driver only needs a small amount of headroom for the
+// `open` -> launchd -> Electron-init handshake.
+const OPEN_TIMEOUT_MS = 60_000;
 
 // dB floor that real ambient mic should clear comfortably; flat
 // silence (the v0.1.1–v0.1.3 fingerprint) sits at -91 dB.
@@ -71,11 +84,13 @@ if (!fs.existsSync(TINK_AIFF)) {
 }
 
 const tmpUserData = fs.mkdtempSync(path.join(os.tmpdir(), "gistlist-smoke-"));
+const reportPath = path.join(tmpUserData, "smoke-result.json");
+const stdoutLogPath = path.join(tmpUserData, "smoke-stdout.log");
+const stderrLogPath = path.join(tmpUserData, "smoke-stderr.log");
 log(`temp data dir: ${tmpUserData}`);
 
 let afplayChild = null;
-let smokeChild = null;
-let smokeKilled = false;
+let openChild = null;
 
 function cleanup() {
   if (afplayChild && !afplayChild.killed) {
@@ -85,13 +100,20 @@ function cleanup() {
       // already dead
     }
   }
-  if (smokeChild && !smokeChild.killed) {
+  if (openChild && !openChild.killed) {
     try {
-      smokeKilled = true;
-      process.kill(smokeChild.pid, "SIGKILL");
+      process.kill(openChild.pid, "SIGKILL");
     } catch {
       // already dead
     }
+  }
+  // Best-effort kill of any straggling Gistlist instance launched by
+  // open. The launchd-parented PID is not visible to us, but pkill
+  // by exact path will reach it.
+  try {
+    spawnSync("pkill", ["-f", exePath], { stdio: "ignore" });
+  } catch {
+    // pkill not present — non-fatal.
   }
   try {
     fs.rmSync(tmpUserData, { recursive: true, force: true });
@@ -109,92 +131,104 @@ process.on("SIGINT", () => {
 // Loop afplay on Tink.aiff so AudioTee always has signal during the
 // capture window. The clip is short (~0.3s); restart it whenever it
 // exits. Stops as soon as we kill it during cleanup.
+let afplayLooping = true;
 function startTinkLoop() {
   function spawnOne() {
+    if (!afplayLooping) return;
     afplayChild = spawn("afplay", [TINK_AIFF], { stdio: "ignore" });
     afplayChild.on("exit", () => {
-      if (smokeChild && !smokeKilled) {
-        spawnOne();
-      }
+      if (afplayLooping) spawnOne();
     });
   }
   spawnOne();
 }
 
-log(`launching ${exePath} --smoke-audio`);
+log(`launching ${appDir} via \`open -n -W -a\` with --smoke-audio`);
 startTinkLoop();
 
-smokeChild = spawn(exePath, ["--smoke-audio"], {
-  env: {
-    ...process.env,
-    GISTLIST_USER_DATA_DIR: tmpUserData,
-  },
-  stdio: ["ignore", "pipe", "pipe"],
-});
+openChild = spawn(
+  "open",
+  [
+    "-n", // new instance
+    "-W", // wait for app to exit
+    "-g", // do not bring to foreground / steal focus
+    "-a",
+    appDir,
+    "--env",
+    `GISTLIST_USER_DATA_DIR=${tmpUserData}`,
+    "--stdout",
+    stdoutLogPath,
+    "--stderr",
+    stderrLogPath,
+    "--args",
+    "--smoke-audio",
+    `--smoke-output=${reportPath}`,
+  ],
+  { stdio: ["ignore", "pipe", "pipe"] }
+);
 
-let stdoutBuf = "";
-let stderrBuf = "";
-smokeChild.stdout.on("data", (d) => {
-  stdoutBuf += d.toString("utf8");
+let openStdout = "";
+let openStderr = "";
+openChild.stdout.on("data", (d) => {
+  openStdout += d.toString("utf8");
 });
-smokeChild.stderr.on("data", (d) => {
-  stderrBuf += d.toString("utf8");
+openChild.stderr.on("data", (d) => {
+  openStderr += d.toString("utf8");
 });
 
 const timer = setTimeout(() => {
-  log(`timeout after ${SMOKE_TIMEOUT_MS}ms — killing smoke child`);
-  smokeKilled = true;
+  log(`open -W timed out after ${OPEN_TIMEOUT_MS}ms`);
   try {
-    process.kill(smokeChild.pid, "SIGKILL");
+    process.kill(openChild.pid, "SIGKILL");
   } catch {}
-}, SMOKE_TIMEOUT_MS);
+}, OPEN_TIMEOUT_MS);
 
-smokeChild.on("exit", (code) => {
+openChild.on("exit", (openCode) => {
   clearTimeout(timer);
 
   // Stop afplay before any further work — no need to keep playing.
+  afplayLooping = false;
   if (afplayChild && !afplayChild.killed) {
     try {
       process.kill(afplayChild.pid, "SIGKILL");
     } catch {}
   }
 
-  if (smokeKilled) {
+  if (openCode !== 0 && openCode !== null) {
     fail(
-      `smoke child timed out / was killed before printing JSON.\n` +
-        `stdout so far:\n${stdoutBuf}\nstderr so far:\n${stderrBuf}\n` +
+      `open exited with code ${openCode}.\n` +
+        `open stdout: ${openStdout}\nopen stderr: ${openStderr}`
+    );
+  }
+
+  if (!fs.existsSync(reportPath)) {
+    const stdoutDump = fs.existsSync(stdoutLogPath)
+      ? fs.readFileSync(stdoutLogPath, "utf8")
+      : "(no stdout file)";
+    const stderrDump = fs.existsSync(stderrLogPath)
+      ? fs.readFileSync(stderrLogPath, "utf8")
+      : "(no stderr file)";
+    fail(
+      `smoke entrypoint did not write a result file at ${reportPath}.\n` +
         `Most likely cause: macOS is blocking on a TCC permission prompt for ` +
-        `Microphone or System Audio Recording. Click Allow on any prompt, ` +
-        `then in System Settings → Privacy & Security verify Gistlist is ` +
-        `enabled under both Microphone and System Audio Recording. ` +
-        `Then re-run \`node packages/app/scripts/smoke-packaged-audio.mjs\`.`
+        `Microphone or System Audio Recording, and the entrypoint's 25s ` +
+        `watchdog tripped before it could capture audio.\n\n` +
+        `Click Allow on any prompt, then in System Settings → Privacy & ` +
+        `Security verify Gistlist is enabled under both Microphone and ` +
+        `System Audio Recording. Then re-run this script.\n\n` +
+        `app stdout (from --stdout):\n${stdoutDump}\n` +
+        `app stderr (from --stderr):\n${stderrDump}`
     );
   }
 
-  if (code !== 0) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+  } catch (err) {
     fail(
-      `smoke child exited with code ${code}.\n` +
-        `stdout:\n${stdoutBuf}\nstderr:\n${stderrBuf}`
+      `failed to parse smoke result at ${reportPath}: ` +
+        (err instanceof Error ? err.message : String(err))
     );
-  }
-
-  // Pull the last non-empty JSON line — the main process may emit
-  // unrelated logs before the smoke result.
-  const lines = stdoutBuf.split("\n").map((l) => l.trim()).filter(Boolean);
-  let parsed = null;
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
-    try {
-      const candidate = JSON.parse(lines[i]);
-      if (candidate && typeof candidate === "object") {
-        parsed = candidate;
-        break;
-      }
-    } catch {
-      // not JSON; keep walking back
-    }
-  }
-  if (!parsed) {
-    fail(`smoke child did not print parseable JSON.\nstdout:\n${stdoutBuf}`);
   }
 
   if (parsed.error) {

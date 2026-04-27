@@ -205,13 +205,51 @@ async function dispatchWindowAction(source: "shortcut" | "tray"): Promise<void> 
  * signed/notarized binary actually captures non-silent mic + system
  * audio under macOS hardened runtime + TCC enforcement, not just that
  * static entitlement keys look right. No UI surface — runs the same
- * code path as the recording:test-audio IPC handler, prints a single
- * line of JSON to stdout, exits.
+ * code path as the recording:test-audio IPC handler, writes a single
+ * line of JSON to the path passed via `--smoke-output=<path>` (and
+ * stdout for logging), exits.
+ *
+ * The driver launches us via `open -n -W -a` so LaunchServices
+ * establishes the freshly-built bundle as its own responsible TCC
+ * session. Without that, macOS attributes TCC checks to whatever
+ * spawned the driver (e.g. a terminal, an agent harness), and any
+ * grant the user gave Gistlist in System Settings does not apply —
+ * the smoke comes back with flat -91 dB silence even on a working
+ * build.
+ *
+ * Self-imposes a 25s hard timeout — `open -W` waits on launchd, not
+ * on a child PID, so the driver killing `open` would not stop a
+ * stuck app process.
  */
 async function runAudioSmoke(): Promise<void> {
-  // Resolve ffmpeg/ffprobe the same way the normal startup path does
-  // so the packaged smoke uses bundled binaries (not whatever happens
-  // to be on PATH).
+  const outputArg = process.argv.find((a) => a.startsWith("--smoke-output="));
+  const outputPath = outputArg ? outputArg.slice("--smoke-output=".length) : "";
+
+  function emit(payload: unknown, code: number): void {
+    const line = JSON.stringify(payload) + "\n";
+    process.stdout.write(line);
+    if (outputPath) {
+      try {
+        fs.writeFileSync(outputPath, line);
+      } catch {
+        // Driver will surface the missing output file as a failure.
+      }
+    }
+    app.exit(code);
+  }
+
+  // Hard-cap the smoke run. testAudioCapture sleeps 6s for capture
+  // plus a few seconds of CoreAudio init; 25s is generous headroom.
+  const watchdog = setTimeout(() => {
+    emit(
+      {
+        error: "smoke watchdog tripped at 25s — capture likely stuck on TCC",
+      },
+      3
+    );
+  }, 25_000);
+  watchdog.unref?.();
+
   try {
     const ffmpegBin = await resolveBin("ffmpeg");
     if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
@@ -240,16 +278,17 @@ async function runAudioSmoke(): Promise<void> {
       audioTeeBinaryPath: resolveAudioTeeBinary(),
       micCaptureBinaryPath: resolveMicCaptureBinary(),
     });
-    process.stdout.write(JSON.stringify(report) + "\n");
-    app.exit(0);
+    clearTimeout(watchdog);
+    emit(report, 0);
   } catch (err) {
-    process.stdout.write(
-      JSON.stringify({
+    clearTimeout(watchdog);
+    emit(
+      {
         error: err instanceof Error ? err.message : String(err),
         stack: err instanceof Error ? err.stack : undefined,
-      }) + "\n"
+      },
+      1
     );
-    app.exit(1);
   }
 }
 
