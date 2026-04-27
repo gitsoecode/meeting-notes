@@ -109,6 +109,40 @@ Quick reference. See "How To Work In This Repo" above for the policy around when
 - [`docs/private_plans/loom-style-screen-recording-investigation.md`](docs/private_plans/loom-style-screen-recording-investigation.md) — Exploratory investigation. **Nothing shipped.**
 - [`docs/private_plans/parallel-agent-pool.md`](docs/private_plans/parallel-agent-pool.md) — Infrastructure setup for a local Claude Code agent pool. Meta, not app code.
 
+## Cross-Repo Docs Sync
+
+End-user docs live in a sibling repo at `/Users/jessevaughan/Projects/gistlist/`.
+The site's `/docs` section (Astro Starlight) is the single source of truth for
+end-user material. [`README.md`](README.md) is contributor-only — build, test,
+repo layout.
+
+If your change touches any of the user-visible surfaces below, update the
+corresponding docs page in the gistlist repo in the same task (or a paired PR
+landing in the same release window):
+
+| Change in this repo                                  | Docs page to update                                             |
+| ---                                                  | ---                                                             |
+| Setup Wizard steps or copy                           | `gistlist/web/src/content/docs/setup-wizard.md`                 |
+| Settings tab structure, labels, or new tabs          | `gistlist/web/src/content/docs/settings.md`                     |
+| Recording UI (Record / Pause / Stop, meters)         | `gistlist/web/src/content/docs/recording/record.md`             |
+| Import flow on the Meetings page                     | `gistlist/web/src/content/docs/recording/import.md`             |
+| Meeting Details tabs (Summary / Analysis / etc.)     | `gistlist/web/src/content/docs/meetings/files-on-disk.md`       |
+| On-disk layout under `<data_path>/Runs/...`          | `gistlist/web/src/content/docs/meetings/files-on-disk.md`       |
+| Audio storage modes or retention behavior            | `gistlist/web/src/content/docs/meetings/audio-storage.md`       |
+| Prompt frontmatter fields, defaults, or shipped set  | `gistlist/web/src/content/docs/prompts.md`                      |
+| LLM/ASR provider list, supported models, daemon flow | `gistlist/web/src/content/docs/providers.md`                    |
+| MCP server tools, citation URL shape, install flow   | `gistlist/web/src/content/docs/integrations/claude-desktop.md`  |
+| Obsidian vault layout or Dataview queries            | `gistlist/web/src/content/docs/integrations/obsidian.md`        |
+| Privacy posture (network calls, telemetry, keys)     | `gistlist/web/src/pages/privacy.astro` (lives on the marketing surface, not in `/docs`) |
+| Anything that changes a documented screenshot        | re-run `npm run capture:docs --workspace @gistlist/app`         |
+
+If the docs page doesn't exist yet when you make a user-visible change,
+create it. Do not silently let the docs fall behind.
+
+The website repo also has its own `AGENTS.md` at `/Users/jessevaughan/Projects/gistlist/AGENTS.md`
+governing site-side conventions. Read it before crossing over to make
+docs edits.
+
 ## Plan Handling
 
 - Stable repo instructions live in this `AGENTS.md`.
