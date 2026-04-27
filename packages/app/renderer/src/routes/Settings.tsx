@@ -13,7 +13,6 @@ import type {
 } from "../../../shared/ipc";
 import { classifyModelClient, findModelEntry } from "../constants";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
-import { ShortcutRecorder } from "../components/ShortcutRecorder";
 import { ModelDropdown } from "../components/ModelDropdown";
 import { LocalModelInstaller } from "../components/LocalModelInstaller";
 import { AudioLevelMeters } from "../components/AudioLevelMeters";
@@ -880,26 +879,6 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
 
         {/* ── General tab ── */}
         <TabsContent value="system" className="max-w-2xl space-y-5 outline-none">
-          <section className="space-y-4">
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Keyboard Shortcuts</h3>
-              <p className="text-sm leading-6 text-[var(--text-secondary)]">Global shortcuts that work even when the app is in the background.</p>
-            </div>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-[var(--text-secondary)]">Toggle recording</label>
-                <ShortcutRecorder
-                  value={config.shortcuts.toggle_recording}
-                  onChange={(next) =>
-                    void save({ ...config, shortcuts: { ...config.shortcuts, toggle_recording: next } })
-                  }
-                />
-              </div>
-            </div>
-          </section>
-
-          <Separator />
-
           <section className="space-y-4">
             <div className="space-y-1">
               <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">System Health</h3>
