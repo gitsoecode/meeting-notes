@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Inherit entitlements for child processes (audiotee, helper apps,
+	  ffmpeg when spawned via posix_spawn). com.apple.security.inherit
+	  tells macOS to attribute TCC checks to the parent's identity, so
+	  the user's Microphone / System Audio Recording grant on Gistlist
+	  applies to these children. Without it the child is its own TCC
+	  subject and silently gets denied.
+	-->
+	<key>com.apple.security.inherit</key>
+	<true/>
+</dict>
+</plist>

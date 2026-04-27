@@ -140,6 +140,8 @@
       "icon": "assets/app-icon.icns",
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
+      "entitlements": "resources/entitlements/mac.plist",
+      "entitlementsInherit": "resources/entitlements/mac.inherit.plist",
       "notarize": {
         "teamId": "UZ8554JSAM"
       },

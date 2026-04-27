@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Microphone capture. REQUIRED on hardenedRuntime apps; without it
+	  macOS feeds all-zero buffers to ffmpeg/AVFoundation even when the
+	  user has granted Microphone access in System Settings. v0.1.1
+	  through v0.1.3 silently shipped without this and Gistlist's mic
+	  meter showed -91 dB on every install. Discovered via tccd log:
+	    "Prompting policy for hardened runtime; service:
+	     kTCCServiceMicrophone requires entitlement
+	     com.apple.security.device.audio-input but it is missing"
+	-->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+
+	<!-- V8 needs JIT. Required for any Electron/Node app under hardenedRuntime. -->
+	<key>com.apple.security.cs.allow-jit</key>
+	<true/>
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
+
+	<!--
+	  We spawn unsigned children: ffmpeg from /opt/homebrew/bin or the
+	  app-installed copy, and Parakeet's Python subprocess. Hardened
+	  runtime would otherwise refuse to load unsigned code.
+	-->
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+
+	<!-- AudioTee inherits the parent's TCC identity for system audio. -->
+	<key>com.apple.security.cs.disable-executable-page-protection</key>
+	<true/>
+</dict>
+</plist>
