@@ -59,23 +59,30 @@ const appSubmitZip = path.join(
 );
 
 /**
- * Find the single .dmg/.zip electron-builder produced for this arch.
+ * Find the .dmg/.zip electron-builder produced for the current build.
  *
- * Avoids hardcoding a filename pattern: we used to assume
- * `${productName}-${version}-${arch}-mac.zip`, but that breaks when
- * `build.mac.artifactName` is customized (e.g. dropped to versionless
- * `${productName}-${arch}.${ext}` so /releases/latest/download/<file>
- * works as a stable URL). Globbing for any single arch-matching file
- * is robust to both naming styles.
+ * Strategy:
+ *   1. If a file matching the *exact* `expectedName` exists in `dir`,
+ *      return it. This is the happy path for versionless artifact
+ *      naming (`Gistlist-arm64.dmg`) and survives stale artifacts from
+ *      prior version bumps still sitting in `release/`.
+ *   2. Otherwise fall back to a single arch-matching file. Errors out
+ *      if more than one matches — the prior bug was that this fallback
+ *      ran unconditionally and aborted whenever a previous version's
+ *      artifact was still present.
  */
-function findSingleArtifact(dir, ext, archMarker) {
+function findSingleArtifact(dir, ext, archMarker, expectedName) {
+  const exactPath = path.join(dir, expectedName);
+  if (fs.existsSync(exactPath)) return exactPath;
+
   const matches = fs
     .readdirSync(dir)
     .filter((name) => name.endsWith(`.${ext}`) && name.includes(archMarker));
   if (matches.length > 1) {
     throw new Error(
-      `[notarize-release] expected at most one .${ext} for arch ${archMarker} in ${dir}, found: ${matches.join(", ")}. ` +
-        `Clean stale artifacts before building.`
+      `[notarize-release] expected ${expectedName} in ${dir}, didn't find it, ` +
+        `and saw multiple .${ext} candidates for arch ${archMarker}: ${matches.join(", ")}. ` +
+        `Run scripts/clean-release-arch.mjs to remove stale artifacts before retrying.`
     );
   }
   return matches[0] ? path.join(dir, matches[0]) : null;
@@ -110,8 +117,13 @@ if (!fs.existsSync(appPath)) {
   throw new Error(`[notarize-release] missing app bundle: ${appPath}`);
 }
 
-const dmgPath = findSingleArtifact(releaseDir, "dmg", arch);
-const builtZipPath = findSingleArtifact(releaseDir, "zip", arch);
+// Versionless artifact names from build.mac.artifactName. If the build
+// config ever flips back to versioned names, the exact-match fast path
+// will simply miss and the glob fallback takes over.
+const expectedDmgName = `${productName}-${arch}.dmg`;
+const expectedZipName = `${productName}-${arch}-mac.zip`;
+const dmgPath = findSingleArtifact(releaseDir, "dmg", arch, expectedDmgName);
+const builtZipPath = findSingleArtifact(releaseDir, "zip", arch, expectedZipName);
 
 let submitTarget;
 let submitTargetLabel;
