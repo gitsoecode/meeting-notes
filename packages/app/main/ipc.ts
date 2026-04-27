@@ -1915,7 +1915,12 @@ export function registerIpcHandlers(): void {
       version: null,
     };
 
-    // whisper-cli — resolved app-installed → bundled → system PATH.
+    // whisper-cli — system PATH only in practice. The resolver still
+    // walks app-installed → bundled → PATH for symmetry with other
+    // tools, but the manifest has no whisper-cli entry (whisper.cpp
+    // v1.8.4 ships no signed macOS CLI), so the first two steps will
+    // never resolve. Renderer treats a missing whisper as non-blocking
+    // unless the user picked whisper-local as their ASR provider.
     const whisperBin = await resolveBin("whisper-cli");
     const whisper: ResolvedTool = {
       path: whisperBin?.path ?? null,

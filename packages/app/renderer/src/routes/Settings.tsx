@@ -314,7 +314,14 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                 ? `${deps.whisper.path}${deps.whisper.source ? ` (${deps.whisper.source})` : ""}`
                 : "not installed (optional)",
             version: deps.whisper.version,
-            ok: !!deps.whisper.path,
+            // Only flag as "not ok" (red) when the user actually picked
+            // whisper-local as their ASR provider. Parakeet and OpenAI
+            // setups don't depend on whisper.cpp, so a missing binary is
+            // neutral and shouldn't render as a health failure.
+            ok:
+              config.asr_provider === "whisper-local"
+                ? !!deps.whisper.path
+                : true,
           },
           {
             label: "Ollama",

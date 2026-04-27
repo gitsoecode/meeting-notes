@@ -28,7 +28,7 @@ export function resolveUserDataDir(
   return fallback;
 }
 
-/** Subdir that holds wizard-installed binaries (ffmpeg, ollama, whisper-cli). */
+/** Subdir that holds wizard-installed binaries (ffmpeg + paired ffprobe, ollama). */
 export function binDirOf(userDataDir: string): string {
   return path.join(userDataDir, "bin");
 }

@@ -429,7 +429,13 @@ export interface DepsCheckResult {
   python: ResolvedTool;
   /** Parakeet venv binary — app-managed, lives under ~/.gistlist/. */
   parakeet: ResolvedTool;
-  /** whisper-cli — wizard-installable; system PATH fallback for devs. */
+  /**
+   * whisper-cli — system PATH only. whisper.cpp v1.8.4 ships no signed
+   * macOS CLI, so the wizard installer manifest intentionally has no
+   * whisper-cli entry. The row is rendered as optional/neutral in
+   * Settings unless the user explicitly picks whisper-local as their
+   * ASR provider.
+   */
   whisper: ResolvedTool;
   /**
    * Local-LLM (Ollama) status. The daemon is owned by the main process; we
