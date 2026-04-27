@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures/setup-wizard.fixture";
+import { test as appTest, expect as appExpect } from "../fixtures/base.fixture";
 
 test.describe("Setup Wizard", () => {
   test("full forward path without Obsidian", async ({ wizard, page }) => {
@@ -253,5 +254,69 @@ test.describe("Setup Wizard", () => {
 
     await wizard.nextButton().click();
     await expect(wizard.doneDots()).toHaveCount(2);
+  });
+});
+
+// ── Reopen-from-Settings flow ─────────────────────────────────────────
+//
+// Uses the regular `app` fixture (config.get returns the mocked existing
+// config). Mock defaults are non-trivial — data_path is
+// "/Users/test/Gistlist" and llm_provider is "ollama", both of which
+// differ from the wizard's first-run defaults — so we don't need to
+// reseed the mock to prove prefill works.
+
+appTest.describe("Setup Wizard — reopened from Settings", () => {
+  appTest("prefills every step from existing config and shows Cancel", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    await app.navigateTo("Settings");
+    await settings.openTab("Other");
+    await page.getByTestId("settings-rerun-wizard").click();
+
+    // Wizard mounts; cancel chip visible because onCancel was provided.
+    await appExpect(page.getByText("Gistlist setup")).toBeVisible();
+    await appExpect(page.getByTestId("wizard-cancel")).toBeVisible();
+
+    await page.getByRole("button", { name: "Get started" }).click();
+
+    // Step 1 — Obsidian (mock default: disabled). Switch should be off.
+    await appExpect(page.locator("#wizard-use-obsidian")).not.toBeChecked();
+    await page.getByRole("button", { name: "Next" }).click();
+
+    // Step 2 — data dir prefilled with the mock's "/Users/test/Gistlist"
+    // (NOT the wizard first-run default "~/Documents/Gistlist").
+    await appExpect(
+      page.getByPlaceholder("/Users/you/Documents/Gistlist")
+    ).toHaveValue("/Users/test/Gistlist");
+  });
+
+  appTest("Cancel returns to Settings without writing config", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    await app.navigateTo("Settings");
+    await settings.openTab("Other");
+
+    // Snapshot the call counter so the assertion is robust against any
+    // bootstrap-time call that might already have happened.
+    const before = await page.evaluate(
+      () => (window as any).__MEETING_NOTES_TEST.getInitProjectCallCount()
+    );
+
+    await page.getByTestId("settings-rerun-wizard").click();
+    await appExpect(page.getByText("Gistlist setup")).toBeVisible();
+    await page.getByTestId("wizard-cancel").click();
+
+    // Settings should be visible again.
+    await appExpect(page.getByText("Changes take effect immediately.")).toBeVisible();
+
+    // Counter unchanged — the wizard wrote nothing.
+    const after = await page.evaluate(
+      () => (window as any).__MEETING_NOTES_TEST.getInitProjectCallCount()
+    );
+    appExpect(after).toBe(before);
   });
 });

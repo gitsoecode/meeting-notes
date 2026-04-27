@@ -453,8 +453,14 @@ export function App() {
   }
 
   if (config === null || wizardReopen) {
+    // Reopened from Settings: pre-fill the wizard from the existing config
+    // and let the user cancel back to Settings without writing. First-run
+    // (config === null) gets neither prop — fresh users still must finish.
+    const isReopen = wizardReopen && config !== null;
     return (
       <SetupWizard
+        initialConfig={isReopen ? config : undefined}
+        onCancel={isReopen ? () => setWizardReopen(false) : undefined}
         onComplete={async () => {
           const fresh = await api.config.get();
           setConfig(fresh);

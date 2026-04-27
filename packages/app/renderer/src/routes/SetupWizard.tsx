@@ -32,6 +32,39 @@ import { Switch } from "../components/ui/switch";
 
 interface SetupWizardProps {
   onComplete: () => void;
+  /**
+   * When provided, the wizard pre-fills every step from the existing
+   * config instead of first-run defaults. Used when reopening from
+   * Settings → Other → "Run setup again" so users don't lose their
+   * data path, Obsidian vault, ASR/LLM choices, or retention setting
+   * just by clicking through.
+   */
+  initialConfig?: AppConfigDTO;
+  /**
+   * When provided, a "Cancel" button appears in the wizard chrome.
+   * Calling it should dismiss the wizard without writing config —
+   * the App-level handler clears the reopen flag and returns the user
+   * to Settings. Omitted on first-run so fresh users must complete
+   * setup.
+   */
+  onCancel?: () => void;
+}
+
+const RETENTION_PRESETS = new Set([30, 90, 180, 365]);
+
+/**
+ * Map an `audio_retention_days` value to the wizard's three-way control:
+ *   - null → "never"
+ *   - one of the preset numbers → that number stringified
+ *   - any other number → "custom" (with the integer surfaced separately)
+ */
+function retentionFromConfig(days: number | null): {
+  value: string;
+  custom: string;
+} {
+  if (days === null) return { value: "never", custom: "90" };
+  if (RETENTION_PRESETS.has(days)) return { value: String(days), custom: "90" };
+  return { value: "custom", custom: String(days) };
 }
 
 const TOTAL_STEPS = 5;
@@ -45,28 +78,46 @@ function hasInstalledLocalModel(
   );
 }
 
-export function SetupWizard({ onComplete }: SetupWizardProps) {
+export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizardProps) {
   const [step, setStep] = useState(0);
 
-  const [usesObsidian, setUsesObsidian] = useState<boolean>(false);
-  const [vaultPath, setVaultPath] = useState<string>("");
+  // When `initialConfig` is provided we treat that as the authoritative
+  // source for every step's initial state. Without it (first-run), we
+  // fall back to the original hardcoded defaults.
+  const seedRetention = retentionFromConfig(
+    initialConfig?.audio_retention_days ?? null
+  );
+
+  const [usesObsidian, setUsesObsidian] = useState<boolean>(
+    initialConfig?.obsidian_integration.enabled ?? false
+  );
+  const [vaultPath, setVaultPath] = useState<string>(
+    initialConfig?.obsidian_integration.vault_path ?? ""
+  );
   const [detectedVaults, setDetectedVaults] = useState<DetectedVault[]>([]);
 
-  const [dataPath, setDataPath] = useState<string>("");
-  const [dataPathTouched, setDataPathTouched] = useState(false);
-  const [retentionValue, setRetentionValue] = useState<string>("never");
-  const [customRetentionDays, setCustomRetentionDays] = useState<string>("90");
+  const [dataPath, setDataPath] = useState<string>(initialConfig?.data_path ?? "");
+  // Seed `dataPathTouched=true` when reopened so the auto-suggest effect
+  // (which derives a default path from Obsidian/no-Obsidian) doesn't
+  // overwrite the user's existing data_path.
+  const [dataPathTouched, setDataPathTouched] = useState(Boolean(initialConfig));
+  const [retentionValue, setRetentionValue] = useState<string>(seedRetention.value);
+  const [customRetentionDays, setCustomRetentionDays] = useState<string>(seedRetention.custom);
 
   const [asrProvider, setAsrProvider] =
-    useState<AppConfigDTO["asr_provider"]>("parakeet-mlx");
+    useState<AppConfigDTO["asr_provider"]>(initialConfig?.asr_provider ?? "parakeet-mlx");
   const [claudeKey, setClaudeKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
   const [hasClaude, setHasClaude] = useState<boolean>(false);
   const [hasOpenai, setHasOpenai] = useState<boolean>(false);
   const [keysChecked, setKeysChecked] = useState(false);
 
-  const [llmProvider, setLlmProvider] = useState<AppConfigDTO["llm_provider"]>("claude");
-  const [localLlmModel, setLocalLlmModel] = useState<string>("");
+  const [llmProvider, setLlmProvider] = useState<AppConfigDTO["llm_provider"]>(
+    initialConfig?.llm_provider ?? "claude"
+  );
+  const [localLlmModel, setLocalLlmModel] = useState<string>(
+    initialConfig?.llm_provider === "ollama" ? initialConfig.ollama.model : ""
+  );
   const [hardware, setHardware] = useState<HardwareInfoDTO | null>(null);
   const [installedLocalModels, setInstalledLocalModels] = useState<string[]>([]);
 
@@ -376,9 +427,22 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
       <div className="h-8 shrink-0 pl-20 [-webkit-app-region:drag]" />
       <div className="flex-1 overflow-y-auto px-6 pb-10 pt-5">
         <div className="mx-auto flex w-full max-w-[35rem] flex-col gap-4">
-          <div className="flex items-center gap-2 text-sm font-medium text-[var(--text-secondary)]">
-            <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
-            Gistlist setup
+          <div className="flex items-center justify-between gap-2 text-sm font-medium text-[var(--text-secondary)]">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-[var(--accent)]" />
+              Gistlist setup
+            </div>
+            {onCancel && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onCancel}
+                disabled={busy || installing !== null}
+                data-testid="wizard-cancel"
+              >
+                Cancel
+              </Button>
+            )}
           </div>
 
           <div className="flex gap-1.5">

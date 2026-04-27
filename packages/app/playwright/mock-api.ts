@@ -480,6 +480,13 @@ export async function installMockApi(page: Page) {
       string,
       { ok: false; error?: string; failedPhase?: string }
     >();
+    // Spy state for the Setup Wizard tests. The "Cancel from reopened
+    // wizard" assertion needs to verify config:init was NOT called, and
+    // the "retention can clear back to null" assertion needs to read the
+    // request payload the wizard sent. The real engine.initProject() runs
+    // in main; the mock just records calls.
+    let initProjectCallCount = 0;
+    let lastInitProjectRequest: unknown = null;
     // Updater state — starts in the build-disabled shape so the default
     // mock matches first-beta behavior. Tests flip it via
     // __MEETING_NOTES_TEST.setUpdaterStatus({...}) when they want to
@@ -952,6 +959,14 @@ export async function installMockApi(page: Page) {
       setProgressEmissionDelay(ms) {
         progressEmissionDelayMs = Math.max(0, Number(ms) || 0);
       },
+      /** Test helper: number of times config.initProject() has been called. */
+      getInitProjectCallCount() {
+        return initProjectCallCount;
+      },
+      /** Test helper: the request payload passed to the most recent config.initProject() call (or null). */
+      getLastInitProjectRequest() {
+        return clone(lastInitProjectRequest);
+      },
     };
 
     window.api = {
@@ -963,7 +978,25 @@ export async function installMockApi(page: Page) {
           Object.assign(config, next);
           persistState();
         },
-        async initProject() {},
+        async initProject(req) {
+          initProjectCallCount += 1;
+          lastInitProjectRequest = clone(req);
+          // Mirror the request into the mock's stored config so a
+          // subsequent config.get() returns what the wizard wrote.
+          // Otherwise reopening the wizard a second time would still see
+          // the seed defaults.
+          config.data_path = req.data_path;
+          config.obsidian_integration = clone(req.obsidian_integration);
+          config.asr_provider = req.asr_provider;
+          if (req.llm_provider) config.llm_provider = req.llm_provider;
+          if (req.ollama_model) config.ollama.model = req.ollama_model;
+          config.recording.mic_device = req.recording.mic_device;
+          config.recording.system_device = req.recording.system_device;
+          config.audio_retention_days = req.audio_retention_days;
+          if (req.audio_storage_mode)
+            config.audio_storage_mode = req.audio_storage_mode;
+          persistState();
+        },
         async setDataPath(newPath) {
           config.data_path = newPath;
           persistState();

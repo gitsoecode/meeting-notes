@@ -643,7 +643,14 @@ export interface InitConfigRequest {
   recording: { mic_device: string; system_device: string };
   claude_api_key?: string;
   openai_api_key?: string;
-  audio_retention_days?: number | null;
+  /**
+   * Required (not optional). The wizard's retention step is always shown,
+   * so this field is always collected. Making it required at the type
+   * level means the IPC handler can use it authoritatively without an
+   * `??` fallback that would silently swallow a "user chose Never"
+   * (`null`) intent.
+   */
+  audio_retention_days: number | null;
   audio_storage_mode?: AppConfigDTO["audio_storage_mode"];
 }
 

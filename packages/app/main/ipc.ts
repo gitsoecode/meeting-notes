@@ -489,7 +489,7 @@ export function registerIpcHandlers(): void {
         system_device: systemDevice,
       },
       shortcuts: existing?.shortcuts ?? { toggle_recording: "CommandOrControl+Shift+M" },
-      audio_retention_days: req.audio_retention_days ?? existing?.audio_retention_days ?? null,
+      audio_retention_days: req.audio_retention_days,
       audio_storage_mode: req.audio_storage_mode ?? existing?.audio_storage_mode ?? "compact",
     };
     if (req.claude_api_key) await setSecret("claude", req.claude_api_key);
