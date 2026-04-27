@@ -40,6 +40,19 @@ const REQUIRED_MAIN_ENTITLEMENTS = [
 
 const REQUIRED_AUDIOTEE_ENTITLEMENTS = ["com.apple.security.inherit"];
 
+// Each Gistlist Helper*.app/Contents/MacOS/* must carry these. The
+// inherit grant is what attributes their TCC checks to the parent; the
+// JIT trio is what lets V8 actually initialize. v0.1.4 shipped helpers
+// with only `inherit`, which left the renderer SIGTRAPing in
+// cppgc::CagedHeapBase before first paint and producing a blank window.
+// This check is what would have caught it.
+const REQUIRED_HELPER_ENTITLEMENTS = [
+  "com.apple.security.inherit",
+  "com.apple.security.cs.allow-jit",
+  "com.apple.security.cs.allow-unsigned-executable-memory",
+  "com.apple.security.cs.disable-library-validation",
+];
+
 export class ReleaseCheckError extends Error {
   constructor(message) {
     super(message);
@@ -275,6 +288,7 @@ export function runChecks({
   const mainBinary = path.join(appPath, "Contents", "MacOS", productName);
   const audioteeBinary = path.join(appPath, "Contents", "MacOS", "audiotee");
   const manifestPath = path.join(resolvedReleaseDir, "latest-mac.yml");
+  const frameworksDir = path.join(appPath, "Contents", "Frameworks");
 
   for (const required of [appPath, mainBinary, audioteeBinary, manifestPath]) {
     if (!fs.existsSync(required)) {
@@ -297,6 +311,25 @@ export function runChecks({
   const audioteeEnts = readEntitlements(audioteeBinary);
   assertEntitlementsPresent(audioteeEnts, REQUIRED_AUDIOTEE_ENTITLEMENTS, "audiotee");
 
+  // Every Gistlist Helper*.app under Contents/Frameworks/ runs an
+  // Electron/V8 process and needs the JIT trio + inherit. v0.1.4
+  // shipped without this and the renderer crashed on first paint.
+  const helperExecutables = listHelperExecutables(frameworksDir, productName);
+  if (helperExecutables.length === 0) {
+    throw new ReleaseCheckError(
+      `[helpers] no ${productName} Helper*.app executables found under ${frameworksDir} — bundle layout has changed?`
+    );
+  }
+  for (const helperBinary of helperExecutables) {
+    const ents = readEntitlements(helperBinary);
+    // helperBinary: .../Frameworks/<HelperName>.app/Contents/MacOS/<exe>
+    // Walk three dirnames up to land on <HelperName>.app.
+    const helperApp = path.basename(
+      path.dirname(path.dirname(path.dirname(helperBinary)))
+    );
+    assertEntitlementsPresent(ents, REQUIRED_HELPER_ENTITLEMENTS, `helper:${helperApp}`);
+  }
+
   const manifestText = fs.readFileSync(manifestPath, "utf8");
   checkManifest(manifestText, resolvedReleaseDir, expectedVersion);
 
@@ -305,7 +338,37 @@ export function runChecks({
     arch: resolvedArch,
     productName,
     version: expectedVersion,
+    helperCount: helperExecutables.length,
   };
+}
+
+/**
+ * List every Mach-O executable under
+ * `<frameworksDir>/<productName> Helper*.app/Contents/MacOS/<...>`.
+ * Returns absolute paths, sorted for determinism.
+ */
+export function listHelperExecutables(frameworksDir, productName) {
+  if (!fs.existsSync(frameworksDir)) return [];
+  const helperBundlePrefix = `${productName} Helper`;
+  const entries = fs.readdirSync(frameworksDir);
+  const helperApps = entries
+    .filter((name) => name.startsWith(helperBundlePrefix) && name.endsWith(".app"))
+    .map((name) => path.join(frameworksDir, name));
+
+  const exes = [];
+  for (const helperApp of helperApps) {
+    const macOsDir = path.join(helperApp, "Contents", "MacOS");
+    if (!fs.existsSync(macOsDir)) continue;
+    for (const exe of fs.readdirSync(macOsDir)) {
+      const exePath = path.join(macOsDir, exe);
+      try {
+        if (fs.statSync(exePath).isFile()) exes.push(exePath);
+      } catch {
+        // ignore
+      }
+    }
+  }
+  return exes.sort();
 }
 
 // CLI shim

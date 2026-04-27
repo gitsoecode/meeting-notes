@@ -9,6 +9,7 @@ import {
   ReleaseCheckError,
   assertEntitlementsPresent,
   checkManifest,
+  listHelperExecutables,
   runChecks,
   sha512Base64,
 } from "../scripts/check-release-artifacts.mjs";
@@ -29,6 +30,12 @@ const REQUIRED_MAIN = {
   "com.apple.security.cs.disable-library-validation": true,
 };
 const REQUIRED_AUDIOTEE = { "com.apple.security.inherit": true };
+const REQUIRED_HELPER = {
+  "com.apple.security.inherit": true,
+  "com.apple.security.cs.allow-jit": true,
+  "com.apple.security.cs.allow-unsigned-executable-memory": true,
+  "com.apple.security.cs.disable-library-validation": true,
+};
 
 function tmpdir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), `gistlist-rac-${randomBytes(4).toString("hex")}-`));
@@ -79,6 +86,22 @@ function buildFixture(root, { version = "0.1.4", productName = "Gistlist", arch 
   writeBinaryFile(path.join(macOsDir, productName), 16);
   writeBinaryFile(path.join(macOsDir, "audiotee"), 16);
 
+  // Mirror electron-builder's helper layout so listHelperExecutables
+  // finds them. Each helper has its own Contents/MacOS/<exe-name>.
+  const helperVariants = ["", " (GPU)", " (Plugin)", " (Renderer)"];
+  for (const variant of helperVariants) {
+    const helperName = `${productName} Helper${variant}`;
+    const helperMacOs = path.join(
+      contentsDir,
+      "Frameworks",
+      `${helperName}.app`,
+      "Contents",
+      "MacOS"
+    );
+    fs.mkdirSync(helperMacOs, { recursive: true });
+    writeBinaryFile(path.join(helperMacOs, helperName), 16);
+  }
+
   // Updater artifacts — actual byte content drives the manifest hashes.
   const zipPath = path.join(releaseDir, `${productName}-${arch}.zip`);
   const dmgPath = path.join(releaseDir, `${productName}-${arch}.dmg`);
@@ -114,13 +137,19 @@ function makePkgJson(root, version = "0.1.4") {
   return p;
 }
 
+function defaultReadEntitlements(bin) {
+  if (bin.endsWith("/audiotee")) return { ...REQUIRED_AUDIOTEE };
+  if (bin.includes("/Frameworks/") && bin.includes("Helper"))
+    return { ...REQUIRED_HELPER };
+  return { ...REQUIRED_MAIN };
+}
+
 function runWithInjections(root, overrides = {}) {
   return runChecks({
     releaseDir: root,
     arch: "arm64",
     pkgJsonPath: makePkgJson(root, overrides.pkgVersion ?? "0.1.4"),
-    readEntitlements: overrides.readEntitlements ?? ((bin) =>
-      bin.endsWith("/audiotee") ? { ...REQUIRED_AUDIOTEE } : { ...REQUIRED_MAIN }),
+    readEntitlements: overrides.readEntitlements ?? defaultReadEntitlements,
     verifySignature: overrides.verifySignature ?? (() => {}),
     readVersion: overrides.readVersion ?? (() => "0.1.4"),
   });
@@ -318,4 +347,94 @@ test("runChecks: fails when expected paths are missing", () => {
     () => runWithInjections(root),
     (err) => err instanceof ReleaseCheckError && /expected path missing/.test(err.message)
   );
+});
+
+test("listHelperExecutables: finds all four helper exes in fixture", () => {
+  const root = tmpdir();
+  const fx = buildFixture(root);
+  const exes = listHelperExecutables(
+    path.join(fx.appPath, "Contents", "Frameworks"),
+    "Gistlist"
+  );
+  assert.equal(exes.length, 4);
+  // Lexical sort: " " (0x20) < "." (0x2E), so the parenthesized variants
+  // sort before the bare "Gistlist Helper.app".
+  assert.match(exes[0], /Gistlist Helper \(GPU\)\.app\/Contents\/MacOS\/Gistlist Helper \(GPU\)$/);
+  assert.match(exes[1], /Gistlist Helper \(Plugin\)\.app\/Contents\/MacOS\/Gistlist Helper \(Plugin\)$/);
+  assert.match(exes[2], /Gistlist Helper \(Renderer\)\.app\/Contents\/MacOS\/Gistlist Helper \(Renderer\)$/);
+  assert.match(exes[3], /Gistlist Helper\.app\/Contents\/MacOS\/Gistlist Helper$/);
+});
+
+test("listHelperExecutables: returns empty when Frameworks dir missing", () => {
+  const root = tmpdir();
+  const exes = listHelperExecutables(path.join(root, "nonexistent"), "Gistlist");
+  assert.deepEqual(exes, []);
+});
+
+test("runChecks: fails when a helper missing JIT entitlement (the v0.1.4 fingerprint)", () => {
+  const root = tmpdir();
+  buildFixture(root);
+  // Simulate v0.1.4's actual bug: helpers have only `inherit`, no JIT.
+  assert.throws(
+    () =>
+      runWithInjections(root, {
+        readEntitlements: (bin) => {
+          if (bin.endsWith("/audiotee")) return { ...REQUIRED_AUDIOTEE };
+          if (bin.includes("/Frameworks/") && bin.includes("Helper")) {
+            return { "com.apple.security.inherit": true };
+          }
+          return { ...REQUIRED_MAIN };
+        },
+      }),
+    (err) =>
+      err instanceof ReleaseCheckError &&
+      /\[helper:Gistlist Helper/.test(err.message) &&
+      /com\.apple\.security\.cs\.allow-jit/.test(err.message)
+  );
+});
+
+test("runChecks: fails when a helper missing inherit entitlement", () => {
+  const root = tmpdir();
+  buildFixture(root);
+  assert.throws(
+    () =>
+      runWithInjections(root, {
+        readEntitlements: (bin) => {
+          if (bin.endsWith("/audiotee")) return { ...REQUIRED_AUDIOTEE };
+          if (bin.includes("/Frameworks/") && bin.includes("Helper")) {
+            // JIT trio but no inherit — TCC scope wouldn't propagate.
+            return {
+              "com.apple.security.cs.allow-jit": true,
+              "com.apple.security.cs.allow-unsigned-executable-memory": true,
+              "com.apple.security.cs.disable-library-validation": true,
+            };
+          }
+          return { ...REQUIRED_MAIN };
+        },
+      }),
+    (err) =>
+      err instanceof ReleaseCheckError &&
+      /\[helper:Gistlist Helper/.test(err.message) &&
+      /com\.apple\.security\.inherit/.test(err.message)
+  );
+});
+
+test("runChecks: fails when no helpers found at all (bundle layout regression)", () => {
+  const root = tmpdir();
+  const fx = buildFixture(root);
+  fs.rmSync(path.join(fx.appPath, "Contents", "Frameworks"), {
+    recursive: true,
+    force: true,
+  });
+  assert.throws(
+    () => runWithInjections(root),
+    (err) => err instanceof ReleaseCheckError && /no Gistlist Helper.*\.app/.test(err.message)
+  );
+});
+
+test("runChecks: happy path returns helperCount", () => {
+  const root = tmpdir();
+  buildFixture(root);
+  const report = runWithInjections(root);
+  assert.equal(report.helperCount, 4);
 });
