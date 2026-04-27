@@ -61,9 +61,16 @@ const TINK_AIFF = "/System/Library/Sounds/Tink.aiff";
 // `open` -> launchd -> Electron-init handshake.
 const OPEN_TIMEOUT_MS = 60_000;
 
-// dB floor that real ambient mic should clear comfortably; flat
-// silence (the v0.1.1–v0.1.3 fingerprint) sits at -91 dB.
-const MIN_MIC_MAX_DB = -75;
+// dB floor for the mic-captured-anything check. The v0.1.1–v0.1.3
+// fingerprint is max=-91 (flat digital zeros — every buffer literally
+// all-zero because macOS denied the entitlement check). Real captured
+// audio in a quiet room sits ~ -75 to -80 max with -91 mean; busy
+// rooms or speech clear -65. -85 is generous enough not to false-fail
+// in quiet rooms, tight enough that any flat-zero ship would fail
+// loudly. Don't tighten below -80 without evidence — quiet ambient
+// sometimes legitimately drops to -78 max even when the mic is
+// healthy.
+const MIN_MIC_MAX_DB = -85;
 
 function log(msg) {
   console.log(`[smoke-packaged-audio] ${msg}`);
