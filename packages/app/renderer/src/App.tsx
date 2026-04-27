@@ -148,6 +148,7 @@ type PendingNav = { state: NavState } | null;
 
 export function App() {
   const [config, setConfig] = useState<AppConfigDTO | null | undefined>(undefined);
+  const [wizardReopen, setWizardReopen] = useState(false);
   const [recording, setRecording] = useState<RecordingStatus>({ active: false });
   const [nav, setNav] = useState<NavState>(() => {
     const initial = routeFromHash(window.location.hash) ?? { name: "record" };
@@ -451,12 +452,13 @@ export function App() {
     );
   }
 
-  if (config === null) {
+  if (config === null || wizardReopen) {
     return (
       <SetupWizard
         onComplete={async () => {
           const fresh = await api.config.get();
           setConfig(fresh);
+          setWizardReopen(false);
         }}
       />
     );
@@ -540,6 +542,7 @@ export function App() {
               <Settings
                 config={config}
                 onChange={(nextConfig) => setConfig(nextConfig)}
+                onReopenWizard={() => setWizardReopen(true)}
               />
             )}
             {route.name === "activity" && <ActivityView />}

@@ -37,6 +37,7 @@ import {
   hasSecret,
   OperationAbortedError,
   testAudioCapture,
+  setFfmpegPath,
   type AppConfig,
   type LlmProvider,
   type PipelineProgressEvent,
@@ -451,35 +452,45 @@ export function registerIpcHandlers(): void {
     const systemDevice = ""; // System audio handled by AudioTee, not a device
 
     const llmProvider = req.llm_provider ?? "claude";
+
+    // Re-running the wizard from Settings should not blow away customized
+    // shortcuts, voice processing, AEC, etc. Merge wizard fields into the
+    // existing config when one is present; fall back to defaults on first
+    // run. Anything the wizard explicitly collects wins; anything it
+    // doesn't touch is preserved.
+    const existing = safeLoadConfig();
     const config: AppConfig = {
+      ...(existing ?? {}),
       data_path: req.data_path.replace(/^~/, os.homedir()),
       obsidian_integration: req.obsidian_integration,
       asr_provider: req.asr_provider,
       llm_provider: llmProvider,
-      whisper_local: {
+      whisper_local: existing?.whisper_local ?? {
         binary_path: "whisper-cli",
         model_path: "",
       },
-      parakeet_mlx: {
+      parakeet_mlx: existing?.parakeet_mlx ?? {
         binary_path: path.join(getConfigDir(), "parakeet-venv", "bin", "mlx_audio.stt.generate"),
         model: "mlx-community/parakeet-tdt-0.6b-v2",
       },
-      claude: { model: "claude-sonnet-4-6" },
-      openai: { model: "gpt-4o" },
+      claude: existing?.claude ?? { model: "claude-sonnet-4-6" },
+      openai: existing?.openai ?? { model: "gpt-4o" },
       ollama: {
-        base_url: "http://127.0.0.1:11434",
-        model: req.ollama_model ?? "qwen3.5:9b",
+        ...(existing?.ollama ?? { base_url: "http://127.0.0.1:11434", model: "qwen3.5:9b" }),
+        ...(req.ollama_model ? { model: req.ollama_model } : {}),
       },
       recording: {
+        ...(existing?.recording ?? {
+          aec_enabled: true,
+          dedup_me_against_others: true,
+          voice_processing_enabled: false,
+        }),
         mic_device: micDevice,
         system_device: systemDevice,
-        aec_enabled: true,
-        dedup_me_against_others: true,
-        voice_processing_enabled: false,
       },
-      shortcuts: { toggle_recording: "CommandOrControl+Shift+M" },
-      audio_retention_days: req.audio_retention_days ?? null,
-      audio_storage_mode: req.audio_storage_mode ?? "compact",
+      shortcuts: existing?.shortcuts ?? { toggle_recording: "CommandOrControl+Shift+M" },
+      audio_retention_days: req.audio_retention_days ?? existing?.audio_retention_days ?? null,
+      audio_storage_mode: req.audio_storage_mode ?? existing?.audio_storage_mode ?? "compact",
     };
     if (req.claude_api_key) await setSecret("claude", req.claude_api_key);
     if (req.openai_api_key) await setSecret("openai", req.openai_api_key);
@@ -1749,6 +1760,10 @@ export function registerIpcHandlers(): void {
     const ffmpegBin = await resolveBin("ffmpeg");
     let ffmpegVersion: string | null = null;
     if (ffmpegBin) {
+      // Keep the engine's ffmpeg path in sync — covers the case where the
+      // wizard just installed ffmpeg and the engine still has the startup
+      // value (or the default "ffmpeg") cached.
+      setFfmpegPath(ffmpegBin.path);
       try {
         const { stdout } = await execFileAsync(ffmpegBin.path, ["-version"]);
         const m = stdout.match(/ffmpeg version (\S+)/);

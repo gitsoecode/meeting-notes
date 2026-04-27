@@ -399,7 +399,32 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
               title="Welcome to Gistlist"
               description="A local-first desktop app for meeting notes. Record in the app or import an existing recording, and your transcript, summary, and custom outputs land in editable markdown on disk. Obsidian is optional. Let's get you set up."
               footer={<Button onClick={() => setStep(1)}>Get started</Button>}
-            />
+            >
+              <p
+                className="text-xs leading-5 text-[var(--text-tertiary)]"
+                data-testid="wizard-legal-acknowledgment"
+              >
+                By using Gistlist you agree to the{" "}
+                <a
+                  className="underline underline-offset-2 hover:text-[var(--text-secondary)]"
+                  href="https://gistlist.app/terms"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Terms of Service
+                </a>{" "}
+                and{" "}
+                <a
+                  className="underline underline-offset-2 hover:text-[var(--text-secondary)]"
+                  href="https://gistlist.app/privacy"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Privacy Policy
+                </a>
+                .
+              </p>
+            </WizardStep>
           )}
 
           {step === 1 && (
@@ -1196,19 +1221,55 @@ function AudioPermissionsPanel({
               {micPermissionBusy ? "Requesting…" : "Grant microphone access"}
             </Button>
           ) : null}
-          {micPermission === "denied" ? (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => api.system.openMicrophonePermissionPane().catch(() => {})}
-            >
-              Open Settings
-            </Button>
-          ) : null}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => api.system.openMicrophonePermissionPane().catch(() => {})}
+          >
+            Open Settings
+          </Button>
         </div>
-        <div className="text-xs text-[var(--text-secondary)]">
-          Needed to record your voice. macOS will show a permission prompt the first time.
-        </div>
+        {micPermission === "denied" || micPermission === "restricted" ? (
+          <div className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning-muted,rgba(245,158,11,0.08))] px-3 py-2 text-xs space-y-2">
+            <div className="text-[var(--text-secondary)]">
+              macOS will not let Gistlist enumerate or capture microphones until you grant the
+              <strong> "Microphone"</strong> permission.{" "}
+              {isDev ? (
+                <>This is a development build, so grant the permission to <strong className="text-[var(--text-primary)]">"Electron"</strong> (not "Gistlist"). The packaged build correctly identifies as "Gistlist".</>
+              ) : (
+                <>Grant it to <strong className="text-[var(--text-primary)]">"{bundleLabel}"</strong>.</>
+              )}
+            </div>
+            <ol className="ml-4 list-decimal space-y-0.5 text-[var(--text-secondary)]">
+              <li>Open System Settings (button above).</li>
+              <li>Go to <strong className="text-[var(--text-primary)]">Privacy &amp; Security → Microphone</strong>.</li>
+              <li>
+                If <strong className="text-[var(--text-primary)]">{isDev ? "Electron" : bundleLabel}</strong> is in
+                the list, turn its switch on. Otherwise click <strong className="text-[var(--text-primary)]">+</strong>{" "}
+                and drag it from the Finder window (use <em>Reveal in Finder</em> below).
+              </li>
+              <li>Come back to Gistlist — you may be asked to relaunch.</li>
+            </ol>
+            {appIdentity?.bundlePath ? (
+              <div className="font-mono text-[10px] text-[var(--text-tertiary)] break-all">
+                {appIdentity.bundlePath}
+              </div>
+            ) : null}
+            <div className="flex flex-wrap gap-2 pt-1">
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => api.system.revealAppBundle().catch(() => {})}
+              >
+                Reveal {isDev ? "Electron" : bundleLabel} in Finder
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="text-xs text-[var(--text-secondary)]">
+            Needed to record your voice. macOS will show a permission prompt the first time. If your physical mic doesn't appear in the Audio settings dropdown after granting, quit and relaunch Gistlist — macOS sometimes caches the empty device list.
+          </div>
+        )}
       </div>
 
       {/* System audio */}

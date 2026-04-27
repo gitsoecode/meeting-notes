@@ -44,6 +44,7 @@ const DEFAULT_CHAT_PROMPT =
 interface SettingsProps {
   config: AppConfigDTO;
   onChange: (c: AppConfigDTO) => void;
+  onReopenWizard: () => void;
 }
 
 type PendingConfirmState = {
@@ -55,7 +56,7 @@ type PendingConfirmState = {
   action: () => Promise<void> | void;
 };
 
-export function Settings({ config, onChange }: SettingsProps) {
+export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
   const [devices, setDevices] = useState<AudioDevice[]>([]);
   const [hasClaude, setHasClaude] = useState(false);
   const [hasOpenai, setHasOpenai] = useState(false);
@@ -74,6 +75,7 @@ export function Settings({ config, onChange }: SettingsProps) {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmState | null>(null);
   const [confirmingAction, setConfirmingAction] = useState(false);
   const [installingWhisper, setInstallingWhisper] = useState(false);
+  const [installingFfmpeg, setInstallingFfmpeg] = useState(false);
 
   const apiKeysRef = useRef<HTMLElement>(null);
 
@@ -224,6 +226,24 @@ export function Settings({ config, onChange }: SettingsProps) {
     apiKeysRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
+  const installFfmpeg = async () => {
+    setInstallingFfmpeg(true);
+    try {
+      const result = await api.deps.install("ffmpeg");
+      if (!result.ok) {
+        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+        setError(
+          `Failed to install ffmpeg${phase}: ${result.error ?? "unknown error"}`
+        );
+      }
+      refreshDeps();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setInstallingFfmpeg(false);
+    }
+  };
+
   const installWhisper = async () => {
     setInstallingWhisper(true);
     try {
@@ -246,7 +266,15 @@ export function Settings({ config, onChange }: SettingsProps) {
     }
   };
 
-  const dependencyRows =
+  type DepRow = {
+    label: string;
+    value: string;
+    version: string | null;
+    ok: boolean;
+    install?: { run: () => void; busy: boolean; label: string };
+  };
+
+  const dependencyRows: DepRow[] =
     deps == null
       ? []
       : [
@@ -258,6 +286,9 @@ export function Settings({ config, onChange }: SettingsProps) {
                 : "not found",
             version: deps.ffmpeg.version,
             ok: !!deps.ffmpeg.path,
+            install: deps.ffmpeg.path
+              ? undefined
+              : { run: () => void installFfmpeg(), busy: installingFfmpeg, label: "Install" },
           },
           {
             label: "Python",
@@ -279,6 +310,9 @@ export function Settings({ config, onChange }: SettingsProps) {
                 : "not found",
             version: deps.whisper.version,
             ok: !!deps.whisper.path,
+            install: deps.whisper.path
+              ? undefined
+              : { run: () => void installWhisper(), busy: installingWhisper, label: "Install" },
           },
           {
             label: "Ollama",
@@ -884,7 +918,23 @@ export function Settings({ config, onChange }: SettingsProps) {
                             {row.version ?? "—"}
                           </TableCell>
                           <TableCell className={`text-right ${row.ok ? "text-[var(--success)]" : "text-[var(--error)] font-medium"}`}>
-                            {row.value}
+                            <div className="flex items-center justify-end gap-2">
+                              <span>{row.value}</span>
+                              {row.install && (
+                                <Button
+                                  size="sm"
+                                  variant="secondary"
+                                  onClick={row.install.run}
+                                  disabled={row.install.busy}
+                                >
+                                  {row.install.busy ? (
+                                    <><Spinner className="h-3.5 w-3.5" /> Installing…</>
+                                  ) : (
+                                    row.install.label
+                                  )}
+                                </Button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -892,6 +942,22 @@ export function Settings({ config, onChange }: SettingsProps) {
                   </Table>
                 </div>
               )}
+            </div>
+          </section>
+
+          <Separator />
+
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Setup</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Re-run the first-launch wizard to re-check microphone permission, reinstall dependencies, or change ASR/LLM choices. Existing config is preserved unless you change it.
+              </p>
+            </div>
+            <div>
+              <Button variant="secondary" onClick={onReopenWizard} data-testid="settings-rerun-wizard">
+                Run setup again
+              </Button>
             </div>
           </section>
 
@@ -1037,6 +1103,47 @@ export function Settings({ config, onChange }: SettingsProps) {
               >
                 View Third-Party Licenses
               </Button>
+            </div>
+          </section>
+
+          <Separator />
+          <section className="space-y-4" data-testid="settings-about-section">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">About</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Gistlist is built by Gistlist, LLC. Source-available under the
+                Functional Source License (FSL-1.1-ALv2), which auto-converts to
+                Apache 2.0 two years after each release.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+              <a
+                className="text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
+                href="https://gistlist.app/privacy"
+                target="_blank"
+                rel="noreferrer"
+                data-testid="about-privacy-link"
+              >
+                Privacy Policy
+              </a>
+              <a
+                className="text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
+                href="https://gistlist.app/terms"
+                target="_blank"
+                rel="noreferrer"
+                data-testid="about-terms-link"
+              >
+                Terms of Service
+              </a>
+              <a
+                className="text-[var(--accent)] underline underline-offset-2 hover:text-[var(--accent-hover)]"
+                href="https://github.com/gitsoecode/meeting-notes"
+                target="_blank"
+                rel="noreferrer"
+                data-testid="about-source-link"
+              >
+                Source code
+              </a>
             </div>
           </section>
         </TabsContent>
