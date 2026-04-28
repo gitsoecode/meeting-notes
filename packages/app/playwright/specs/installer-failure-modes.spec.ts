@@ -122,4 +122,49 @@ test.describe("Installer failure modes", () => {
       page.getByText(/Install failed \[verify-exec\]/).first()
     ).toBeVisible();
   });
+
+  test("Parakeet auto-chain ffmpeg sub-step failure surfaces the phase", async ({
+    wizard,
+    page,
+  }) => {
+    // The setup-asr IPC handler now does ffmpeg + ffprobe + Python +
+    // venv + smoke test all in one click. If any installer sub-step
+    // fails, the renderer must show `[<phase>]:` from the chain's
+    // {ok,error,failedPhase} return shape — same UX as deps:install.
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setDependencyState({
+        ffmpeg: null,
+        parakeet: null,
+      });
+      (window as any).__MEETING_NOTES_TEST.setNextSetupAsrFailure({
+        error: "ffmpeg bundle install failed: SHA-256 mismatch on evermeet.cx zip",
+        failedPhase: "verify-checksum",
+        logLines: [
+          "→ ensuring ffmpeg + ffprobe",
+          "  ffmpeg download: 12.3 MB / 25.4 MB",
+          "  ✘ ffmpeg: SHA-256 mismatch",
+        ],
+      });
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await wizard.nextButton().click();
+
+    await wizard.installButton("Install Parakeet").click();
+
+    await expect(
+      page.getByText(/Install failed \[verify-checksum\]/).first()
+    ).toBeVisible();
+    await expect(
+      page.getByText(/ffmpeg bundle install failed/).first()
+    ).toBeVisible();
+    // Sub-step log lines surface in the install pane so the user can see
+    // exactly which step inside the chain blew up.
+    await expect(
+      page.getByText(/ensuring ffmpeg \+ ffprobe/).first()
+    ).toBeVisible();
+  });
 });

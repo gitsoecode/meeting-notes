@@ -39,6 +39,7 @@ import {
   testAudioCapture,
   setFfmpegPath,
   setFfprobePath,
+  setPythonPath,
   type AppConfig,
   type LlmProvider,
   type PipelineProgressEvent,
@@ -48,7 +49,14 @@ import {
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { resolveBin } from "./bundled.js";
-import { installTool } from "./installers/install-tool.js";
+import {
+  installTool,
+  findEntry,
+  isPinnedVersionInstalled,
+  hasOrphanedKeptPrev,
+} from "./installers/install-tool.js";
+import { installFfmpegBundle } from "./installers/install-bundle.js";
+import { commitKeptPrev, rollbackKeptPrev } from "./installers/download.js";
 import {
   checkForUpdates,
   startDownload,
@@ -1470,11 +1478,202 @@ export function registerIpcHandlers(): void {
   });
 
   // ---- setup-asr ----
-  ipcMain.handle("setup-asr", async (_e, opts: { force?: boolean }) => {
-    await setupAsr({
-      force: opts.force,
-      onLog: (line) => broadcastToAll("setup-asr:log", line),
-    });
+  //
+  // One-click Parakeet install. The chain runs entirely in main (so the
+  // engine stays clean of binary-lifecycle code):
+  //
+  //   1. ensure ffmpeg + ffprobe via the shared installFfmpegBundle helper
+  //   2. ensure app-managed Python via installTool("python")
+  //   3. inject resolved paths into the engine (setFfmpegPath / setFfprobePath / setPythonPath)
+  //   4. call engine setupAsr — venv build + pip install + smoke test
+  //
+  // The contract is `{ ok, error, failedPhase }` (mirrors deps:install)
+  // so the renderer can render the same `[<phase>]: ...` UX without
+  // string-parsing the thrown Error.
+  ipcMain.handle("setup-asr", async (_e, opts: { force?: boolean }): Promise<DepsInstallResult> => {
+    const log = (line: string) => broadcastToAll("setup-asr:log", line);
+    // Single AbortController owned by this invocation. The renderer can
+    // cancel via the "setup-asr:abort" channel below; the controller
+    // also fires if the renderer disconnects mid-install (Electron
+    // garbage-collects ipcMain handlers when no window is left).
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    ipcMain.once("setup-asr:abort", onAbort);
+    try {
+      // Step 1: ffmpeg + ffprobe
+      log("→ ensuring ffmpeg + ffprobe");
+      const bundleResult = await installFfmpegBundle({
+        signal: controller.signal,
+        onProgress: (event) => {
+          broadcastToAll("installer-progress", event);
+          if (event.phase === "download" && event.bytesDone !== undefined) {
+            const total = event.bytesTotal
+              ? ` / ${humanBytes(event.bytesTotal)}`
+              : "";
+            log(`  ${event.tool} download: ${humanBytes(event.bytesDone)}${total}`);
+          } else if (event.phase === "failed") {
+            log(`  ✘ ${event.tool}: ${event.error ?? "unknown"}`);
+          } else {
+            log(`  ${event.tool} ${event.phase}…`);
+          }
+        },
+      });
+      if (!bundleResult.ok) {
+        return {
+          ok: false,
+          error: `ffmpeg bundle install failed: ${bundleResult.error}`,
+          failedPhase: bundleResult.phase,
+        };
+      }
+      if (bundleResult.installed.length > 0) {
+        log(`  ✓ installed: ${bundleResult.installed.join(", ")}`);
+      } else {
+        log(`  ✓ ffmpeg + ffprobe already present`);
+      }
+
+      // Step 2: app-managed Python.
+      //
+      // Transactional install: we keep the previous Python runtime at
+      // `<binDir>/python-runtime.prev` until the venv build + smoke test
+      // also pass. If the venv side fails, rollbackKeptPrev restores the
+      // old runtime so the user keeps a working Parakeet (modulo the
+      // venv's own .prev rescue inside engine/setup-asr.ts). If both
+      // succeed, commitKeptPrev deletes the kept .prev. The plan calls
+      // this "Single-transaction means a Python bump never leaves the
+      // user with a half-installed runtime + an unusable venv."
+      log("→ ensuring app-managed Python runtime");
+      // Critical: do NOT use resolveBin("python") here. resolveBin falls
+      // back to system PATH, which would let us skip the install when
+      // some random `python3` is on PATH — re-introducing the
+      // "works because the dev had Python installed" class of bug.
+      // isPinnedVersionInstalled checks ONLY <binDir>/python AND
+      // verifies the version matches the manifest's pin, so a manifest
+      // version bump triggers an upgrade install instead of silently
+      // accepting the older runtime.
+      let pythonAlreadyPinned = await isPinnedVersionInstalled("python");
+
+      // Mid-swap crash recovery. If a previous run was killed inside
+      // downloadAndStage's atomic-swap step *after* renaming the old
+      // runtime to `.prev` but *before* the new runtime was put in
+      // place, this run sees `.prev` exists AND the canonical runtime
+      // is missing (so `isPinnedVersionInstalled` is false). Without
+      // recovery, the next install attempt's swap would call
+      // `rmSilent(prevRuntime)` and destroy the user's only known-good
+      // runtime before staging the new one — a fresh-install failure
+      // mid-chain would then leave the user with nothing.
+      //
+      // Restore `.prev` to canonical first, then re-check whether a
+      // new install is needed. If the restored version matches the
+      // manifest pin (manifest didn't bump since the crash) we skip
+      // the install entirely. If it doesn't match, the upgrade install
+      // proceeds with `keepPrev: true` — which legitimately renames
+      // the restored canonical aside again, but now we have a clean
+      // single-transaction slate.
+      if (!pythonAlreadyPinned && hasOrphanedKeptPrev("python")) {
+        const pythonEntry = findEntry("python");
+        if (pythonEntry) {
+          log("  Recovering Python runtime from interrupted swap (restoring .prev)");
+          rollbackKeptPrev(pythonEntry);
+          pythonAlreadyPinned = await isPinnedVersionInstalled("python");
+        }
+      }
+
+      // Adopt any orphaned `<binDir>/python-runtime.prev` left behind by
+      // a previous run that was killed between the Python install and
+      // the venv commit/rollback. Without this, the chain would skip
+      // the install (pinned Python is already there) but never commit
+      // or roll back the orphaned `.prev`, leaving disk waste forever
+      // and — worse — a venv failure on this run would not roll Python
+      // back since pythonInstallNeedsCommit would be false. Treating an
+      // orphan as an in-flight transaction means this run's outcome
+      // commits (success → delete `.prev`) or rolls back (failure →
+      // restore `.prev`).
+      const pythonOrphanFromPriorRun = hasOrphanedKeptPrev("python");
+      let pythonInstallNeedsCommit = pythonOrphanFromPriorRun;
+      if (pythonOrphanFromPriorRun) {
+        log("  Adopting orphaned python-runtime.prev from a previous interrupted run");
+      }
+      if (!pythonAlreadyPinned) {
+        const pythonResult = await installTool({
+          tool: "python",
+          signal: controller.signal,
+          keepPrev: true,
+          onProgress: (event) => {
+            broadcastToAll("installer-progress", event);
+            if (event.phase === "download" && event.bytesDone !== undefined) {
+              const total = event.bytesTotal
+                ? ` / ${humanBytes(event.bytesTotal)}`
+                : "";
+              log(`  python download: ${humanBytes(event.bytesDone)}${total}`);
+            } else if (event.phase === "failed") {
+              log(`  ✘ python: ${event.error ?? "unknown"}`);
+            } else {
+              log(`  python ${event.phase}…`);
+            }
+          },
+        });
+        if (!pythonResult.ok) {
+          return {
+            ok: false,
+            error: `Python runtime install failed: ${pythonResult.error}`,
+            failedPhase: pythonResult.phase,
+          };
+        }
+        log("  ✓ Python runtime installed");
+        pythonInstallNeedsCommit = true;
+      } else if (pythonOrphanFromPriorRun) {
+        log("  ✓ Python runtime already present (with adopted .prev)");
+      } else {
+        log("  ✓ Python runtime already present");
+      }
+
+      // Step 3: inject resolved paths into engine
+      const ffmpegBin = await resolveBin("ffmpeg");
+      const ffprobeBin = await resolveBin("ffprobe");
+      const pythonBin = await resolveBin("python");
+      if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
+      if (ffprobeBin) setFfprobePath(ffprobeBin.path);
+      if (pythonBin) setPythonPath(pythonBin.path);
+
+      // Step 4: engine venv build + pip + smoke test. If this throws,
+      // the catch below rolls Python back to the previous version so
+      // the user isn't left with a half-installed runtime.
+      log("→ building venv and installing mlx-audio");
+      try {
+        await setupAsr({
+          force: opts.force,
+          onLog: log,
+          abort: controller.signal,
+        });
+      } catch (venvErr) {
+        if (pythonInstallNeedsCommit) {
+          const pythonEntry = findEntry("python");
+          if (pythonEntry) {
+            log("  ✘ venv build failed — rolling Python runtime back");
+            rollbackKeptPrev(pythonEntry);
+          }
+        }
+        throw venvErr;
+      }
+
+      // Step 5: commit. Both Python and venv are healthy; drop the
+      // kept Python `.prev` so disk space goes back to one runtime.
+      if (pythonInstallNeedsCommit) {
+        const pythonEntry = findEntry("python");
+        if (pythonEntry) commitKeptPrev(pythonEntry);
+      }
+
+      return { ok: true };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log(`✘ setup-asr failed: ${message}`);
+      return {
+        ok: false,
+        error: message,
+      };
+    } finally {
+      ipcMain.removeListener("setup-asr:abort", onAbort);
+    }
   });
 
   // ---- dep install (direct download + verify, no Homebrew) ----
@@ -1498,14 +1697,59 @@ export function registerIpcHandlers(): void {
     async (_e, target: DepsInstallTarget): Promise<DepsInstallResult> => {
       broadcastToAll("deps-install:log", `→ installing ${target}`);
 
+      // ffmpeg implies ffprobe — both come from the same evermeet.cx zip
+      // family and engine/audio.ts requires both. The shared bundle helper
+      // is the single source of truth (also used by setup-asr's chain).
+      if (target === "ffmpeg") {
+        const result = await installFfmpegBundle({
+          onProgress: (event: InstallerProgressEvent) => {
+            broadcastToAll("installer-progress", event);
+            if (event.phase === "download" && event.bytesDone !== undefined) {
+              const total = event.bytesTotal
+                ? ` / ${humanBytes(event.bytesTotal)}`
+                : "";
+              broadcastToAll(
+                "deps-install:log",
+                `  ${event.tool} ${event.phase}: ${humanBytes(event.bytesDone)}${total}`
+              );
+            } else if (event.phase === "failed") {
+              broadcastToAll(
+                "deps-install:log",
+                `✘ ${event.tool} install failed: ${event.error ?? "unknown"}`
+              );
+            } else {
+              broadcastToAll("deps-install:log", `  ${event.tool} ${event.phase}…`);
+            }
+          },
+        });
+        if (!result.ok) {
+          createAppLogger(false).error("ffmpeg bundle install failed", {
+            processType: "wizard-install",
+            detail: "ffmpeg",
+            message: result.error,
+          });
+          return {
+            ok: false,
+            error: result.error,
+            failedPhase: result.phase,
+          };
+        }
+        if (result.installed.length > 0) {
+          broadcastToAll("deps-install:log", `✓ installed: ${result.installed.join(", ")}`);
+        } else {
+          broadcastToAll("deps-install:log", `✓ ffmpeg + ffprobe already present`);
+        }
+        createAppLogger(false).info("ffmpeg bundle install completed", {
+          processType: "wizard-install",
+          detail: result.installed.join(",") || "noop",
+        });
+        return { ok: true };
+      }
+
+      // Other tools (ollama, whisper-cli) flow through installTool directly.
       const result = await installTool({
         tool: target,
         onProgress: (event: InstallerProgressEvent) => {
-          // Stream progress to two channels:
-          //  - installer-progress: structured payload (Phase 3 wizard
-          //    surfaces bytesDone/bytesTotal in a progress bar)
-          //  - deps-install:log: human-readable line stream (wizard
-          //    log panel — same UX as the brew wrapper used to drive)
           broadcastToAll("installer-progress", event);
           if (event.phase === "download" && event.bytesDone !== undefined) {
             const total = event.bytesTotal
@@ -1540,60 +1784,6 @@ export function registerIpcHandlers(): void {
         processType: "wizard-install",
         detail: target,
       });
-
-      // ffmpeg is paired with ffprobe — same upstream zip from evermeet.cx,
-      // and engine code (audio.ts duration / stream-info) requires both.
-      // Install ffprobe as a follow-up so users who click "Install ffmpeg"
-      // get a fully functional audio toolchain without a second click.
-      // ffprobe is intentionally NOT exposed in DepsInstallTarget (renderer
-      // can never request it directly); the manifest-driven install path is
-      // the only way it lands on disk.
-      if (target === "ffmpeg") {
-        broadcastToAll("deps-install:log", `→ installing ffprobe (paired with ffmpeg)`);
-        const ffprobeResult = await installTool({
-          tool: "ffprobe",
-          onProgress: (event: InstallerProgressEvent) => {
-            broadcastToAll("installer-progress", event);
-            if (event.phase === "download" && event.bytesDone !== undefined) {
-              const total = event.bytesTotal
-                ? ` / ${humanBytes(event.bytesTotal)}`
-                : "";
-              broadcastToAll(
-                "deps-install:log",
-                `  ${event.phase}: ${humanBytes(event.bytesDone)}${total}`
-              );
-            } else if (event.phase === "failed") {
-              broadcastToAll(
-                "deps-install:log",
-                `✘ ffprobe install failed: ${event.error ?? "unknown"}`
-              );
-            } else {
-              broadcastToAll("deps-install:log", `  ${event.phase}…`);
-            }
-          },
-        });
-        if (!ffprobeResult.ok) {
-          // Partial success: ffmpeg landed, ffprobe didn't. Surface the
-          // ffprobe failure clearly. Resolver tolerates partial state —
-          // each binary is checked independently — so the user can retry
-          // by re-clicking Install (which is idempotent for ffmpeg).
-          createAppLogger(false).error("Paired ffprobe install failed", {
-            processType: "wizard-install",
-            detail: "ffprobe",
-            message: ffprobeResult.error,
-          });
-          return {
-            ok: false,
-            error: `ffmpeg installed but ffprobe install failed: ${ffprobeResult.error ?? "unknown"}`,
-            failedPhase: ffprobeResult.phase,
-          };
-        }
-        broadcastToAll("deps-install:log", `✓ ffprobe installed`);
-        createAppLogger(false).info("Paired ffprobe install completed", {
-          processType: "wizard-install",
-          detail: "ffprobe",
-        });
-      }
 
       return { ok: true };
     }
@@ -1853,6 +2043,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
     // ffmpeg — resolved app-installed → bundled → system. Source is
     // surfaced so the wizard can show "App copy" vs "System: …" badges.
+    // Python is an internal sub-step of the Parakeet install chain and
+    // never appears in DepsCheckResult — but we still want to refresh
+    // the engine's injected python path here so a Re-check after the
+    // chain completes makes a follow-up `setupAsr({ force: true })`
+    // pick up the freshly-installed runtime.
+    const pythonBinForRefresh = await resolveBin("python");
+    if (pythonBinForRefresh) setPythonPath(pythonBinForRefresh.path);
+
     const ffmpegBin = await resolveBin("ffmpeg");
     let ffmpegVersion: string | null = null;
     if (ffmpegBin) {
@@ -1893,22 +2091,31 @@ export function registerIpcHandlers(): void {
       version: ffprobeVersion,
     };
 
-    // Python — system-only. We never install Python ourselves.
+    // Python — prefer the app-managed runtime (installed by the
+    // Parakeet auto-chain at <binDir>/python), then fall back to a
+    // system Python only for honest reporting. resolveBin walks
+    // app-installed → bundled → PATH. Without this, after a successful
+    // Parakeet install the Settings health row could still show "not
+    // found" because we'd only check `which python3.12` and the user
+    // never installed system Python.
+    const pythonResolved = await resolveBin("python");
     const pythonPath =
+      pythonResolved?.path ??
       (await whichCmd("python3.12")) ??
       (await whichCmd("python3.11")) ??
       (await whichCmd("python3"));
     let pythonVersion: string | null = null;
     if (pythonPath) {
       try {
-        const { stdout } = await execFileAsync(pythonPath, ["--version"]);
-        const m = stdout.match(/Python (\S+)/);
+        const args = pythonResolved ? ["-V"] : ["--version"];
+        const { stdout, stderr } = await execFileAsync(pythonPath, args);
+        const m = (stdout || stderr).match(/Python (\S+)/);
         if (m) pythonVersion = m[1];
       } catch { /* ignore */ }
     }
     const python: ResolvedTool = {
       path: pythonPath,
-      source: pythonPath ? "system" : null,
+      source: pythonResolved?.source ?? (pythonPath ? "system" : null),
       version: pythonVersion,
     };
 

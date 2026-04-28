@@ -11,7 +11,7 @@
  * that forgets to update the hash fails the check before merge.
  */
 
-export type ToolName = "ffmpeg" | "ffprobe" | "ollama" | "whisper-cli";
+export type ToolName = "ffmpeg" | "ffprobe" | "ollama" | "whisper-cli" | "python";
 export type ArchTag = "arm64" | "x64" | "universal";
 export type ArchiveType = "tgz" | "zip" | "raw";
 export type SignatureCheckPolicy = "codesign-verify" | "none";
@@ -162,6 +162,43 @@ export const TOOL_MANIFEST: ToolManifestEntry[] = [
     verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
     notes:
       "Same upstream as ffmpeg above; same Rosetta caveat for Apple Silicon. Installed as a side effect of installDep('ffmpeg') in the IPC handler — never user-installable on its own.",
+  },
+  {
+    // App-managed Python runtime, used as a sub-step of the Parakeet
+    // (Apple-Silicon-only ASR) install chain. Built by Astral's
+    // python-build-standalone project: pinned per-arch, signed/relocatable
+    // tarball with a portable layout. We extract the whole `python/`
+    // tree under <binDir>/python-runtime/ and symlink <binDir>/python at
+    // python-runtime/python/bin/python3.
+    //
+    // Apple-Silicon-only by design: Parakeet is the only consumer and
+    // mlx-audio requires MLX, which is Apple-Silicon-only. If a future
+    // feature genuinely needs Python on Intel, add an x64 entry then.
+    //
+    // Trust model: SHA-256 only. PBS binaries aren't notarized in a way
+    // that maps onto the existing codesign-verify path; same posture as
+    // the evermeet ffmpeg builds.
+    tool: "python",
+    version: "3.12.13",
+    platform: "darwin",
+    arch: "arm64",
+    minMacOS: "11.0",
+    url: "https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-aarch64-apple-darwin-install_only.tar.gz",
+    sha256:
+      "8966b2bcd9fa03ba22c080ad15a86bc12e41a00122b16f4b3740e302261124d9",
+    archiveType: "tgz",
+    binaryPathInArchive: "python/bin/python3",
+    installLayout: "preserve-tree",
+    signatureCheck: "none",
+    license: {
+      spdx: "PSF-2.0",
+      url: "https://docs.python.org/3/license.html",
+      buildVariant:
+        "python-build-standalone CPython 3.12.13 (release 20260414, aarch64-apple-darwin install_only)",
+    },
+    verifyExec: { args: ["-V"], expectExit: 0, timeoutMs: 5000 },
+    notes:
+      "Internal sub-step of the Parakeet install chain. Apple-Silicon-only — there is no Intel x64 entry because MLX (and therefore mlx-audio) is Apple Silicon-only.",
   },
   {
     tool: "ollama",

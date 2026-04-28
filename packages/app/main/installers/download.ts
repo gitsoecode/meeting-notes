@@ -70,6 +70,23 @@ export interface DownloadAndStageOptions {
   fetcher?: Fetcher;
   /** Optional cancellation. */
   signal?: AbortSignal;
+  /**
+   * Body-stream inactivity timeout in ms. Production omits and gets
+   * DEFAULT_BODY_INACTIVITY_MS (60 s). Tests inject a small value
+   * (e.g. 100 ms) so the stalled-stream path can be exercised without
+   * waiting the real timeout.
+   */
+  bodyInactivityMs?: number;
+  /**
+   * Preserve the previous runtime at `<binDir>/<tool>-runtime.prev` after
+   * the atomic swap (preserve-tree only — no-op for single-binary). The
+   * caller is then responsible for either calling `commitKeptPrev(entry)`
+   * after a downstream success or `rollbackKeptPrev(entry)` after a
+   * downstream failure. Used by the Parakeet auto-chain to coordinate
+   * Python-runtime + venv as one transaction so a venv smoke-test
+   * failure can roll Python back to the previous version.
+   */
+  keepPrev?: boolean;
 }
 
 export type DownloadAndStageResult =
@@ -157,20 +174,48 @@ function rmSilent(target: string): void {
   }
 }
 
+/**
+ * Default body-stream inactivity timeout. The connection-level setTimeout
+ * (in the fetcher) only catches a stalled *connect*; once bytes start
+ * flowing, a server can stall mid-stream forever. If no bytes arrive for
+ * this long, fail in the `download` phase instead of spinning silently.
+ *
+ * Overridable via DownloadAndStageOptions.bodyInactivityMs (used by tests
+ * with a much shorter value so they don't wait the real 60 s).
+ */
+const DEFAULT_BODY_INACTIVITY_MS = 60_000;
+
 /** Stream a source into a write target while updating a hasher. */
 async function streamToFileWithHash(
   source: NodeJS.ReadableStream,
   destPath: string,
   contentLength: number | null,
   onProgress: ((bytesDone: number, bytesTotal: number | null) => void) | null,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  inactivityMs: number
 ): Promise<{ sha256: string; bytes: number }> {
   const hasher = crypto.createHash("sha256");
   const out = fs.createWriteStream(destPath);
   let bytes = 0;
 
   return await new Promise<{ sha256: string; bytes: number }>((resolve, reject) => {
+    let inactivityTimer: NodeJS.Timeout | null = null;
+    const armInactivity = () => {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        cleanup();
+        out.destroy();
+        if ("destroy" in source && typeof (source as { destroy?: () => void }).destroy === "function") {
+          (source as { destroy: () => void }).destroy();
+        }
+        reject(new Error(`stalled: no data received for ${inactivityMs}ms`));
+      }, inactivityMs);
+    };
     const cleanup = () => {
+      if (inactivityTimer) {
+        clearTimeout(inactivityTimer);
+        inactivityTimer = null;
+      }
       source.removeAllListeners();
       out.removeAllListeners();
     };
@@ -178,6 +223,7 @@ async function streamToFileWithHash(
       const onAbort = () => {
         source.unpipe(out);
         out.destroy(new Error("aborted"));
+        cleanup();
         reject(new Error("aborted"));
       };
       if (signal.aborted) return onAbort();
@@ -187,6 +233,7 @@ async function streamToFileWithHash(
       hasher.update(chunk);
       bytes += chunk.length;
       if (onProgress) onProgress(bytes, contentLength);
+      armInactivity();
     });
     source.on("error", (err) => {
       cleanup();
@@ -201,6 +248,7 @@ async function streamToFileWithHash(
       cleanup();
       resolve({ sha256: hasher.digest("hex"), bytes });
     });
+    armInactivity();
     source.pipe(out);
   });
 }
@@ -292,6 +340,7 @@ export async function downloadAndStage(
 ): Promise<DownloadAndStageResult> {
   const { entry, onProgress, signal } = options;
   const fetcher = options.fetcher ?? httpsFetcher;
+  const inactivityMs = options.bodyInactivityMs ?? DEFAULT_BODY_INACTIVITY_MS;
 
   const emit = (event: InstallerProgressEvent) => {
     if (onProgress) {
@@ -345,7 +394,8 @@ export async function downloadAndStage(
           bytesTotal: bytesTotal ?? undefined,
         });
       },
-      signal
+      signal,
+      inactivityMs
     );
   } catch (err) {
     return fail("download", err instanceof Error ? err.message : String(err));
@@ -430,7 +480,15 @@ export async function downloadAndStage(
     // New install is broken — clean it up. The existing install is
     // untouched; the user's `<tool>` keeps working.
     rmSilent(stagedInstall);
-    return fail("verify-exec", verifyResult.error);
+    // Surface the captured stderr/stdout (last ~1 KB) along with the
+    // verify-exec failure summary. Without this the user just sees
+    // "expected exit 0, got 2" with no idea what the binary itself said
+    // — the actual diagnostic ("dyld: Library not loaded…", "missing
+    // HOME", etc.) lives in verifyResult.output and would be silently
+    // dropped otherwise.
+    const tail = verifyResult.output.slice(-1024).trim();
+    const detail = tail ? `${verifyResult.error}\n${tail}` : verifyResult.error;
+    return fail("verify-exec", detail);
   }
 
   // 7. ATOMIC SWAP — only now do we touch the user's existing install.
@@ -475,8 +533,11 @@ export async function downloadAndStage(
         }
         throw swapErr;
       }
-      // Success — drop the previous runtime now that the new one is live.
-      rmSilent(prevRuntime);
+      // Success — drop the previous runtime now that the new one is live,
+      // unless the caller asked us to keep it for a multi-step transaction.
+      if (!options.keepPrev) {
+        rmSilent(prevRuntime);
+      }
     }
   } catch (err) {
     // Final-stage swap failure leaves the existing install in place
@@ -495,4 +556,36 @@ export async function downloadAndStage(
 
   emit({ tool: entry.tool, phase: "complete" });
   return { ok: true, finalPath };
+}
+
+/**
+ * Production wrappers around the electron-free recovery helpers in
+ * `recovery.ts`. The wrappers resolve `binDir()` (which transitively
+ * imports `electron`) and forward; the pure helpers are testable
+ * under plain Node.
+ */
+import {
+  commitKeptPrevAt,
+  hasOrphanedKeptPrevAt,
+  rollbackKeptPrevAt,
+} from "./recovery.js";
+
+export {
+  commitKeptPrevAt,
+  hasOrphanedKeptPrevAt,
+  rollbackKeptPrevAt,
+} from "./recovery.js";
+
+/**
+ * Delete the kept `<tool>-runtime.prev` after a multi-step transaction
+ * (e.g. Parakeet chain) succeeded. No-op if `.prev` doesn't exist or
+ * the tool is single-binary. Idempotent.
+ */
+export function commitKeptPrev(entry: ToolManifestEntry): void {
+  commitKeptPrevAt(binDir(), entry);
+}
+
+/** See `rollbackKeptPrevAt`. */
+export function rollbackKeptPrev(entry: ToolManifestEntry): void {
+  rollbackKeptPrevAt(binDir(), entry);
 }

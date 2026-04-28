@@ -134,6 +134,7 @@ const api: GistlistApi = {
     set: (name, value) => ipcRenderer.invoke("secrets:set", name, value),
   },
   setupAsr: (opts) => ipcRenderer.invoke("setup-asr", opts),
+  cancelSetupAsr: () => ipcRenderer.send("setup-asr:abort"),
   llm: {
     check: () => ipcRenderer.invoke("llm:check"),
     setup: (opts) => ipcRenderer.invoke("llm:setup", opts),

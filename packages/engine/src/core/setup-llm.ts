@@ -13,6 +13,8 @@ const LOCAL_MODEL_ALIASES: Record<string, string> = {
   "qwen3.5": "qwen3.5:9b",
   "qwen3.5:latest": "qwen3.5:9b",
   "llama3.1:latest": "llama3.1:8b",
+  "mistral": "mistral:7b",
+  "mistral:latest": "mistral:7b",
 };
 
 export function normalizeLocalModelId(id: string | null | undefined): string | null {

@@ -10,11 +10,11 @@ import type {
   InitConfigRequest,
 } from "../../../shared/ipc";
 import {
-  LLM_MODELS,
   recommendLocalModel,
   findModelEntry,
   localModelIdsMatch,
 } from "../constants";
+import { ModelDropdown } from "../components/ModelDropdown";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
@@ -134,6 +134,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   const [skipBlackhole, setSkipBlackhole] = useState(false);
   const [restartingAudio, setRestartingAudio] = useState(false);
   const [restartAudioError, setRestartAudioError] = useState<string | null>(null);
+  const [recheckBusy, setRecheckBusy] = useState(false);
 
   // Audio permissions (macOS). micPermission = native TCC status for mic;
   // systemAudioProbe = AudioTee zero-sample probe. Both are checked lazily
@@ -212,6 +213,15 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
       setLocalLlmModel(recommendLocalModel(hardware?.totalRamGb));
     }
   }, [llmProvider, hardware, installedLocalModels, localLlmModel]);
+
+  // Parakeet (MLX) doesn't run on Intel Macs. If hardware detection comes
+  // back as Intel and the user is still on the parakeet-mlx default,
+  // auto-switch to OpenAI cloud ASR — the only working option on x64.
+  useEffect(() => {
+    if (hardware?.appleSilicon === false && asrProvider === "parakeet-mlx") {
+      setAsrProvider("openai");
+    }
+  }, [hardware?.appleSilicon, asrProvider]);
 
   useEffect(() => {
     if (step === 4) {
@@ -307,8 +317,24 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
         // non-fatal — the next interaction will retry.
         await api.llm.check().catch(() => {});
       }
-      const fresh = await api.depsCheck();
-      setDeps(fresh);
+      try {
+        const fresh = await api.depsCheck();
+        setDeps(fresh);
+      } catch (err) {
+        // depsCheck failure leaves the row in stale state — surface it
+        // explicitly so the user doesn't think the install silently failed.
+        setInstallError(
+          `Install completed but post-install check failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+    } catch (err) {
+      // IPC throw / preload failure — the install never returned. Without
+      // this catch the spinner clears with no error and the row keeps its
+      // pre-install "Missing" state, looking like the install silently
+      // succeeded but did nothing.
+      setInstallError(err instanceof Error ? err.message : String(err));
     } finally {
       setInstalling(null);
     }
@@ -326,6 +352,8 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
       }
       const fresh = await api.depsCheck();
       setDeps(fresh);
+    } catch (err) {
+      setRestartAudioError(err instanceof Error ? err.message : String(err));
     } finally {
       setRestartingAudio(false);
     }
@@ -352,9 +380,27 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     setInstallLog([]);
     setInstallError(null);
     try {
-      await api.setupAsr({ force: false });
-      const fresh = await api.depsCheck();
-      setDeps(fresh);
+      // setup-asr returns { ok, error, failedPhase } (mirrors deps:install)
+      // so the install pane gets the same `[<phase>]: ...` UX without
+      // string-parsing a thrown Error. The chain auto-installs ffmpeg +
+      // ffprobe + Python before building the venv, so a one-click flow.
+      const result = await api.setupAsr({ force: false });
+      if (!result.ok) {
+        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+        setInstallError(`Install failed${phase}: ${result.error ?? "unknown error"}`);
+      }
+      try {
+        const fresh = await api.depsCheck();
+        setDeps(fresh);
+      } catch (err) {
+        setInstallError(
+          (prev) =>
+            prev ??
+            `Install completed but post-install check failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`
+        );
+      }
     } catch (err) {
       setInstallError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -683,7 +729,17 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="parakeet-mlx">Parakeet (local)</SelectItem>
+                      {/* Parakeet runs on MLX, which is Apple-Silicon-only.
+                          Render the option only when hardware detection
+                          has positively confirmed Apple Silicon — using
+                          `=== true` (not `!== false`) so the option is
+                          hidden during the brief unknown-hardware window
+                          on first paint. Otherwise an Intel user could
+                          see Parakeet flash in before the hint below
+                          replaces it. */}
+                      {hardware?.appleSilicon === true && (
+                        <SelectItem value="parakeet-mlx">Parakeet (local)</SelectItem>
+                      )}
                       <SelectItem value="openai">OpenAI (cloud)</SelectItem>
                       {/* whisper.cpp (local) intentionally hidden for first
                           beta — whisper.cpp Releases don't currently ship
@@ -695,6 +751,15 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                           packages/app/main/installers/manifest.ts. */}
                     </SelectContent>
                   </Select>
+                  {hardware == null && (
+                    <Hint>Checking hardware…</Hint>
+                  )}
+                  {hardware?.appleSilicon === false && (
+                    <Hint>
+                      Local Parakeet transcription requires Apple Silicon. On
+                      Intel Macs use OpenAI cloud transcription instead.
+                    </Hint>
+                  )}
                 </Field>
 
                 <Field label="Summarization (LLM)">
@@ -729,70 +794,23 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                         : undefined
                     }
                   >
-                    <Select value={localLlmModel} onValueChange={setLocalLlmModel}>
-                      <SelectTrigger data-testid="local-llm-select">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(() => {
-                          const curated = LLM_MODELS.filter(
-                            (model) => model.provider === "ollama"
-                          );
-                          const recommendedId = recommendLocalModel(hardware?.totalRamGb);
-                          const extras = installedLocalModels.filter(
-                            (id) =>
-                              !curated.some((m) => localModelIdsMatch(m.id, id)) &&
-                              !/embed/i.test(id)
-                          );
-                          return (
-                            <>
-                              {curated.map((model) => {
-                                const tooBig =
-                                  typeof hardware?.totalRamGb === "number" &&
-                                  typeof model.minRamGb === "number" &&
-                                  model.minRamGb > hardware.totalRamGb;
-                                const installed = hasInstalledLocalModel(
-                                  installedLocalModels,
-                                  model.id
-                                );
-                                const recommended =
-                                  model.id === recommendedId;
-                                const sizeLabel = model.sizeGb
-                                  ? ` · ${model.sizeGb} GB`
-                                  : "";
-                                const tags: string[] = [];
-                                if (installed) tags.push("✓ installed");
-                                if (recommended && !tooBig)
-                                  tags.push("recommended");
-                                if (tooBig)
-                                  tags.push(
-                                    `needs ${model.minRamGb} GB RAM`
-                                  );
-                                const tagLabel = tags.length
-                                  ? ` · ${tags.join(" · ")}`
-                                  : "";
-                                return (
-                                  <SelectItem
-                                    key={model.id}
-                                    value={model.id}
-                                    disabled={tooBig}
-                                  >
-                                    {model.label}
-                                    {sizeLabel}
-                                    {tagLabel}
-                                  </SelectItem>
-                                );
-                              })}
-                              {extras.map((id) => (
-                                <SelectItem key={id} value={id}>
-                                  {id} · ✓ installed
-                                </SelectItem>
-                              ))}
-                            </>
-                          );
-                        })()}
-                      </SelectContent>
-                    </Select>
+                    <ModelDropdown
+                      value={localLlmModel}
+                      onChange={setLocalLlmModel}
+                      providerFilter="ollama"
+                      // Filter out embedding-only tags (e.g. nomic-embed-text)
+                      // so the LLM picker doesn't list them as chat models.
+                      // The semantic-search opt-in below installs the
+                      // embedding model separately.
+                      installedLocalModels={installedLocalModels.filter(
+                        (id) => !/embed/i.test(id)
+                      )}
+                      totalRamGb={hardware?.totalRamGb}
+                      allowCustom
+                      selectableWhenUninstalled
+                      recommendedId={recommendLocalModel(hardware?.totalRamGb)}
+                      triggerTestId="local-llm-select"
+                    />
                     {localLlmModel && (
                       <Hint>{findModelEntry(localLlmModel)?.blurb}</Hint>
                     )}
@@ -880,11 +898,22 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                   back={{ label: "Back", onClick: () => setStep(3), disabled: installing !== null }}
                   secondary={{
                     label: "Re-check",
-                    onClick: () => {
-                      api.depsCheck().then(setDeps).catch(() => {});
-                      api.deps.checkBrew().then(setBrewAvailable).catch(() => {});
+                    onClick: async () => {
+                      setRecheckBusy(true);
+                      try {
+                        const [fresh, brew] = await Promise.allSettled([
+                          api.depsCheck(),
+                          api.deps.checkBrew(),
+                        ]);
+                        if (fresh.status === "fulfilled") setDeps(fresh.value);
+                        if (brew.status === "fulfilled")
+                          setBrewAvailable(brew.value);
+                      } finally {
+                        setRecheckBusy(false);
+                      }
                     },
                     disabled: installing !== null,
+                    busy: recheckBusy,
                   }}
                   primary={{
                     label: busy
@@ -948,9 +977,10 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       anyInstalling={installing !== null}
                       brewAvailable={true}
                       onInstall={installParakeet}
+                      onCancel={() => api.cancelSetupAsr()}
                       footerNote={
                         !deps.parakeet.path
-                          ? "Creates a Python venv at ~/.gistlist/parakeet-venv and downloads model weights (~600 MB). Takes about a minute."
+                          ? "Installs an app-managed Python runtime (Apple-Silicon-only), ffmpeg if missing, and the Parakeet model — about 1 GB total. First run can take a few minutes on a slow connection while the model weights download."
                           : undefined
                       }
                     />
@@ -1086,7 +1116,7 @@ function WizardActions({
   primary,
 }: {
   back?: { label: string; onClick: () => void; disabled?: boolean };
-  secondary?: { label: string; onClick: () => void; disabled?: boolean };
+  secondary?: { label: string; onClick: () => void; disabled?: boolean; busy?: boolean };
   primary: { label: string; onClick: () => void; disabled?: boolean };
 }) {
   return (
@@ -1098,8 +1128,19 @@ function WizardActions({
       ) : null}
       <div className="ml-auto flex flex-wrap gap-3">
         {secondary ? (
-          <Button variant="secondary" onClick={secondary.onClick} disabled={secondary.disabled}>
-            {secondary.label}
+          <Button
+            variant="secondary"
+            onClick={secondary.onClick}
+            disabled={secondary.disabled || secondary.busy}
+          >
+            {secondary.busy ? (
+              <span className="flex items-center gap-2">
+                <Spinner className="h-3.5 w-3.5" />
+                Checking…
+              </span>
+            ) : (
+              secondary.label
+            )}
           </Button>
         ) : null}
         <Button onClick={primary.onClick} disabled={primary.disabled}>
@@ -1178,6 +1219,14 @@ interface DependencyRowProps {
   anyInstalling: boolean;
   brewAvailable: boolean | null;
   onInstall: () => void;
+  /**
+   * Optional cancel handler. When provided AND `installing` is true,
+   * the row renders an enabled "Cancel" button next to the spinner so
+   * the user can abort a long-running install (e.g. Parakeet's
+   * model-weight download). Without this, the install button is just
+   * a disabled "Installing…" spinner with no exit.
+   */
+  onCancel?: () => void;
   footerNote?: string;
 }
 
@@ -1190,6 +1239,7 @@ function DependencyRow({
   anyInstalling,
   brewAvailable,
   onInstall,
+  onCancel,
   footerNote,
 }: DependencyRowProps) {
   return (
@@ -1205,9 +1255,16 @@ function DependencyRow({
           {footerNote && !ok ? <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{footerNote}</div> : null}
         </div>
         {!ok ? (
-          <Button variant="secondary" onClick={onInstall} disabled={anyInstalling || brewAvailable === false}>
-            {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : installLabel}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={onInstall} disabled={anyInstalling || brewAvailable === false}>
+              {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : installLabel}
+            </Button>
+            {installing && onCancel ? (
+              <Button variant="ghost" size="sm" onClick={onCancel}>
+                Cancel
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

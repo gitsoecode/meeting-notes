@@ -16,7 +16,12 @@
  * (for the IPC handler) extending the DepsInstallTarget union — no
  * new install logic.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { findManifestEntry, type ToolName } from "./manifest.js";
+import { binDir } from "../paths.js";
+import { runVerifyExec } from "./verifyExec.js";
+import { hasOrphanedKeptPrevAt } from "./recovery.js";
 import {
   downloadAndStage,
   type DownloadAndStageResult,
@@ -31,6 +36,13 @@ export interface InstallToolOptions {
   fetcher?: Fetcher;
   /** Optional cancellation. */
   signal?: AbortSignal;
+  /**
+   * Preserve the previous runtime at `<binDir>/<tool>-runtime.prev` for
+   * a downstream transaction to commit or roll back. See `commitKeptPrev`
+   * / `rollbackKeptPrev` in `download.ts`. Used by the Parakeet chain
+   * to coordinate Python-runtime + venv as one transaction.
+   */
+  keepPrev?: boolean;
 }
 
 export type InstallToolResult =
@@ -64,7 +76,88 @@ export async function installTool(
     onProgress: options.onProgress,
     fetcher: options.fetcher,
     signal: options.signal,
+    keepPrev: options.keepPrev,
   });
+}
+
+/**
+ * Look up the manifest entry for a tool by name. Re-exported here so
+ * orchestrators (e.g. the setup-asr IPC handler) can pass the entry
+ * straight into `commitKeptPrev` / `rollbackKeptPrev` after they call
+ * `installTool` — without those helpers needing to look it up again.
+ */
+export function findEntry(tool: ToolName) {
+  return findManifestEntry(tool);
+}
+
+/**
+ * "Does an orphaned `.prev` runtime exist for `tool`?" — used by the
+ * Parakeet auto-chain to detect an in-flight transaction left behind
+ * by a previous run that was killed between Python install and venv
+ * commit/rollback. When this returns true, the caller should treat
+ * the chain as having an outstanding Python transaction: a successful
+ * venv build commits (deletes `.prev`); a failed venv build rolls
+ * back (restores the previous runtime from `.prev`). Without this
+ * check, an orphaned `.prev` would leak forever and the next failure
+ * would silently bypass the rollback because `pythonInstallNeedsCommit`
+ * was false.
+ *
+ * No-op for single-binary layouts (we don't keep `.prev` for those).
+ */
+export function hasOrphanedKeptPrev(tool: ToolName): boolean {
+  const entry = findManifestEntry(tool);
+  if (!entry) return false;
+  return hasOrphanedKeptPrevAt(binDir(), entry);
+}
+
+/**
+ * "Is the manifest-pinned version of `tool` already installed in
+ * `<binDir>/<tool>`?" — used by orchestrators to decide whether to
+ * call `installTool` or skip.
+ *
+ * Critically, this **does NOT** fall back to system PATH like
+ * `resolveBin` does. The Parakeet chain (and any other consumer that
+ * needs a known-version, app-managed binary) must NOT accept whatever
+ * `python3` happens to be on PATH — that re-introduces the
+ * "works because the dev had Python installed" class of bug. For
+ * Python specifically, the system copy may be the wrong arch (Intel
+ * Python on Apple Silicon), wrong major version, or otherwise
+ * incompatible with the venv we want to build against the pinned
+ * runtime.
+ *
+ * Implementation: existence-check the symlink/binary at `<binDir>/<tool>`,
+ * run it with the manifest's `verifyExec.args`, and parse the version
+ * from stdout/stderr. Compare against `entry.version`. Any miss means
+ * "install needed" and the caller should call `installTool` to either
+ * install fresh or upgrade in place (with `keepPrev: true` if the
+ * caller wants transactional rollback).
+ *
+ * Returns `false` when the tool is missing, when the version doesn't
+ * match, when verifyExec fails, or when verifyExec output doesn't
+ * contain a parseable version. Treat any false as "install needed."
+ */
+export async function isPinnedVersionInstalled(
+  tool: ToolName
+): Promise<boolean> {
+  const entry = findManifestEntry(tool);
+  if (!entry) return false;
+
+  const candidate = path.join(binDir(), tool);
+  if (!fs.existsSync(candidate)) return false;
+
+  // Run the manifest's verifyExec args (e.g., `python -V`, `ffmpeg -version`)
+  // and look for the manifest's pinned version string in the output.
+  const verifyResult = await runVerifyExec(candidate, entry.verifyExec);
+  if (!verifyResult.ok) return false;
+
+  // Match the manifest version *bounded* by non-version characters so
+  // "3.12.13" doesn't accidentally match "3.12.131". Also tolerate the
+  // common "<name> <version>" output shape (Python 3.12.13, ffmpeg
+  // version 7.1.1, ollama version is 0.21.2).
+  const pattern = new RegExp(
+    `(^|[^\\d.])${entry.version.replace(/\./g, "\\.")}([^\\d.]|$)`
+  );
+  return pattern.test(verifyResult.output);
 }
 
 export { type Fetcher, type InstallerProgressEvent } from "./download.js";

@@ -11,11 +11,13 @@ export {
 
 /**
  * Pick a sensible default local model for a machine with `ramGb` of RAM.
- * Pure function — kept testable and out of the React tree.
+ * Returns a model id that is always a member of the curated `LLM_MODELS`
+ * list — the wizard's "recommended" pill renders against this, so an
+ * off-list return would silently make the pill unreachable.
  */
 export function recommendLocalModel(ramGb: number | undefined): string {
-  if (!ramGb || ramGb < 16) return "qwen3:8b";
-  if (ramGb >= 24) return "qwen3.5:9b";
+  if (!ramGb || ramGb < 8) return "qwen3.5:2b";
+  if (ramGb < 16) return "qwen3.5:4b";
   return "qwen3.5:9b";
 }
 

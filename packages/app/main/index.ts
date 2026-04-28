@@ -30,7 +30,7 @@ import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortc
 import { resolveBin } from "./bundled.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { resolveMicCaptureBinary } from "./mic-capture-binary.js";
-import { setFfmpegPath, setFfprobePath, testAudioCapture } from "@gistlist/engine";
+import { setFfmpegPath, setFfprobePath, setPythonPath, testAudioCapture } from "@gistlist/engine";
 import { startAudioRetentionTimer } from "./audio-retention.js";
 import { getStatus as getRecordingStatus } from "./recording.js";
 import { getCachedAudioDevices } from "./device-cache.js";
@@ -327,8 +327,14 @@ app.whenReady().then(async () => {
     if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
     const ffprobeBin = await resolveBin("ffprobe");
     if (ffprobeBin) setFfprobePath(ffprobeBin.path);
+    // App-managed Python is installed by the Parakeet auto-chain. If
+    // it's already present from a previous wizard run, inject the path
+    // so engine/setupAsr can build the venv against it without re-doing
+    // the install. Falls back to bare "python3" via PATH for CLI/dev.
+    const pythonBin = await resolveBin("python");
+    if (pythonBin) setPythonPath(pythonBin.path);
   } catch {
-    // Non-fatal: engine falls back to bare "ffmpeg"/"ffprobe" via PATH.
+    // Non-fatal: engine falls back to bare "ffmpeg"/"ffprobe"/"python3" via PATH.
   }
 
   registerIpcHandlers();

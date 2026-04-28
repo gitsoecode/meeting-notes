@@ -77,6 +77,7 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirmState | null>(null);
   const [confirmingAction, setConfirmingAction] = useState(false);
   const [installingFfmpeg, setInstallingFfmpeg] = useState(false);
+  const [appleSilicon, setAppleSilicon] = useState<boolean | null>(null);
 
   const apiKeysRef = useRef<HTMLElement>(null);
 
@@ -95,6 +96,10 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
     api.recording.listAudioDevices().then(setDevices).catch(() => {});
     api.secrets.has("claude").then(setHasClaude).catch(() => {});
     api.secrets.has("openai").then(setHasOpenai).catch(() => {});
+    api.system
+      .detectHardware()
+      .then((h) => setAppleSilicon(h.appleSilicon))
+      .catch(() => setAppleSilicon(null));
     refreshDeps();
     refreshInstalledLocal();
   }, []);
@@ -436,7 +441,18 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                     <SelectValue placeholder="Select provider" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="parakeet-mlx">Parakeet (local, MLX)</SelectItem>
+                    {/* Parakeet runs on MLX, which is Apple-Silicon-only.
+                        Render the option only when hardware detection
+                        has positively confirmed Apple Silicon — using
+                        `=== true` (not `!== false`) so the option is
+                        hidden during the brief unknown-hardware window
+                        between mount and detectHardware() resolving.
+                        On Intel Macs the option stays hidden; on
+                        unresolved hardware Parakeet is hidden too,
+                        with a "Checking hardware…" hint below. */}
+                    {appleSilicon === true && (
+                      <SelectItem value="parakeet-mlx">Parakeet (local, MLX)</SelectItem>
+                    )}
                     <SelectItem value="openai">OpenAI Whisper (cloud)</SelectItem>
                     {/* Keep showing whisper.cpp (local) ONLY when the
                         existing config is already on it — that way users
@@ -456,10 +472,43 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                     Parakeet or OpenAI Whisper to keep transcribing.
                   </p>
                 )}
+                {appleSilicon === null && (
+                  <p className="text-xs text-[var(--text-tertiary)] pt-2">
+                    Checking hardware…
+                  </p>
+                )}
+                {appleSilicon === false && config.asr_provider === "parakeet-mlx" && (
+                  <p className="text-xs text-[var(--warning)] pt-2">
+                    Local Parakeet transcription requires Apple Silicon.
+                    Switch to OpenAI Whisper to keep transcribing on this
+                    Intel Mac.
+                  </p>
+                )}
               </div>
 
-              {/* Parakeet conditional */}
-              {config.asr_provider === "parakeet-mlx" && (
+              {/* Parakeet conditional. On Intel Macs (Parakeet's MLX
+                  backend is Apple-Silicon-only) we render only the
+                  steer copy — clicking Install would just trip the
+                  arm64-only Python manifest entry's `manifest`-phase
+                  failure and confuse users who already saw the warning
+                  above. The dropdown gate above hides the option for
+                  fresh configs; this branch covers stale configs whose
+                  asr_provider is already "parakeet-mlx". */}
+              {config.asr_provider === "parakeet-mlx" && appleSilicon === false && (
+                <div className="space-y-2">
+                  <p className="text-xs text-[var(--text-tertiary)]">
+                    Parakeet is unavailable on this Intel Mac. Switch the
+                    transcription provider above to OpenAI Whisper to keep
+                    transcribing.
+                  </p>
+                </div>
+              )}
+              {/* Show install UI only after hardware is confirmed Apple
+                  Silicon (=== true). While hardware is still null we
+                  render only the "Checking hardware…" hint above; we
+                  don't want a brief flash of the Install button on
+                  Intel Macs before detection resolves. */}
+              {config.asr_provider === "parakeet-mlx" && appleSilicon === true && (
                 <div className="space-y-2">
                   {deps == null ? (
                     <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
@@ -475,7 +524,7 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                         onClick={() => {
                           setPendingConfirm({
                             title: "Reinstall Parakeet?",
-                            description: "This will remove and recreate the Python environment from scratch (~2 GB download).",
+                            description: "Rebuilds the Python venv against the pinned runtime and re-runs the smoke test. The Parakeet model weights are kept in the Hugging Face cache so this is faster than the first install.",
                             confirmLabel: "Reinstall",
                             confirmVariant: "default",
                             action: () => setSetupAsrMode("reinstall"),
@@ -489,7 +538,10 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                     <div className="space-y-2">
                       <p className="text-sm text-[var(--warning-text)]">Not installed</p>
                       <p className="text-xs text-[var(--text-tertiary)]">
-                        Requires Python 3.11+ and ~2 GB disk space.
+                        Installs an app-managed Python runtime, ffmpeg if
+                        missing, then the Parakeet model — about 1 GB total.
+                        First run can take several minutes on a slow
+                        connection (model weights download lazily).
                       </p>
                       <Button
                         variant="secondary"
@@ -497,7 +549,7 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                         onClick={() => {
                           setPendingConfirm({
                             title: "Install Parakeet?",
-                            description: "This will create a Python environment and download the Parakeet model (~2 GB). This takes about a minute.",
+                            description: "Installs an app-managed Python runtime, ffmpeg if missing, and the Parakeet model. About 1 GB total. First run can take a few minutes while the model weights download.",
                             confirmLabel: "Install",
                             confirmVariant: "default",
                             action: () => setSetupAsrMode("install"),
@@ -1327,8 +1379,16 @@ function SetupAsrModal({
     setLog([]);
     setError(null);
     try {
-      await api.setupAsr({ force: isReinstall });
-      setDone(true);
+      // setupAsr now returns { ok, error, failedPhase } (mirrors deps:install).
+      // Treating a non-ok result as success used to confidently mark the
+      // dialog "done" even when the install actually failed.
+      const result = await api.setupAsr({ force: isReinstall });
+      if (!result.ok) {
+        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+        setError(`Install failed${phase}: ${result.error ?? "unknown error"}`);
+      } else {
+        setDone(true);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1364,7 +1424,17 @@ function SetupAsrModal({
           )}
         </div>
         <DialogFooter>
-          <Button variant="secondary" onClick={onClose} disabled={running}>Close</Button>
+          {running ? (
+            <Button
+              variant="secondary"
+              onClick={() => api.cancelSetupAsr()}
+              data-testid="setup-asr-cancel"
+            >
+              Cancel
+            </Button>
+          ) : (
+            <Button variant="secondary" onClick={onClose}>Close</Button>
+          )}
           <Button onClick={onRun} disabled={running}>
             {running ? <><Spinner className="h-4 w-4" /> {isReinstall ? "Reinstalling…" : "Installing…"}</> : isReinstall ? "Reinstall" : "Install"}
           </Button>

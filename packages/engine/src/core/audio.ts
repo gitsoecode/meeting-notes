@@ -35,7 +35,7 @@ export async function mediaHasAudioStream(mediaPath: string): Promise<boolean> {
     return stdout.trim().length > 0;
   } catch {
     throw new Error(
-      "ffprobe not found. Install ffmpeg:\n  brew install ffmpeg"
+      "ffprobe not found. Install ffmpeg from the setup wizard (Settings → Run setup again → Dependencies)."
     );
   }
 }
@@ -62,7 +62,7 @@ export async function getAudioInfo(audioPath: string): Promise<AudioInfo> {
     };
   } catch {
     throw new Error(
-      "ffprobe not found. Install ffmpeg:\n  brew install ffmpeg"
+      "ffprobe not found. Install ffmpeg from the setup wizard (Settings → Run setup again → Dependencies)."
     );
   }
 }
@@ -251,7 +251,7 @@ export async function normalizeAudio(
     ]);
   } catch {
     throw new Error(
-      "ffmpeg not found or conversion failed. Install ffmpeg:\n  brew install ffmpeg"
+      "ffmpeg not found or conversion failed. Install ffmpeg from the setup wizard (Settings → Run setup again → Dependencies)."
     );
   }
 }

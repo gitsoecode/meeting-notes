@@ -425,7 +425,14 @@ export interface DepsCheckResult {
   blackhole: BlackHoleStatus;
   /** True when macOS 14.2+ supports automatic system audio capture via CoreAudio taps. */
   systemAudioSupported: boolean;
-  /** python3 — system-only (we never install python ourselves). */
+  /**
+   * Python — prefers the app-managed runtime installed by the Parakeet
+   * auto-chain at `<userData>/bin/python` (CPython 3.12.13, Apple
+   * Silicon only, from python-build-standalone). Falls back to system
+   * `python3.x` on PATH for honest reporting only — the Parakeet chain
+   * itself never accepts a system Python. `source` reflects the
+   * actual origin: "app-installed" / "bundled" / "system".
+   */
   python: ResolvedTool;
   /** Parakeet venv binary — app-managed, lives under ~/.gistlist/. */
   parakeet: ResolvedTool;
@@ -818,8 +825,18 @@ export interface GistlistApi {
     has: (name: "claude" | "openai") => Promise<boolean>;
     set: (name: "claude" | "openai", value: string) => Promise<void>;
   };
-  // ASR setup
-  setupAsr: (opts: { force?: boolean }) => Promise<void>;
+  // ASR setup. Returns `{ ok, error, failedPhase }` so the renderer can
+  // surface the same `[<phase>]: ...` UX `deps:install` already produces.
+  // The chain auto-installs ffmpeg/ffprobe/Python as needed before
+  // building the venv.
+  setupAsr: (opts: { force?: boolean }) => Promise<DepsInstallResult>;
+  /**
+   * Cancel an in-flight setupAsr chain. Aborts every child process
+   * (downloads, venv build, pip install, smoke test) and triggers the
+   * Python-runtime rollback to .prev if a runtime install was in
+   * progress. No-op if nothing is in flight. Fire-and-forget.
+   */
+  cancelSetupAsr: () => void;
   // Local LLM (Ollama)
   llm: {
     /** Ensure the Ollama daemon is running and report installed models. */

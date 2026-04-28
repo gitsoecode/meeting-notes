@@ -484,6 +484,12 @@ export async function installMockApi(page: Page) {
       string,
       { ok: false; error?: string; failedPhase?: string }
     >();
+    // One-shot setup-asr failure override. Tests prime this via
+    // __MEETING_NOTES_TEST.setNextSetupAsrFailure(...) to exercise the
+    // {ok: false, error, failedPhase} unhappy paths in the Parakeet chain.
+    let mockSetupAsrFailure:
+      | { error: string; failedPhase?: string; logLines?: string[] }
+      | null = null;
     // Spy state for the Setup Wizard tests. The "Cancel from reopened
     // wizard" assertion needs to verify config:init was NOT called, and
     // the "retention can clear back to null" assertion needs to read the
@@ -967,6 +973,16 @@ export async function installMockApi(page: Page) {
        */
       setNextInstallFailure(target, response) {
         installFailureOverrides.set(target, clone(response));
+      },
+      /**
+       * Test helper: schedule the next call to `setupAsr()` to return a
+       * failure (with optional log lines emitted before the return).
+       * One-shot, mirrors `setNextInstallFailure`. Used by Parakeet-chain
+       * failure specs (ffmpeg auto-install fails, Python install fails,
+       * etc.) to drive the renderer's `[<phase>]: ...` unhappy-path UX.
+       */
+      setNextSetupAsrFailure(failure) {
+        mockSetupAsrFailure = clone(failure);
       },
       /**
        * Test helper: replace the mock's current updater status. Pushed
@@ -1783,7 +1799,38 @@ export async function installMockApi(page: Page) {
           persistState();
         },
       },
-      async setupAsr() {},
+      cancelSetupAsr() {
+        // Mock no-op: real impl sends "setup-asr:abort" IPC; tests
+        // that exercise cancellation can poke a hook here when needed.
+      },
+      async setupAsr() {
+        // Mock implementation of the new chain: emit log lines for each
+        // sub-step and report success. Real spec failure-mode tests
+        // override this via __MEETING_NOTES_TEST.setNextSetupAsrFailure()
+        // to drive the {ok, error, failedPhase} unhappy paths.
+        if (mockSetupAsrFailure) {
+          const failure = mockSetupAsrFailure;
+          mockSetupAsrFailure = null;
+          for (const line of failure.logLines ?? []) {
+            emit("setupAsrLog", line);
+          }
+          return {
+            ok: false,
+            error: failure.error,
+            failedPhase: failure.failedPhase,
+          };
+        }
+        emit("setupAsrLog", "→ ensuring ffmpeg + ffprobe");
+        emit("setupAsrLog", "  ✓ ffmpeg + ffprobe already present");
+        emit("setupAsrLog", "→ ensuring app-managed Python runtime");
+        emit("setupAsrLog", "  ✓ Python runtime already present");
+        emit("setupAsrLog", "→ building venv and installing mlx-audio");
+        emit("setupAsrLog", "  Creating venv: ~/.gistlist/parakeet-venv");
+        emit("setupAsrLog", "  Downloading Parakeet weights (~600 MB)…");
+        emit("setupAsrLog", "  ✓ Parakeet ready");
+        deps.parakeet = { path: "/mock/parakeet-venv/bin/mlx_audio.stt.generate" };
+        return { ok: true };
+      },
       llm: {
         async check() {
           return {

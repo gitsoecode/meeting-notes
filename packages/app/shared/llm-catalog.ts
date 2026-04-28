@@ -52,6 +52,11 @@ export const LLM_MODELS: LlmModelEntry[] = [
     provider: "openai",
     blurb: "OpenAI's reasoning model for complex tasks.",
   },
+  // Ollama tags below — sizes verified against ollama.com/library/<tag> on
+  // 2026-04-28. minRamGb is an app-side recommendation (RAM isn't canonical
+  // on Ollama); rough rule used: app overhead + ceil(sizeGb × 1.5), rounded
+  // up to the next common tier (4 / 8 / 16). When bumping a tag, re-check
+  // its size on ollama.com and update the date above this comment.
   {
     id: "qwen3.5:0.8b",
     label: "qwen3.5:0.8b",
@@ -72,15 +77,15 @@ export const LLM_MODELS: LlmModelEntry[] = [
     id: "qwen3.5:4b",
     label: "qwen3.5:4b",
     provider: "ollama",
-    sizeGb: 2.6,
+    sizeGb: 3.4,
     minRamGb: 8,
-    blurb: "Compact and fast — great for lower-RAM machines.",
+    blurb: "Compact and fast — great for 8 GB machines.",
   },
   {
     id: "qwen3.5:9b",
     label: "qwen3.5:9b",
     provider: "ollama",
-    sizeGb: 5.5,
+    sizeGb: 6.6,
     minRamGb: 16,
     blurb: "Best all-around local pick for transcript-style work.",
   },
@@ -88,15 +93,15 @@ export const LLM_MODELS: LlmModelEntry[] = [
     id: "llama3.1:8b",
     label: "llama3.1:8b",
     provider: "ollama",
-    sizeGb: 4.7,
+    sizeGb: 4.9,
     minRamGb: 8,
     blurb: "Meta's open-weights flagship. Great performance/size ratio.",
   },
   {
-    id: "mistral:latest",
-    label: "mistral:latest",
+    id: "mistral:7b",
+    label: "mistral:7b",
     provider: "ollama",
-    sizeGb: 4.1,
+    sizeGb: 4.4,
     minRamGb: 8,
     blurb: "Efficient and reliable local model.",
   },
@@ -104,7 +109,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
     id: "phi3:latest",
     label: "phi3:latest",
     provider: "ollama",
-    sizeGb: 2.3,
+    sizeGb: 2.2,
     minRamGb: 4,
     blurb: "Microsoft's capable tiny model. Runs on almost anything.",
   },
@@ -114,15 +119,15 @@ export const LLM_MODELS: LlmModelEntry[] = [
     provider: "ollama",
     sizeGb: 7.2,
     minRamGb: 16,
-    blurb: "Google's smallest Gemma 4 — quick inference, modest quality.",
+    blurb: "Google's smaller Gemma 4 — quick inference, modest quality.",
   },
   {
     id: "gemma4:e4b",
     label: "gemma4:e4b",
     provider: "ollama",
-    sizeGb: 4.0,
+    sizeGb: 9.6,
     minRamGb: 16,
-    blurb: "Lightweight Google model — quick to load, decent quality.",
+    blurb: "Larger Gemma 4 — better quality at the cost of disk and RAM.",
   },
 ];
 
@@ -130,6 +135,8 @@ const LOCAL_MODEL_ALIASES: Record<string, string> = {
   "qwen3.5": "qwen3.5:9b",
   "qwen3.5:latest": "qwen3.5:9b",
   "llama3.1:latest": "llama3.1:8b",
+  "mistral": "mistral:7b",
+  "mistral:latest": "mistral:7b",
 };
 
 export function classifyAppModel(id: string): LlmProviderKind {

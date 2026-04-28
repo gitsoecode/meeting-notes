@@ -26,8 +26,22 @@ interface ModelDropdownProps {
   localMode?: "all" | "installed-only";
   /** Which cloud providers have a working API key configured */
   availableKeys?: { claude?: boolean; openai?: boolean };
+  /**
+   * When true, uninstalled Ollama models are still selectable. Default
+   * (false) preserves the Settings behavior — you can't make an
+   * uninstalled model your default. The wizard sets this to true because
+   * the user is *choosing what to install*, not switching defaults.
+   */
+  selectableWhenUninstalled?: boolean;
+  /**
+   * Render a "recommended" pill next to this model's option label.
+   * Driven by the caller so the recommendation logic stays in one place
+   * (recommendLocalModel) and this component stays presentational.
+   */
+  recommendedId?: string;
   className?: string;
   triggerClassName?: string;
+  triggerTestId?: string;
 }
 
 export function ModelDropdown({
@@ -39,8 +53,11 @@ export function ModelDropdown({
   allowCustom = true,
   localMode = "all",
   availableKeys,
+  selectableWhenUninstalled = false,
+  recommendedId,
   className,
   triggerClassName,
+  triggerTestId,
 }: ModelDropdownProps) {
   const normalizedInstalled = useMemo(
     () => (installedLocalModels ?? []).map((m) => normalizeModelId(m)).filter(Boolean),
@@ -123,7 +140,7 @@ export function ModelDropdown({
   return (
     <div className={className}>
       <Select value={selectValue} onValueChange={onSelectChange}>
-        <SelectTrigger className={triggerClassName}>
+        <SelectTrigger className={triggerClassName} data-testid={triggerTestId}>
           <span
             className={`min-w-0 flex-1 truncate text-left ${value ? "text-[var(--text-primary)]" : "text-[var(--text-secondary)]"}`}
           >
@@ -169,12 +186,18 @@ export function ModelDropdown({
               {ollamaEntries.map((m) => {
                 const installed = isInstalled(m);
                 const tooLarge = tooBig(m);
-                const disabled = !installed || tooLarge;
+                const disabled = (!installed && !selectableWhenUninstalled) || tooLarge;
+                const recommended =
+                  recommendedId !== undefined && localModelIdsMatch(m.id, recommendedId);
                 const sizeLabel = m.sizeGb ? ` · ${m.sizeGb} GB` : "";
                 const statusLabel = installed
                   ? " — Installed"
-                  : " — Not installed";
+                  : selectableWhenUninstalled
+                    ? ""
+                    : " — Not installed";
                 const ramWarn = tooLarge ? ` · needs ${m.minRamGb} GB RAM` : "";
+                const recommendedTag =
+                  recommended && !tooLarge ? " · recommended" : "";
                 return (
                   <SelectItem
                     key={m.id}
@@ -184,9 +207,12 @@ export function ModelDropdown({
                     <span className={disabled ? "opacity-50" : ""}>
                       {m.label}
                       {sizeLabel}
-                      <span className={`text-xs ${installed ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}>
-                        {statusLabel}
-                      </span>
+                      {statusLabel && (
+                        <span className={`text-xs ${installed ? "text-[var(--success)]" : "text-[var(--text-tertiary)]"}`}>
+                          {statusLabel}
+                        </span>
+                      )}
+                      {recommendedTag}
                       {ramWarn}
                     </span>
                   </SelectItem>
@@ -209,7 +235,7 @@ export function ModelDropdown({
         />
       )}
 
-      {value && !showCustom && classifyModelClient(value) === "ollama" && installedLocalModels && !normalizedInstalled.some((inst) => localModelIdsMatch(inst, value)) && (
+      {value && !showCustom && !selectableWhenUninstalled && classifyModelClient(value) === "ollama" && installedLocalModels && !normalizedInstalled.some((inst) => localModelIdsMatch(inst, value)) && (
         <p className="mt-2 text-xs text-[var(--text-tertiary)]">
           This model is not installed. Go to <strong>Settings → AI Models</strong> to pull it.
         </p>

@@ -45,7 +45,9 @@ remove them by deleting that directory.
 | Tool | Version | License | Build variant | Source URL |
 |---|---|---|---|---|
 | ffmpeg | 7.1.1 | LGPL-2.1-or-later | evermeet.cx LGPL static (no GPL components) | https://evermeet.cx/ffmpeg/ffmpeg-7.1.1.zip |
+| ffprobe | 7.1.1 | LGPL-2.1-or-later | evermeet.cx LGPL static (paired with ffmpeg above) | https://evermeet.cx/ffmpeg/ffprobe-7.1.1.zip |
 | Ollama (CLI) | 0.21.2 | MIT | Universal `ollama-darwin.tgz` from upstream Releases | https://github.com/ollama/ollama/releases/download/v0.21.2/ollama-darwin.tgz |
+| CPython runtime | 3.12.13 | PSF-2.0 | python-build-standalone aarch64-apple-darwin install_only (release 20260414). Used as the host runtime for the Parakeet venv. Apple-Silicon only. | https://github.com/astral-sh/python-build-standalone/releases/download/20260414/cpython-3.12.13%2B20260414-aarch64-apple-darwin-install_only.tar.gz |
 
 `whisper-cli` (whisper.cpp) is intentionally not offered for first beta —
 upstream does not currently ship a signed macOS binary in Releases. When

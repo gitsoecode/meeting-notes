@@ -11,9 +11,18 @@ Local-first desktop meeting workspace for macOS. Records mic and system audio, t
 ## Prerequisites (contributor)
 
 - **Node ≥ 20**
-- **ffmpeg** (`brew install ffmpeg`)
 - **macOS 14.2+** for system-audio capture testing (older macOS records mic-only)
-- **Python 3.12** (or 3.11) — only if you're touching the Parakeet ASR path
+
+End-users do not need to install ffmpeg or Python by hand: the in-app
+Setup Wizard installs both into `<userData>/bin/` (ffmpeg/ffprobe from
+evermeet.cx, Python from python-build-standalone). For contributor work
+where you want to run the engine outside the wizard (CLI, headless
+tests), system-PATH `ffmpeg` / `python3.12` still work as a fallback —
+they're not required to develop the app itself.
+
+The Parakeet ASR path is **Apple Silicon only** (it depends on MLX). On
+Intel Macs the wizard hides the Parakeet option and steers users to
+OpenAI cloud transcription.
 
 ---
 
