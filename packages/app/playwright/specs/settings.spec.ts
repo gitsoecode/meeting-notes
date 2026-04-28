@@ -228,7 +228,7 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
-    await settings.openTab("Storage");
+    await settings.openTab("Audio");
     const select = settings.audioRetentionSelect();
     await expect(select).toBeVisible();
     await expect(select).toContainText("Never");
@@ -242,7 +242,7 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
-    await settings.openTab("Storage");
+    await settings.openTab("Audio");
     const select = settings.audioStorageModeSelect();
     await expect(select).toBeVisible();
     await expect(select).toContainText("Compact");
@@ -257,7 +257,7 @@ test.describe("Settings", () => {
     settings,
     page,
   }) => {
-    await settings.openTab("Storage");
+    await settings.openTab("Audio");
     const select = settings.audioRetentionSelect();
     await select.click();
     await page.getByRole("option", { name: "Custom" }).click();

@@ -509,6 +509,32 @@ export async function installMockApi(page: Page) {
       autoCheck: true,
       notifyBanner: true,
     };
+    // Meeting-index health/progress mock state. Defaults to a fully
+    // healthy index so unrelated specs aren't perturbed. The new
+    // settings-meeting-index spec drives these via __MEETING_NOTES_TEST
+    // helpers below to exercise pending / fts-only / no-vec / progress
+    // states without standing up a real Ollama daemon.
+    let meetingIndexHealthState: {
+      totalRuns: number;
+      pendingRuns: number;
+      ftsOnlyRuns: number;
+      vecAvailable: boolean;
+    } = { totalRuns: 0, pendingRuns: 0, ftsOnlyRuns: 0, vecAvailable: true };
+    let meetingIndexProgressState: {
+      state: "idle" | "running" | "paused" | "complete" | "error";
+      total: number;
+      completed: number;
+      currentRunFolder: string | null;
+      errors: number;
+      scope: "missing-chunks" | "missing-embeddings";
+    } = {
+      state: "idle",
+      total: 0,
+      completed: 0,
+      currentRunFolder: null,
+      errors: 0,
+      scope: "missing-chunks",
+    };
 
     const hydrateArray = <T,>(target: T[], source: T[]) => {
       target.splice(0, target.length, ...clone(source));
@@ -970,6 +996,33 @@ export async function installMockApi(page: Page) {
       /** Test helper: the request payload passed to the most recent config.initProject() call (or null). */
       getLastInitProjectRequest() {
         return clone(lastInitProjectRequest);
+      },
+      /**
+       * Test helper: replace the meeting-index health snapshot the mock
+       * returns from `meetingIndex.health()`. Pass a partial — fields
+       * not provided keep their current value. Used by the
+       * settings-meeting-index spec to drive each panel state.
+       */
+      setMeetingIndexHealth(partial) {
+        meetingIndexHealthState = {
+          ...meetingIndexHealthState,
+          ...partial,
+        };
+      },
+      /**
+       * Test helper: emit a synthetic
+       * `meetingIndexBackfillProgress` event. Lets the spec step the
+       * panel through running → complete (with or without errors)
+       * without standing up a real Ollama daemon. Also updates the
+       * status the mock returns from `backfillStatus()` so a
+       * mid-flight Settings re-mount sees the same value.
+       */
+      emitMeetingIndexProgress(next) {
+        meetingIndexProgressState = {
+          ...meetingIndexProgressState,
+          ...next,
+        };
+        emit("meetingIndexBackfillProgress", clone(meetingIndexProgressState));
       },
     };
 
@@ -2101,26 +2154,23 @@ export async function installMockApi(page: Page) {
         },
       },
       meetingIndex: {
-        async backfillStart() {
-          return {
+        async backfillStart(arg) {
+          const scope = arg?.scope ?? "missing-chunks";
+          meetingIndexProgressState = {
+            ...meetingIndexProgressState,
             state: "complete",
-            total: 0,
-            completed: 0,
-            currentRunFolder: null,
-            errors: 0,
+            scope,
           };
+          return clone(meetingIndexProgressState);
         },
         async backfillStatus() {
-          return {
-            state: "complete",
-            total: 0,
-            completed: 0,
-            currentRunFolder: null,
-            errors: 0,
-          };
+          return clone(meetingIndexProgressState);
         },
         async backfillCountPending() {
-          return 0;
+          return meetingIndexHealthState.pendingRuns;
+        },
+        async health() {
+          return clone(meetingIndexHealthState);
         },
         async embedModelStatus() {
           return { model: "nomic-embed-text", installed: true };

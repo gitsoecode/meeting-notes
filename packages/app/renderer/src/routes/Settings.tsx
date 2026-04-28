@@ -8,6 +8,8 @@ import type {
   AppConfigDTO,
   AudioDevice,
   DepsCheckResult,
+  MeetingIndexHealthDTO,
+  MeetingIndexProgressDTO,
   UpdaterStatus,
   UpdaterPreferences,
 } from "../../../shared/ipc";
@@ -29,6 +31,7 @@ import {
 } from "../components/ui/dialog";
 import { Input } from "../components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Meter } from "../components/ui/meter";
 import { Spinner } from "../components/ui/spinner";
 import { Switch } from "../components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
@@ -810,6 +813,14 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
               />
             </div>
           </section>
+
+          <Separator />
+
+          <AudioStorageSection config={config} onSave={save} />
+
+          <Separator />
+
+          <AudioRetentionSection config={config} onSave={save} />
         </TabsContent>
 
         {/* ── Storage tab ── */}
@@ -873,14 +884,6 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
               )}
             </div>
           </section>
-
-          <Separator />
-
-          <AudioStorageSection config={config} onSave={save} />
-
-          <Separator />
-
-          <AudioRetentionSection config={config} onSave={save} />
         </TabsContent>
 
         {/* ── General tab ── */}
@@ -1509,11 +1512,49 @@ function AudioRetentionSection({
 // ---------------------------------------------------------------------------
 
 function MeetingIndexSettingsSection() {
-  const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [health, setHealth] = useState<MeetingIndexHealthDTO | null>(null);
+  const [progress, setProgress] = useState<MeetingIndexProgressDTO | null>(null);
 
+  const refreshHealth = () => {
+    api.meetingIndex
+      .health()
+      .then(setHealth)
+      .catch(() => {});
+  };
+
+  // Mount: seed both the health snapshot and the in-flight backfill state
+  // (so opening Settings mid-run shows progress immediately, not blank
+  // until the next event fires).
   useEffect(() => {
-    api.meetingIndex.backfillCountPending().then(setPendingCount).catch(() => {});
+    refreshHealth();
+    api.meetingIndex
+      .backfillStatus()
+      .then(setProgress)
+      .catch(() => {});
+    const unsub = api.on.meetingIndexBackfillProgress((p) => setProgress(p));
+    return () => unsub();
   }, []);
+
+  // When a backfill finishes (with or without partial errors), the
+  // database state may have changed — refetch so the panel reflects it.
+  const lastTerminalKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!progress) return;
+    if (progress.state !== "complete" && progress.state !== "error") return;
+    const key = `${progress.scope}:${progress.state}:${progress.completed}:${progress.errors}`;
+    if (lastTerminalKeyRef.current === key) return;
+    lastTerminalKeyRef.current = key;
+    refreshHealth();
+  }, [progress]);
+
+  const running = progress?.state === "running";
+  const startScope = async (scope: "missing-chunks" | "missing-embeddings") => {
+    try {
+      await api.meetingIndex.backfillStart({ scope });
+    } catch {
+      /* noop */
+    }
+  };
 
   return (
     <>
@@ -1521,30 +1562,165 @@ function MeetingIndexSettingsSection() {
 
       <Separator />
 
-      <section className="space-y-3">
+      <section className="space-y-3" data-testid="meeting-index-health">
         <h3 className="text-sm font-medium text-[var(--text-primary)]">Indexing</h3>
         <p className="text-xs text-[var(--text-secondary)]">
           Claude Desktop (via MCP) searches an embedding index over your
           transcripts and summaries.
-          {pendingCount && pendingCount > 0
-            ? ` ${pendingCount} meetings are not yet indexed.`
-            : " All meetings are indexed."}
         </p>
-        <Button
-          size="sm"
-          onClick={async () => {
-            try {
-              await api.meetingIndex.backfillStart();
-            } catch {
-              /* noop */
-            }
-          }}
-          data-testid="meeting-index-backfill-start"
-        >
-          Re-run indexing
-        </Button>
+
+        {health == null ? (
+          <p
+            className="text-xs text-[var(--text-tertiary)]"
+            data-testid="meeting-index-health-loading"
+          >
+            Loading status…
+          </p>
+        ) : (
+          <MeetingIndexHealthBody
+            health={health}
+            progress={progress}
+            running={running}
+            onIndexPending={() => startScope("missing-chunks")}
+            onReembed={() => startScope("missing-embeddings")}
+          />
+        )}
       </section>
     </>
+  );
+}
+
+function MeetingIndexHealthBody({
+  health,
+  progress,
+  running,
+  onIndexPending,
+  onReembed,
+}: {
+  health: MeetingIndexHealthDTO;
+  progress: MeetingIndexProgressDTO | null;
+  running: boolean;
+  onIndexPending: () => void;
+  onReembed: () => void;
+}) {
+  const { totalRuns, pendingRuns, ftsOnlyRuns, vecAvailable } = health;
+
+  if (totalRuns === 0) {
+    return (
+      <p
+        className="text-sm text-[var(--text-secondary)]"
+        data-testid="meeting-index-state-empty"
+      >
+        No completed meetings to index yet.
+      </p>
+    );
+  }
+
+  const healthy = pendingRuns === 0 && ftsOnlyRuns === 0;
+  const healthyCopy = vecAvailable
+    ? `All ${totalRuns} ${totalRuns === 1 ? "meeting is" : "meetings are"} indexed and searchable.`
+    : `All ${totalRuns} ${totalRuns === 1 ? "meeting is" : "meetings are"} indexed for keyword search. Semantic search is unavailable because sqlite-vec isn't loaded.`;
+
+  return (
+    <div className="space-y-3">
+      {healthy ? (
+        <p
+          className="text-sm text-[var(--text-secondary)]"
+          data-testid="meeting-index-state-healthy"
+        >
+          {healthyCopy}
+        </p>
+      ) : null}
+
+      {pendingRuns > 0 ? (
+        <div className="space-y-2" data-testid="meeting-index-state-pending">
+          <p className="text-sm text-[var(--text-secondary)]">
+            {pendingRuns} of {totalRuns}{" "}
+            {totalRuns === 1 ? "meeting is" : "meetings are"} not yet indexed.
+          </p>
+          <Button
+            size="sm"
+            onClick={onIndexPending}
+            disabled={running}
+            data-testid="meeting-index-backfill-start"
+          >
+            Index pending meetings
+          </Button>
+        </div>
+      ) : null}
+
+      {ftsOnlyRuns > 0 ? (
+        <div className="space-y-2" data-testid="meeting-index-state-fts-only">
+          <p className="text-sm text-[var(--text-secondary)]">
+            {ftsOnlyRuns} {ftsOnlyRuns === 1 ? "meeting is" : "meetings are"} indexed
+            for keyword only — semantic search is incomplete.
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onReembed}
+            disabled={running}
+            data-testid="meeting-index-reembed"
+          >
+            Re-embed {ftsOnlyRuns} {ftsOnlyRuns === 1 ? "meeting" : "meetings"}
+          </Button>
+        </div>
+      ) : null}
+
+      {progress ? (
+        <MeetingIndexProgressRow progress={progress} />
+      ) : null}
+    </div>
+  );
+}
+
+function MeetingIndexProgressRow({
+  progress,
+}: {
+  progress: MeetingIndexProgressDTO;
+}) {
+  const { state, total, completed, errors, scope } = progress;
+  const running = state === "running";
+  const finished = state === "complete" || state === "error";
+  const hadErrors = errors > 0;
+
+  if (!running && !(finished && hadErrors)) return null;
+
+  const processed = completed + errors;
+  const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
+
+  let message: string;
+  if (running) {
+    message = hadErrors
+      ? `Indexing ${processed} / ${total}… ${errors} failed`
+      : `Indexing ${processed} / ${total}…`;
+  } else if (scope === "missing-embeddings") {
+    message =
+      "Re-embed failed — Ollama is still unreachable. Start Ollama and try again.";
+  } else {
+    message = `Indexing failed for ${errors} of ${total} ${total === 1 ? "meeting" : "meetings"} — check logs.`;
+  }
+
+  return (
+    <div className="space-y-1.5" data-testid="meeting-index-progress">
+      {running ? (
+        <Meter value={pct} size="sm" />
+      ) : null}
+      <p
+        className={
+          finished && hadErrors
+            ? "text-xs text-[var(--error)]"
+            : "text-xs text-[var(--text-secondary)]"
+        }
+        data-testid={
+          finished && hadErrors
+            ? "meeting-index-progress-error"
+            : "meeting-index-progress-message"
+        }
+      >
+        {message}
+      </p>
+    </div>
   );
 }
 
@@ -1820,15 +1996,7 @@ function IntegrationsSection() {
           className="rounded-md border border-[var(--error)] bg-[var(--error-bg,transparent)] p-3 text-sm text-[var(--error)]"
           data-testid="integrations-install-error"
         >
-          {actionError}{" "}
-          <a
-            className="underline"
-            href="https://gistlist.app/docs/claude-desktop-setup"
-            target="_blank"
-            rel="noreferrer"
-          >
-            See setup guide →
-          </a>
+          {actionError}
         </div>
       )}
 
@@ -1872,18 +2040,6 @@ function IntegrationsSection() {
             {meetingsLabel}
           </li>
         </ul>
-      </div>
-
-      <div className="text-xs text-[var(--text-secondary)]">
-        <a
-          className="underline"
-          href="https://gistlist.app/docs/claude-desktop-setup"
-          target="_blank"
-          rel="noreferrer"
-          data-testid="integrations-docs-link"
-        >
-          Setup guide & troubleshooting →
-        </a>
       </div>
     </section>
   );

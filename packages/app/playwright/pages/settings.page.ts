@@ -159,7 +159,7 @@ export class SettingsPage {
     return this.dependenciesCard().getByText(name, { exact: false });
   }
 
-  // Audio retention card (on Storage tab)
+  // Audio retention card (on Audio tab)
   audioStorageCard() {
     return this.card("Audio Storage");
   }

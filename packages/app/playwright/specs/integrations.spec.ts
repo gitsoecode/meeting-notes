@@ -28,11 +28,6 @@ test.describe("Settings → Integrations", () => {
     await expect(page.getByTestId("integrations-status-db")).toContainText(
       /7 meetings indexed/
     );
-
-    // Docs link is present and points at the public setup guide.
-    const docsLink = page.getByTestId("integrations-docs-link");
-    await expect(docsLink).toBeVisible();
-    await expect(docsLink).toHaveAttribute("href", /claude-desktop-setup/);
   });
 
   test("clicking install fires the IPC, shows the restart hint, and reveals Uninstall", async ({
@@ -70,7 +65,7 @@ test.describe("Settings → Integrations (install error path)", () => {
     await settings.openTab("Integrations");
   });
 
-  test("surfaces the error toast + docs link when install fails", async ({
+  test("surfaces the error toast when install fails", async ({
     page,
   }) => {
     // Set the mock-api test flag inline — the mock reads it at call time,
@@ -82,7 +77,6 @@ test.describe("Settings → Integrations (install error path)", () => {
     const errBox = page.getByTestId("integrations-install-error");
     await expect(errBox).toBeVisible({ timeout: 5000 });
     await expect(errBox).toContainText(/not valid JSON/);
-    await expect(errBox.getByRole("link", { name: /setup guide/i })).toBeVisible();
     // The success hint must NOT be shown on the failure branch.
     await expect(page.getByTestId("integrations-opened")).toHaveCount(0);
   });

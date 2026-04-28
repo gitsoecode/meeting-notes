@@ -21,7 +21,14 @@ import {
   createOllamaEmbedder,
 } from "@gistlist/engine";
 import { broadcastToAll } from "../events.js";
-import { ChatIndexBackfill } from "../chat-index/backfill.js";
+import { getDb } from "../db/connection.js";
+import { isVecAvailable } from "../db/sqlite-vec-loader.js";
+import {
+  ChatIndexBackfill,
+  type BackfillScope,
+} from "../chat-index/backfill.js";
+
+export type MeetingIndexBackfillScope = BackfillScope;
 
 export interface MeetingIndexProgressDTO {
   state: "idle" | "running" | "paused" | "complete" | "error";
@@ -29,6 +36,14 @@ export interface MeetingIndexProgressDTO {
   completed: number;
   currentRunFolder: string | null;
   errors: number;
+  scope: MeetingIndexBackfillScope;
+}
+
+export interface MeetingIndexHealthDTO {
+  totalRuns: number;
+  pendingRuns: number;
+  ftsOnlyRuns: number;
+  vecAvailable: boolean;
 }
 
 const appLogger = createAppLogger(false);
@@ -40,6 +55,7 @@ let latestBackfillProgress: MeetingIndexProgressDTO = {
   completed: 0,
   currentRunFolder: null,
   errors: 0,
+  scope: "missing-chunks",
 };
 
 function getOrCreateBackfill(): ChatIndexBackfill {
@@ -61,11 +77,16 @@ function getOrCreateBackfill(): ChatIndexBackfill {
 export function registerMeetingIndexIpc(): void {
   ipcMain.handle(
     "meeting-index:backfill-start",
-    async (): Promise<MeetingIndexProgressDTO> => {
+    async (
+      _e,
+      arg?: { scope?: MeetingIndexBackfillScope },
+    ): Promise<MeetingIndexProgressDTO> => {
       const bf = getOrCreateBackfill();
-      bf.start().catch((err) => {
+      const scope: MeetingIndexBackfillScope = arg?.scope ?? "missing-chunks";
+      bf.start({ scope }).catch((err) => {
         appLogger.warn("backfill failed", {
           detail: err instanceof Error ? err.message : String(err),
+          scope,
         });
       });
       return bf.getProgress();
@@ -88,6 +109,72 @@ export function registerMeetingIndexIpc(): void {
       return 0;
     }
   });
+
+  // Direct DB read — does NOT route through getOrCreateBackfill(), so
+  // opening Settings doesn't spin up an embedder/Ollama client just to
+  // count rows.
+  ipcMain.handle(
+    "meeting-index:health",
+    async (): Promise<MeetingIndexHealthDTO> => {
+      try {
+        const db = getDb();
+        const vecAvailable = isVecAvailable();
+
+        const totalRow = db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM runs WHERE status IN ('complete', 'error')",
+          )
+          .get() as { n: number };
+
+        const pendingRow = db
+          .prepare(
+            `SELECT COUNT(*) AS n
+             FROM runs r
+             LEFT JOIN (
+               SELECT run_id, COUNT(*) AS n
+               FROM chat_chunks
+               GROUP BY run_id
+             ) c ON c.run_id = r.run_id
+             WHERE r.status IN ('complete', 'error')
+               AND (c.n IS NULL OR c.n = 0)`,
+          )
+          .get() as { n: number };
+
+        let ftsOnlyRuns = 0;
+        if (vecAvailable) {
+          const ftsRow = db
+            .prepare(
+              `SELECT COUNT(DISTINCT c.run_id) AS n
+               FROM chat_chunks c
+               JOIN runs r ON r.run_id = c.run_id
+               WHERE r.status IN ('complete', 'error')
+                 AND NOT EXISTS (
+                   SELECT 1 FROM chat_chunks_vec v WHERE v.rowid = c.chunk_id
+                 )`,
+            )
+            .get() as { n: number };
+          ftsOnlyRuns = ftsRow.n;
+        }
+
+        return {
+          totalRuns: totalRow.n,
+          pendingRuns: pendingRow.n,
+          ftsOnlyRuns,
+          vecAvailable,
+        };
+      } catch (err) {
+        appLogger.warn("meeting-index:health failed", {
+          detail: err instanceof Error ? err.message : String(err),
+        });
+        return {
+          totalRuns: 0,
+          pendingRuns: 0,
+          ftsOnlyRuns: 0,
+          vecAvailable: false,
+        };
+      }
+    },
+  );
 
   ipcMain.handle(
     "meeting-index:embed-model-status",

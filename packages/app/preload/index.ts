@@ -218,9 +218,11 @@ const api: GistlistApi = {
     launch: (req: LaunchChatRequest) => ipcRenderer.invoke("chatLauncher:launch", req),
   },
   meetingIndex: {
-    backfillStart: () => ipcRenderer.invoke("meeting-index:backfill-start"),
+    backfillStart: (arg?: { scope?: "missing-chunks" | "missing-embeddings" }) =>
+      ipcRenderer.invoke("meeting-index:backfill-start", arg ?? {}),
     backfillStatus: () => ipcRenderer.invoke("meeting-index:backfill-status"),
     backfillCountPending: () => ipcRenderer.invoke("meeting-index:backfill-count-pending"),
+    health: () => ipcRenderer.invoke("meeting-index:health"),
     embedModelStatus: () => ipcRenderer.invoke("meeting-index:embed-model-status"),
     installEmbedModel: () => ipcRenderer.invoke("meeting-index:install-embed-model"),
   },

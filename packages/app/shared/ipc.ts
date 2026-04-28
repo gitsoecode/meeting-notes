@@ -561,12 +561,35 @@ export interface PickedMediaFile {
 
 // ---- Meeting index (FTS + sqlite-vec corpus the MCP server reads) ----
 
+export type MeetingIndexBackfillScope = "missing-chunks" | "missing-embeddings";
+
 export interface MeetingIndexProgressDTO {
   state: "idle" | "running" | "paused" | "complete" | "error";
   total: number;
   completed: number;
   currentRunFolder: string | null;
   errors: number;
+  /**
+   * Which run set this progress reflects. Lets the renderer attribute
+   * `errors` correctly when Settings opens after the run already finished
+   * (e.g. distinguishing "Ollama unreachable" from "indexing failed").
+   */
+  scope: MeetingIndexBackfillScope;
+}
+
+export interface MeetingIndexHealthDTO {
+  /** Total runs in a terminal state (`complete` or `error`). */
+  totalRuns: number;
+  /** Terminal runs with zero `chat_chunks` rows. */
+  pendingRuns: number;
+  /**
+   * Distinct terminal runs with at least one chunk missing its vec row
+   * (FTS-only because the embedder failed). Always 0 when sqlite-vec
+   * isn't loaded.
+   */
+  ftsOnlyRuns: number;
+  /** Whether the sqlite-vec extension is currently loaded. */
+  vecAvailable: boolean;
 }
 
 // ---- Chat Launcher ----
@@ -909,10 +932,22 @@ export interface GistlistApi {
   // Meeting index (the corpus the MCP server reads; still needs renderer
   // controls for re-index + embed-model install).
   meetingIndex: {
-    backfillStart: () => Promise<MeetingIndexProgressDTO>;
+    /**
+     * Kick a backfill. Default scope (`"missing-chunks"`) re-indexes runs
+     * with no chunks. `"missing-embeddings"` re-runs `indexRun` on FTS-only
+     * runs so they pick up vector embeddings (used after restoring Ollama).
+     */
+    backfillStart: (
+      arg?: { scope?: MeetingIndexBackfillScope },
+    ) => Promise<MeetingIndexProgressDTO>;
     backfillStatus: () => Promise<MeetingIndexProgressDTO>;
     /** Best-effort hint for the UI "N meetings need indexing" message. */
     backfillCountPending: () => Promise<number>;
+    /**
+     * Single-roundtrip status snapshot for the Settings health panel.
+     * Direct DB read — no Ollama probe.
+     */
+    health: () => Promise<MeetingIndexHealthDTO>;
     /** Check whether the embedding model is installed via Ollama. */
     embedModelStatus: () => Promise<{ model: string; installed: boolean }>;
     /** Start a pull of the embedding model. Progress streams via setupLlmLog. */
