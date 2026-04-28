@@ -10,12 +10,27 @@ test.describe("Meeting Workspace", () => {
   });
 
   test("loads the workspace with the current tab set", async ({ meetingWorkspace }) => {
-    await expect(meetingWorkspace.tab("Metadata")).toHaveAttribute("data-state", "active");
-    await expect(meetingWorkspace.tab("Summary")).toBeVisible();
+    // Summary is the default landing tab; Metadata moved to last.
+    await expect(meetingWorkspace.tab("Summary")).toHaveAttribute("data-state", "active");
+    await expect(meetingWorkspace.tab("Metadata")).toBeVisible();
     await expect(meetingWorkspace.tab("Analysis")).toBeVisible();
     await expect(meetingWorkspace.tab("Transcript")).toBeVisible();
     await expect(meetingWorkspace.tab("Recording")).toBeVisible();
     await expect(meetingWorkspace.tab("Files")).toBeVisible();
+    // Pin the visible tab order. Files label is dynamic ("Files" or
+    // "Files (N)") when attachments exist; normalize before comparing.
+    const labels = await meetingWorkspace
+      .tabsList()
+      .getByRole("tab")
+      .allInnerTexts();
+    expect(labels.map((t) => t.replace(/\s*\(\d+\)$/, "").trim())).toEqual([
+      "Summary",
+      "Analysis",
+      "Transcript",
+      "Recording",
+      "Files",
+      "Metadata",
+    ]);
     // Prep and Notes tabs were removed from Details — prep/notes editing lives
     // in the Workspace view now.
     await expect(meetingWorkspace.tab("Prep" as never)).toHaveCount(0);

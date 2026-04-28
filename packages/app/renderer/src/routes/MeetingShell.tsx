@@ -213,9 +213,10 @@ export function MeetingShell({
   // Priority order on first mount:
   //   1. explicit `initialTabId` from the router (chat citation → specific tab)
   //   2. `initialSeekMs` → Transcript tab so the cited line is in context
-  //   3. default "metadata"
+  //   3. default "summary" — leads with the artifact users came for; Metadata
+  //      moved to the last tab.
   const [activeTabId, setActiveTabId] = useState<DetailsTabKind>(
-    initialTabId ?? (initialSeekMs != null ? "transcript" : "metadata"),
+    initialTabId ?? (initialSeekMs != null ? "transcript" : "summary"),
   );
   const [tabContents, setTabContents] = useState<Record<string, string>>({});
   const [documentReloadVersion, setDocumentReloadVersion] = useState(0);
@@ -389,9 +390,9 @@ export function MeetingShell({
     setTabContents({});
     loadTokensRef.current.clear();
     // Reset to the same priority order as the initial useState: explicit
-    // initialTabId wins, then seek-implies-transcript, then metadata.
+    // initialTabId wins, then seek-implies-transcript, then summary.
     setActiveTabId(
-      initialTabId ?? (initialSeekMs != null ? "transcript" : "metadata"),
+      initialTabId ?? (initialSeekMs != null ? "transcript" : "summary"),
     );
     setActivePromptId(null);
     setAnalysisSearchQuery("");

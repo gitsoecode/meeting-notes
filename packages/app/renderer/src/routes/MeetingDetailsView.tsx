@@ -306,29 +306,14 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
       >
         <div className="min-w-0">
           <TabsList className="min-w-0 w-full overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <TabsTrigger value="metadata">Metadata</TabsTrigger>
             <TabsTrigger value="summary">Summary</TabsTrigger>
             <TabsTrigger value="analysis">Analysis</TabsTrigger>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
             <TabsTrigger value="recording">Recording</TabsTrigger>
             <TabsTrigger value="files">Files{attachments.length > 0 ? ` (${attachments.length})` : ""}</TabsTrigger>
+            <TabsTrigger value="metadata">Metadata</TabsTrigger>
           </TabsList>
         </div>
-
-        {/* ---- METADATA TAB ---- */}
-        <TabsContent value="metadata">
-          <div className="space-y-4">
-            <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 shadow-sm md:p-6">
-              <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={onRefreshDetail} />
-            </div>
-            {(prepNotes.trim() || notes.trim()) && (
-              <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 p-4">
-                <PrepOrNotesPreview label="Prep notes" source={prepNotes} onEdit={onFlipToWorkspace} />
-                <PrepOrNotesPreview label="Live notes" source={notes} onEdit={onFlipToWorkspace} />
-              </div>
-            )}
-          </div>
-        </TabsContent>
 
         {/* ---- SUMMARY TAB ---- */}
         <TabsContent value="summary">
@@ -650,6 +635,21 @@ export function MeetingDetailsView(props: MeetingDetailsViewProps) {
               )}
             </div>
           )}
+        </TabsContent>
+
+        {/* ---- METADATA TAB ---- */}
+        <TabsContent value="metadata">
+          <div className="space-y-4">
+            <div className="rounded-xl border border-[var(--border-subtle)] bg-white p-5 shadow-sm md:p-6">
+              <OverviewPanel detail={detail} runFolder={runFolder} onUpdated={onRefreshDetail} />
+            </div>
+            {(prepNotes.trim() || notes.trim()) && (
+              <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)]/40 p-4">
+                <PrepOrNotesPreview label="Prep notes" source={prepNotes} onEdit={onFlipToWorkspace} />
+                <PrepOrNotesPreview label="Live notes" source={notes} onEdit={onFlipToWorkspace} />
+              </div>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
 

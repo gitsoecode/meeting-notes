@@ -284,7 +284,7 @@ export function App() {
           initialTabId = "transcript";
         } else {
           view = "details";
-          initialTabId = "metadata";
+          initialTabId = "summary";
         }
         navigate({
           name: "meeting",
