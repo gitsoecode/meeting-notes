@@ -10,6 +10,18 @@ async function readNotesFromDisk(page: Page): Promise<string> {
   }, RUN_FOLDER);
 }
 
+async function readMilkdownRendererErrors(page: Page): Promise<string[]> {
+  return page.evaluate(async () => {
+    // @ts-expect-error - injected by preload
+    const entries = await window.api.logs.listAppEntries();
+    return entries
+      .filter((entry: { message?: string }) =>
+        /MilkdownError|Context "editorView" not found/.test(entry.message ?? "")
+      )
+      .map((entry: { message?: string }) => entry.message ?? "");
+  });
+}
+
 test.describe("Notes autosave — deletions persist across view toggles", () => {
   test.beforeEach(async ({ app, meetingsList, meetingWorkspace }) => {
     await app.navigateTo("Meetings");
@@ -102,6 +114,11 @@ test.describe("Notes autosave — deletions persist across view toggles", () => 
     meetingWorkspace,
     page,
   }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (err) => {
+      pageErrors.push(err.stack ?? err.message);
+    });
+
     const editor = meetingWorkspace.notesEditor();
     const box = await editor.boundingBox();
     if (!box) throw new Error("notes editor has no bounding box");
@@ -127,6 +144,7 @@ test.describe("Notes autosave — deletions persist across view toggles", () => 
 
     await meetingWorkspace.viewToggle("Details").click();
     await expect(meetingWorkspace.tabsList()).toBeVisible();
+    await page.waitForTimeout(350);
     await meetingWorkspace.viewToggle("Workspace").click();
     await expect(meetingWorkspace.workspacePanelGroup()).toBeVisible();
 
@@ -140,5 +158,7 @@ test.describe("Notes autosave — deletions persist across view toggles", () => 
     expect(postToggleDisk).not.toContain("Charlie");
     expect(postToggleDisk).not.toContain("Bravo");
     expect(postToggleDisk).toContain("Alpha");
+    expect(pageErrors).toEqual([]);
+    expect(await readMilkdownRendererErrors(page)).toEqual([]);
   });
 });

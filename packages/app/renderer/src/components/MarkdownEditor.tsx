@@ -4,6 +4,8 @@ import { cn } from "@/lib/utils";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
 
+type CrepeListenerApi = Parameters<Parameters<Crepe["on"]>[0]>[0];
+
 export interface MarkdownEditorProps {
   value: string;
   onChange: (value: string) => void;
@@ -51,6 +53,7 @@ export function MarkdownEditor({
 }: MarkdownEditorProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const crepeRef = useRef<Crepe | null>(null);
+  const listenerApiRef = useRef<CrepeListenerApi | null>(null);
   const onChangeRef = useRef(onChange);
   const onBlurRef = useRef(onBlur);
   // Last markdown Crepe emitted. We forward *every* emission to onChange
@@ -69,16 +72,23 @@ export function MarkdownEditor({
     const root = rootRef.current;
     if (!root) return;
 
+    const handleMarkdownUpdated: Parameters<CrepeListenerApi["markdownUpdated"]>[0] = (
+      _ctx,
+      markdown,
+    ) => {
+      if (markdown === lastEmittedRef.current) return;
+      lastEmittedRef.current = markdown;
+      onChangeRef.current(markdown);
+    };
+    const handleBlur: Parameters<CrepeListenerApi["blur"]>[0] = () => {
+      onBlurRef.current?.();
+    };
+
     const crepe = new Crepe({ root, defaultValue: value });
     crepe.on((api) => {
-      api.markdownUpdated((_ctx, markdown) => {
-        if (markdown === lastEmittedRef.current) return;
-        lastEmittedRef.current = markdown;
-        onChangeRef.current(markdown);
-      });
-      api.blur(() => {
-        onBlurRef.current?.();
-      });
+      listenerApiRef.current = api;
+      api.markdownUpdated(handleMarkdownUpdated);
+      api.blur(handleBlur);
     });
     crepe.setReadonly(readOnly);
     crepeRef.current = crepe;
@@ -87,6 +97,15 @@ export function MarkdownEditor({
     return () => {
       const toDestroy = crepeRef.current;
       crepeRef.current = null;
+      const listenerApi = listenerApiRef.current;
+      listenerApiRef.current = null;
+      if (listenerApi) {
+        // Milkdown's markdownUpdated listener serializes through a 200ms
+        // debounce. Remove our listener before destroy so a trailing tick
+        // doesn't serialize after editorViewCtx has been removed.
+        removeListener(listenerApi.listeners.markdownUpdated, handleMarkdownUpdated);
+        removeListener(listenerApi.listeners.blur, handleBlur);
+      }
       // Pull the current markdown *synchronously* before starting the async
       // destroy. Crepe batches markdownUpdated on a microtask; a fast
       // edit-then-unmount path can race such that the final keystroke
@@ -117,4 +136,9 @@ export function MarkdownEditor({
   }, [readOnly]);
 
   return <div ref={rootRef} className={cn("markdown-editor", className)} />;
+}
+
+function removeListener<T>(listeners: T[], listener: T) {
+  const index = listeners.indexOf(listener);
+  if (index >= 0) listeners.splice(index, 1);
 }
