@@ -497,6 +497,21 @@ export async function installMockApi(page: Page) {
     // in main; the mock just records calls.
     let initProjectCallCount = 0;
     let lastInitProjectRequest: unknown = null;
+    // Permission spy state for the consent-first wizard spec. Asserts that
+    // landing on step 4 reads mic status (passive) but never auto-fires
+    // requestMicrophonePermission or probeSystemAudioPermission — those
+    // only run on explicit button click. Tests can also override the
+    // mic permission status to simulate a fresh "not-determined" install.
+    let micPermissionStatus:
+      | "granted"
+      | "denied"
+      | "not-determined"
+      | "restricted" = "granted";
+    const permissionCallCounts = {
+      getMicrophonePermission: 0,
+      requestMicrophonePermission: 0,
+      probeSystemAudioPermission: 0,
+    };
     // Updater state — starts in the build-disabled shape so the default
     // mock matches first-beta behavior. Tests flip it via
     // __MEETING_NOTES_TEST.setUpdaterStatus({...}) when they want to
@@ -962,6 +977,23 @@ export async function installMockApi(page: Page) {
       setDependencyState(overrides) {
         Object.assign(depsState, overrides);
         persistState();
+      },
+      /**
+       * Test helpers for the consent-first permissions spec. Spec asserts
+       * that landing on step 4 of the wizard does NOT auto-fire either the
+       * microphone request or the system-audio probe — both only run on
+       * explicit button click.
+       */
+      setMicPermissionStatus(status) {
+        micPermissionStatus = status;
+      },
+      getPermissionCallCounts() {
+        return { ...permissionCallCounts };
+      },
+      resetPermissionCallCounts() {
+        permissionCallCounts.getMicrophonePermission = 0;
+        permissionCallCounts.requestMicrophonePermission = 0;
+        permissionCallCounts.probeSystemAudioPermission = 0;
       },
       /**
        * Test helper: schedule the next call to `deps.install(target)` to
@@ -1927,12 +1959,16 @@ export async function installMockApi(page: Page) {
           // no-op in tests
         },
         async requestMicrophonePermission() {
+          permissionCallCounts.requestMicrophonePermission += 1;
+          micPermissionStatus = "granted";
           return { granted: true, status: "granted" };
         },
         async getMicrophonePermission() {
-          return { status: "granted" };
+          permissionCallCounts.getMicrophonePermission += 1;
+          return { status: micPermissionStatus };
         },
         async probeSystemAudioPermission() {
+          permissionCallCounts.probeSystemAudioPermission += 1;
           return {
             status: "granted" as const,
             totalSamples: 16000,

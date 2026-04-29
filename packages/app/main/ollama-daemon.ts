@@ -7,7 +7,10 @@ import { trackChildProcess, updateTrackedProcess } from "./activity-monitor.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:11434";
 const PING_INTERVAL_MS = 250;
-const PING_TIMEOUT_MS = 8000;
+// First-run cold start on a slow disk (or with macOS Gatekeeper doing a
+// first-launch verification on the freshly-installed binary) can exceed
+// 8s. 20s leaves headroom without making genuine failure modes feel slow.
+const PING_TIMEOUT_MS = 20000;
 
 export type OllamaSource = "system-running" | "system-spawned" | "bundled-spawned";
 
