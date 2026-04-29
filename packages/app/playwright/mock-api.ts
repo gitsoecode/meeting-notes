@@ -460,6 +460,7 @@ export async function installMockApi(page: Page) {
       pythonVersion: "3.9.6",
       parakeet: "/Users/test/.gistlist/parakeet",
       whisper: "/opt/homebrew/bin/whisper-cli",
+      ollama: "/opt/homebrew/bin/ollama" as string | null,
       ollamaVersion: "0.7.2",
       brewAvailable: true,
     } as {
@@ -473,6 +474,7 @@ export async function installMockApi(page: Page) {
       pythonVersion: string | null;
       parakeet: string | null;
       whisper: string | null;
+      ollama: string | null;
       ollamaVersion: string | null;
       brewAvailable: boolean | null;
     };
@@ -497,6 +499,21 @@ export async function installMockApi(page: Page) {
     // in main; the mock just records calls.
     let initProjectCallCount = 0;
     let lastInitProjectRequest: unknown = null;
+    // Permission spy state for the consent-first wizard spec. Asserts that
+    // landing on step 4 reads mic status (passive) but never auto-fires
+    // requestMicrophonePermission or probeSystemAudioPermission — those
+    // only run on explicit button click. Tests can also override the
+    // mic permission status to simulate a fresh "not-determined" install.
+    let micPermissionStatus:
+      | "granted"
+      | "denied"
+      | "not-determined"
+      | "restricted" = "granted";
+    const permissionCallCounts = {
+      getMicrophonePermission: 0,
+      requestMicrophonePermission: 0,
+      probeSystemAudioPermission: 0,
+    };
     // Updater state — starts in the build-disabled shape so the default
     // mock matches first-beta behavior. Tests flip it via
     // __MEETING_NOTES_TEST.setUpdaterStatus({...}) when they want to
@@ -962,6 +979,23 @@ export async function installMockApi(page: Page) {
       setDependencyState(overrides) {
         Object.assign(depsState, overrides);
         persistState();
+      },
+      /**
+       * Test helpers for the consent-first permissions spec. Spec asserts
+       * that landing on step 4 of the wizard does NOT auto-fire either the
+       * microphone request or the system-audio probe — both only run on
+       * explicit button click.
+       */
+      setMicPermissionStatus(status) {
+        micPermissionStatus = status;
+      },
+      getPermissionCallCounts() {
+        return { ...permissionCallCounts };
+      },
+      resetPermissionCallCounts() {
+        permissionCallCounts.getMicrophonePermission = 0;
+        permissionCallCounts.requestMicrophonePermission = 0;
+        permissionCallCounts.probeSystemAudioPermission = 0;
       },
       /**
        * Test helper: schedule the next call to `deps.install(target)` to
@@ -1927,12 +1961,16 @@ export async function installMockApi(page: Page) {
           // no-op in tests
         },
         async requestMicrophonePermission() {
+          permissionCallCounts.requestMicrophonePermission += 1;
+          micPermissionStatus = "granted";
           return { granted: true, status: "granted" };
         },
         async getMicrophonePermission() {
-          return { status: "granted" };
+          permissionCallCounts.getMicrophonePermission += 1;
+          return { status: micPermissionStatus };
         },
         async probeSystemAudioPermission() {
+          permissionCallCounts.probeSystemAudioPermission += 1;
           return {
             status: "granted" as const,
             totalSamples: 16000,
@@ -2019,10 +2057,20 @@ export async function installMockApi(page: Page) {
           parakeet: wrap(depsState.parakeet, "app-installed"),
           whisper: wrap(depsState.whisper ?? null, "system"),
           ollama: {
-            daemon: true,
-            source: "bundled-spawned",
-            installedModels: clone(installedLocalModels),
-            version: depsState.ollamaVersion,
+            // Setting `ollama: null` via setDependencyState simulates a
+            // fresh-install machine where Ollama isn't on disk and nothing
+            // is answering on :11434. The wizard's Install Ollama button
+            // is gated on `daemon: false`, so this is the toggle that
+            // actually exercises the install path in mocks.
+            daemon: depsState.ollama !== null,
+            source:
+              depsState.ollama !== null
+                ? ("bundled-spawned" as const)
+                : undefined,
+            installedModels:
+              depsState.ollama !== null ? clone(installedLocalModels) : [],
+            version:
+              depsState.ollama !== null ? depsState.ollamaVersion : null,
           },
         };
       },
@@ -2056,8 +2104,11 @@ export async function installMockApi(page: Page) {
           if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
           if (target === "whisper-cli") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
           if (target === "ollama") {
-            // Ollama install just no-ops in the mock — daemon is already
-            // true. Real installs land the binary in <userData>/bin/.
+            // Flip the daemon state on so the post-install depsCheck
+            // reports installed. Tests that simulate "Ollama installed
+            // but daemon failed to start" leave depsState.ollama as null
+            // and override api.llm.check to return daemon: false.
+            depsState.ollama = "/opt/homebrew/bin/ollama";
           }
           persistState();
           return { ok: true };

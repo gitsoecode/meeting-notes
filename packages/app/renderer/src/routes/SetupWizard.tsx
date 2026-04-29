@@ -262,23 +262,14 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
   useEffect(() => {
     if (step === 4) {
-      api.depsCheck().then((d) => {
-        setDeps(d);
-        // Auto-run the system-audio probe as soon as we know the host
-        // supports it (macOS 14.2+). The probe plays its own test tone
-        // server-side, so the user doesn't have to play a YouTube video
-        // or click "Check system audio" — the result is deterministic
-        // and immediate. Skip if a previous run already produced a
-        // verdict so the user can see the latest state without flicker.
-        if (d?.systemAudioSupported && systemAudioProbe.status === "unknown") {
-          void probeSystemAudio();
-        }
-      }).catch(() => {});
+      // Status reads only — never trigger a permission dialog or run a
+      // subprocess as a side effect of landing on this step. The mic
+      // request and the system-audio probe (which indirectly surfaces
+      // the macOS Screen & System Audio Recording TCC dialog) only run
+      // when the user clicks their respective buttons.
+      api.depsCheck().then(setDeps).catch(() => {});
       api.deps.checkBrew().then(setBrewAvailable).catch(() => setBrewAvailable(false));
-      // Load app identity so we can tell the user what to look for in
-      // System Settings (e.g., "Electron" in dev, "Gistlist" in prod).
       api.system.getAppIdentity().then(setAppIdentity).catch(() => {});
-      // Read current mic permission state (doesn't prompt).
       api.system
         .getMicrophonePermission()
         .then(({ status }) => setMicPermission(status as typeof micPermission))
@@ -350,9 +341,19 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
         setInstallError(`Install failed${phase}: ${result.error ?? "unknown error"}`);
       } else if (target === "ollama") {
         // Ollama just landed on disk. Bring the daemon up so subsequent
-        // model pulls don't pay the cold-start cost. Failure here is
-        // non-fatal — the next interaction will retry.
-        await api.llm.check().catch(() => {});
+        // model pulls don't pay the cold-start cost. The IPC handler
+        // returns `daemon: false` when ensureOllamaDaemon throws (e.g.
+        // the binary spawned but :11434 never answered, or codesign
+        // refused to launch it). Treat that as an install-completion
+        // problem the user needs to see — silent swallowing here leaves
+        // them staring at a green "installed" row with a red LLM
+        // provider check and no idea why.
+        const llmStatus = await api.llm.check().catch(() => null);
+        if (!llmStatus || !llmStatus.daemon) {
+          setInstallError(
+            "Ollama installed but the daemon failed to start. See ~/.gistlist/ollama.log for details."
+          );
+        }
       }
       try {
         const fresh = await api.depsCheck();
@@ -506,15 +507,12 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     // ffprobe is paired with ffmpeg — engine audio code requires both.
     if (!deps.ffprobe.path) return true;
     if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
-    // System audio probe must produce a verdict before Finish. The probe
-    // auto-runs on step entry and resolves in ~2s; this gate just ensures
-    // users wait for it to complete instead of finishing with a stale
-    // unknown state. "denied" doesn't block — the user can intentionally
-    // choose mic-only recording — but they have to know about it first.
-    if (
-      deps.systemAudioSupported &&
-      (systemAudioProbe.status === "unknown" || systemAudioProbe.status === "probing")
-    ) {
+    // The system-audio probe is optional and consent-driven (the user has
+    // to click "Test system audio" to start it). Don't block Finish on
+    // "unknown" — that just means the user chose not to run the test, which
+    // is valid: system audio is optional, mic-only recording works.
+    // "probing" still blocks so users don't finish mid-probe.
+    if (deps.systemAudioSupported && systemAudioProbe.status === "probing") {
       return true;
     }
     // BlackHole no longer required — system audio is captured via AudioTee
@@ -1384,7 +1382,12 @@ function AudioPermissionsPanel({
 
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3 space-y-4">
-      <div className="text-sm font-medium text-[var(--text-primary)]">Audio permissions</div>
+      <div className="space-y-1">
+        <div className="text-sm font-medium text-[var(--text-primary)]">Audio permissions</div>
+        <div className="text-xs text-[var(--text-secondary)]">
+          Microphone access is required. System audio is optional — only needed if you record meetings with other speakers playing through your speakers.
+        </div>
+      </div>
 
       {/* Microphone */}
       <div className="space-y-2">
@@ -1511,8 +1514,16 @@ function AudioPermissionsPanel({
             </Badge>
           )}
           {systemAudioSupported && systemAudioProbe.status !== "probing" ? (
-            <Button size="sm" variant="secondary" onClick={onProbeSystemAudio}>
-              {systemAudioProbe.status === "granted" ? "Re-test" : "Test again"}
+            <Button
+              size="sm"
+              variant={systemAudioProbe.status === "unknown" ? "default" : "secondary"}
+              onClick={onProbeSystemAudio}
+            >
+              {systemAudioProbe.status === "unknown"
+                ? "Test system audio"
+                : systemAudioProbe.status === "granted"
+                  ? "Re-test"
+                  : "Test again"}
             </Button>
           ) : null}
         </div>
@@ -1561,8 +1572,7 @@ function AudioPermissionsPanel({
           </div>
         ) : systemAudioSupported ? (
           <div className="text-xs text-[var(--text-secondary)]">
-            Captures the other participants in your meeting (browser, Zoom, Teams, etc.). The check plays nothing —
-            it just verifies audio data is flowing through macOS's CoreAudio tap.
+            Captures other participants in your meeting (browser, Zoom, Teams). Optional — mic-only recording works without it. Testing plays a brief tone and asks macOS for permission to capture system audio.
           </div>
         ) : null}
       </div>

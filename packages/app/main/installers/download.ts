@@ -32,6 +32,7 @@ import path from "node:path";
 import { binDir, downloadStageDir, ensureDir } from "../paths.js";
 import type { ToolManifestEntry } from "./manifest.js";
 import { runVerifyExec } from "./verifyExec.js";
+import { stripQuarantineXattr } from "./xattr.js";
 
 export type InstallerPhase =
   | "download"
@@ -550,7 +551,16 @@ export async function downloadAndStage(
     );
   }
 
-  // 8. Cleanup of stage state — resolver only ever sees binDir().
+  // 8. Strip macOS quarantine xattr from the live install. On preserve-tree
+  // we cover the whole runtime dir (the binary plus every sibling .dylib);
+  // on single-binary we cover just the final binary path.
+  if (entry.installLayout === "preserve-tree") {
+    await stripQuarantineXattr(runtimeDirFor(entry));
+  } else {
+    await stripQuarantineXattr(finalPath);
+  }
+
+  // 9. Cleanup of stage state — resolver only ever sees binDir().
   rmSilent(stageFileFor(entry));
   rmSilent(extractDirFor(entry));
 

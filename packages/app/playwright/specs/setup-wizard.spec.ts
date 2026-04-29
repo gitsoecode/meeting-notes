@@ -236,6 +236,121 @@ test.describe("Setup Wizard", () => {
     await expect(page.getByText(/\(system\)/)).toBeVisible();
   });
 
+  test("step 4 never auto-fires permission prompts; both require explicit click", async ({
+    wizard,
+    page,
+  }) => {
+    // Regression guard for issue #3. Landing on step 4 must NOT fire the
+    // microphone request or the system-audio probe — both UX paths trigger
+    // a macOS TCC dialog (the system-audio probe indirectly via AudioTee),
+    // and a user landing on the step expects to see what's about to happen
+    // before any dialog opens. Only passive status reads are allowed on
+    // mount; dialogs/probes only run when the user clicks.
+    await page.evaluate(() => {
+      const harness = (window as any).__MEETING_NOTES_TEST;
+      harness.setMicPermissionStatus("not-determined");
+      harness.resetPermissionCallCounts();
+    });
+
+    // Walk to step 4 (deps).
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // step 1 → 2
+    await wizard.nextButton().click(); // step 2 → 3
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await wizard.nextButton().click(); // step 3 → 4
+    await expect(wizard.depsHeading()).toBeVisible();
+
+    // Give the mount effect time to settle (it should call
+    // getMicrophonePermission but nothing else).
+    await page.waitForTimeout(150);
+
+    const afterMount = await page.evaluate(() =>
+      (window as any).__MEETING_NOTES_TEST.getPermissionCallCounts()
+    );
+    expect(afterMount.getMicrophonePermission).toBeGreaterThan(0);
+    expect(afterMount.requestMicrophonePermission).toBe(0);
+    expect(afterMount.probeSystemAudioPermission).toBe(0);
+
+    // Mic button is visible because status is "not-determined".
+    const grantMicButton = page.getByRole("button", {
+      name: "Grant microphone access",
+    });
+    await expect(grantMicButton).toBeVisible();
+    await grantMicButton.click();
+
+    // System-audio: with status "unknown" the CTA is the primary
+    // "Test system audio" button.
+    const testSystemAudioButton = page.getByRole("button", {
+      name: "Test system audio",
+    });
+    await expect(testSystemAudioButton).toBeVisible();
+    await testSystemAudioButton.click();
+
+    // Wait for both async handlers to settle, then assert click counts.
+    await expect.poll(async () => {
+      return await page.evaluate(() => {
+        const counts = (window as any).__MEETING_NOTES_TEST.getPermissionCallCounts();
+        return counts.requestMicrophonePermission + counts.probeSystemAudioPermission;
+      });
+    }, { timeout: 3000 }).toBeGreaterThanOrEqual(2);
+
+    const afterClicks = await page.evaluate(() =>
+      (window as any).__MEETING_NOTES_TEST.getPermissionCallCounts()
+    );
+    expect(afterClicks.requestMicrophonePermission).toBe(1);
+    expect(afterClicks.probeSystemAudioPermission).toBe(1);
+  });
+
+  test("ollama install reports daemon-startup failure to the user", async ({
+    wizard,
+    page,
+  }) => {
+    // Regression guard for issue #3, second branch. When `deps.install`
+    // succeeds but the post-install `llm.check` fails (daemon couldn't
+    // bind, took too long to come up, etc.), the wizard must NOT silently
+    // swallow the error — it has to surface "Ollama installed but the
+    // daemon failed to start" so the user understands why the LLM row is
+    // still red.
+    // Simulate "Ollama not installed" so the wizard renders the Install
+    // Ollama button. The real llm:check IPC handler swallows
+    // ensureOllamaDaemon failures and returns
+    // { daemon: false, installedModels: [] }, so we mirror that resolved-
+    // but-unhealthy shape rather than rejecting.
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setDependencyState({
+        ollama: null,
+      });
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    await expect(wizard.depsHeading()).toBeVisible();
+
+    // Step 3's mount effect already called api.llm.check() to populate
+    // the installed-models list, so it's safe to overwrite api.llm.check
+    // here without that call consuming our override. Make the override
+    // sticky so the post-install check (and any subsequent depsCheck-
+    // driven re-renders) all see the same daemon-down result.
+    await page.evaluate(() => {
+      const api = (window as any).api;
+      api.llm.check = async () => ({
+        daemon: false,
+        installedModels: [],
+      });
+    });
+
+    await wizard.installButton("Install Ollama").click();
+
+    await expect(
+      page.getByText(/Ollama installed but the daemon failed to start/)
+    ).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText(/~\/.gistlist\/ollama\.log/)).toBeVisible();
+  });
+
   test("system audio shows optional badge when unsupported", async ({
     wizard,
     page,
@@ -254,8 +369,10 @@ test.describe("Setup Wizard", () => {
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click();
 
-    // System audio should show as optional, not a blocking failure
-    await expect(page.getByText("Optional")).toBeVisible();
+    // System audio should show as optional, not a blocking failure.
+    // Match the badge exactly — the new step-4 intro copy contains the
+    // word "optional" too, so a partial-text locator is now ambiguous.
+    await expect(page.getByText("Optional", { exact: true })).toBeVisible();
     await expect(page.getByText(/mic-only recording still works/)).toBeVisible();
     // Finish should still be enabled (system audio is not a blocker)
     await expect(wizard.finishButton()).toBeEnabled();

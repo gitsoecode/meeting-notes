@@ -1716,7 +1716,7 @@ export function registerIpcHandlers(): void {
         if (!result.ok) {
           createAppLogger(false).error("ffmpeg bundle install failed", {
             processType: "wizard-install",
-            detail: "ffmpeg",
+            detail: `ffmpeg:${result.phase ?? "unknown"}`,
             message: result.error,
           });
           return {
@@ -1764,7 +1764,7 @@ export function registerIpcHandlers(): void {
       if (!result.ok) {
         createAppLogger(false).error("Dependency install failed", {
           processType: "wizard-install",
-          detail: target,
+          detail: `${target}:${result.phase}`,
           message: result.error,
         });
         return { ok: false, error: result.error, failedPhase: result.phase };
