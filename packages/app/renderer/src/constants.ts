@@ -12,13 +12,22 @@ export {
 /**
  * Pick a sensible default local model for a machine with `ramGb` of RAM.
  * Returns a model id that is always a member of the curated `LLM_MODELS`
- * list — the wizard's "recommended" pill renders against this, so an
- * off-list return would silently make the pill unreachable.
+ * list — the wizard's auto-select uses this on first run.
  */
 export function recommendLocalModel(ramGb: number | undefined): string {
   if (!ramGb || ramGb < 8) return "qwen3.5:2b";
-  if (ramGb < 16) return "qwen3.5:4b";
-  return "qwen3.5:9b";
+  return "gemma4:e4b";
+}
+
+/**
+ * Models to flag with the "recommended" pill in the wizard's local-model
+ * picker. Returns multiple ids per tier so the user can see both a Gemma and
+ * a Qwen option highlighted on capable machines.
+ */
+export function recommendedLocalModelIds(ramGb: number | undefined): string[] {
+  if (!ramGb || ramGb < 8) return ["qwen3.5:2b"];
+  if (ramGb < 16) return ["gemma4:e4b", "qwen3.5:4b"];
+  return ["gemma4:e4b", "qwen3.5:9b"];
 }
 
 /** Format an ISO date as a relative label like "Today" / "Yesterday" / "3d ago". */

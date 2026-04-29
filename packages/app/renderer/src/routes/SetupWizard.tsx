@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { api } from "../ipc-client";
 import type {
@@ -11,6 +11,7 @@ import type {
 } from "../../../shared/ipc";
 import {
   recommendLocalModel,
+  recommendedLocalModelIds,
   findModelEntry,
   localModelIdsMatch,
 } from "../constants";
@@ -118,7 +119,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   const [keysChecked, setKeysChecked] = useState(false);
 
   const [llmProvider, setLlmProvider] = useState<AppConfigDTO["llm_provider"]>(
-    initialConfig?.llm_provider ?? "claude"
+    initialConfig?.llm_provider ?? "ollama"
   );
   const [localLlmModel, setLocalLlmModel] = useState<string>(
     initialConfig?.llm_provider === "ollama" ? initialConfig.ollama.model : ""
@@ -130,6 +131,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   const [brewAvailable, setBrewAvailable] = useState<boolean | null>(null);
   const [installing, setInstalling] = useState<DepsInstallTarget | "parakeet" | "local-llm" | null>(null);
   const [installLog, setInstallLog] = useState<string[]>([]);
+  const installLogRef = useRef<HTMLPreElement>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [skipBlackhole, setSkipBlackhole] = useState(false);
   const [restartingAudio, setRestartingAudio] = useState(false);
@@ -188,6 +190,12 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   }, []);
 
   useEffect(() => {
+    const node = installLogRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [installLog]);
+
+  useEffect(() => {
     if (step === 3 && !keysChecked) {
       setKeysChecked(true);
       api.secrets.has("claude").then(setHasClaude).catch(() => {});
@@ -207,8 +215,11 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   useEffect(() => {
     if (llmProvider !== "ollama") return;
     if (localLlmModel) return;
-    if (installedLocalModels.length > 0) {
-      setLocalLlmModel(installedLocalModels[0]);
+    const installedChatModels = installedLocalModels.filter(
+      (id) => !/embed/i.test(id)
+    );
+    if (installedChatModels.length > 0) {
+      setLocalLlmModel(installedChatModels[0]);
     } else {
       setLocalLlmModel(recommendLocalModel(hardware?.totalRamGb));
     }
@@ -808,7 +819,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       totalRamGb={hardware?.totalRamGb}
                       allowCustom
                       selectableWhenUninstalled
-                      recommendedId={recommendLocalModel(hardware?.totalRamGb)}
+                      recommendedIds={recommendedLocalModelIds(hardware?.totalRamGb)}
                       triggerTestId="local-llm-select"
                     />
                     {localLlmModel && (
@@ -1036,7 +1047,10 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                   download. The wizard never asks the user to open Terminal. */}
 
               {installLog.length > 0 && (
-                <pre className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]">
+                <pre
+                  ref={installLogRef}
+                  className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]"
+                >
                   {installLog.join("\n")}
                 </pre>
               )}

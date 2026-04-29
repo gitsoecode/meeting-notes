@@ -31,7 +31,9 @@ test.describe("Setup Wizard", () => {
 
     await wizard.nextButton().click();
     await expect(wizard.transcriptionHeading()).toBeVisible();
-    // Fill API key (required in cloud mode)
+    // Default is Local Ollama; switch to Anthropic Claude for the key flow.
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await page.screenshot({
       path: "test-results/screenshots/wizard-step3-transcription.png",
@@ -110,7 +112,7 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.nextButton()).toBeEnabled();
   });
 
-  test("local LLM opt-in makes Claude key optional", async ({
+  test("Local Ollama is the default and switching to Claude requires an API key", async ({
     wizard,
     page,
   }) => {
@@ -118,16 +120,18 @@ test.describe("Setup Wizard", () => {
     await wizard.nextButton().click(); // to data dir
     await wizard.nextButton().click(); // to transcription
 
-    // Without local LLM and without key, Next should be disabled
+    // Default is Local Ollama — Next should be enabled without a key once
+    // the local model picker has populated.
+    await expect(wizard.nextButton()).toBeEnabled({ timeout: 3000 });
+
+    // Switch summarization to Anthropic Claude — Next must now be disabled
+    // until an API key is supplied.
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await expect(wizard.nextButton()).toBeDisabled();
 
-    // Switch summarization to a local Ollama model
-    await wizard.localLlmToggle().click();
-    await page.getByRole("option", { name: /Local \(Ollama\)/ }).click();
-
-    // Now Next should be enabled without a Claude key
-    // (need to wait for model picker to populate)
-    await expect(wizard.nextButton()).toBeEnabled({ timeout: 3000 });
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await expect(wizard.nextButton()).toBeEnabled();
 
     await page.screenshot({
       path: "test-results/screenshots/wizard-step3-local-llm.png",
@@ -187,6 +191,8 @@ test.describe("Setup Wizard", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click(); // data dir
     await wizard.nextButton().click(); // transcription
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click(); // deps
 
@@ -214,6 +220,8 @@ test.describe("Setup Wizard", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click(); // data dir
     await wizard.nextButton().click(); // transcription
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click(); // deps
 
@@ -234,6 +242,8 @@ test.describe("Setup Wizard", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click();
 

@@ -34,11 +34,11 @@ interface ModelDropdownProps {
    */
   selectableWhenUninstalled?: boolean;
   /**
-   * Render a "recommended" pill next to this model's option label.
+   * Render a "recommended" pill next to these models' option labels.
    * Driven by the caller so the recommendation logic stays in one place
-   * (recommendLocalModel) and this component stays presentational.
+   * (recommendedLocalModelIds) and this component stays presentational.
    */
-  recommendedId?: string;
+  recommendedIds?: string[];
   className?: string;
   triggerClassName?: string;
   triggerTestId?: string;
@@ -54,7 +54,7 @@ export function ModelDropdown({
   localMode = "all",
   availableKeys,
   selectableWhenUninstalled = false,
-  recommendedId,
+  recommendedIds,
   className,
   triggerClassName,
   triggerTestId,
@@ -188,7 +188,7 @@ export function ModelDropdown({
                 const tooLarge = tooBig(m);
                 const disabled = (!installed && !selectableWhenUninstalled) || tooLarge;
                 const recommended =
-                  recommendedId !== undefined && localModelIdsMatch(m.id, recommendedId);
+                  recommendedIds?.some((id) => localModelIdsMatch(m.id, id)) ?? false;
                 const sizeLabel = m.sizeGb ? ` · ${m.sizeGb} GB` : "";
                 const statusLabel = installed
                   ? " — Installed"
