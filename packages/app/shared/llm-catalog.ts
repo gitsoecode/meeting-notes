@@ -57,6 +57,9 @@ export const LLM_MODELS: LlmModelEntry[] = [
   // on Ollama); rough rule used: app overhead + ceil(sizeGb × 1.5), rounded
   // up to the next common tier (4 / 8 / 16). When bumping a tag, re-check
   // its size on ollama.com and update the date above this comment.
+  // Exception: Gemma 4 e2b/e4b — Google's own guidance and Ollama's default
+  // 4-bit quant put practical RAM well below the heuristic's output, so the
+  // entries below pin minRamGb manually.
   {
     id: "qwen3.5:0.8b",
     label: "qwen3.5:0.8b",
@@ -118,7 +121,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
     label: "gemma4:e2b",
     provider: "ollama",
     sizeGb: 7.2,
-    minRamGb: 16,
+    minRamGb: 8,
     blurb: "Google's smaller Gemma 4 — quick inference, modest quality.",
   },
   {
@@ -126,7 +129,7 @@ export const LLM_MODELS: LlmModelEntry[] = [
     label: "gemma4:e4b",
     provider: "ollama",
     sizeGb: 9.6,
-    minRamGb: 16,
+    minRamGb: 8,
     blurb: "Larger Gemma 4 — better quality at the cost of disk and RAM.",
   },
 ];

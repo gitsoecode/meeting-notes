@@ -385,7 +385,7 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                       ? config.openai.model
                       : config.claude.model
                   }
-                  installedLocalModels={installedLocal}
+                  installedLocalModels={installedLocal.filter((id) => !/embed/i.test(id))}
                   availableKeys={{ claude: hasClaude, openai: hasOpenai }}
                   allowCustom={false}
                   localMode="installed-only"

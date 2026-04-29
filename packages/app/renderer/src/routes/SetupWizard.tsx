@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { api } from "../ipc-client";
 import type {
@@ -11,6 +11,7 @@ import type {
 } from "../../../shared/ipc";
 import {
   recommendLocalModel,
+  recommendedLocalModelIds,
   findModelEntry,
   localModelIdsMatch,
 } from "../constants";
@@ -118,18 +119,27 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   const [keysChecked, setKeysChecked] = useState(false);
 
   const [llmProvider, setLlmProvider] = useState<AppConfigDTO["llm_provider"]>(
-    initialConfig?.llm_provider ?? "claude"
+    initialConfig?.llm_provider ?? "ollama"
   );
   const [localLlmModel, setLocalLlmModel] = useState<string>(
     initialConfig?.llm_provider === "ollama" ? initialConfig.ollama.model : ""
   );
   const [hardware, setHardware] = useState<HardwareInfoDTO | null>(null);
   const [installedLocalModels, setInstalledLocalModels] = useState<string[]>([]);
+  // Tracks whether the step-3 `llm.check()` round-trip has completed, so
+  // the auto-select effect below can distinguish "not loaded yet" from
+  // "loaded, user has no chat models". Without this, hardware (a fast
+  // synchronous IPC) typically resolves before Ollama's HTTP probe, and
+  // the auto-select would lock in the recommended default before the
+  // installed-models list could win.
+  const [installedLocalModelsLoaded, setInstalledLocalModelsLoaded] =
+    useState(false);
 
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [brewAvailable, setBrewAvailable] = useState<boolean | null>(null);
   const [installing, setInstalling] = useState<DepsInstallTarget | "parakeet" | "local-llm" | null>(null);
   const [installLog, setInstallLog] = useState<string[]>([]);
+  const installLogRef = useRef<HTMLPreElement>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   const [skipBlackhole, setSkipBlackhole] = useState(false);
   const [restartingAudio, setRestartingAudio] = useState(false);
@@ -188,6 +198,12 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   }, []);
 
   useEffect(() => {
+    const node = installLogRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [installLog]);
+
+  useEffect(() => {
     if (step === 3 && !keysChecked) {
       setKeysChecked(true);
       api.secrets.has("claude").then(setHasClaude).catch(() => {});
@@ -196,7 +212,8 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
       api.llm
         .check()
         .then((res) => setInstalledLocalModels(res.installedModels))
-        .catch(() => setInstalledLocalModels([]));
+        .catch(() => setInstalledLocalModels([]))
+        .finally(() => setInstalledLocalModelsLoaded(true));
       api.meetingIndex
         .embedModelStatus()
         .then((s) => setEmbedAlreadyInstalled(!!s.installed))
@@ -207,12 +224,32 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   useEffect(() => {
     if (llmProvider !== "ollama") return;
     if (localLlmModel) return;
-    if (installedLocalModels.length > 0) {
-      setLocalLlmModel(installedLocalModels[0]);
+    // Wait for both step-3 fetches before locking in a default. With
+    // ollama as the first-run provider this effect runs on initial mount
+    // (hardware=null, models not yet probed). Picking now would freeze in
+    // recommendLocalModel(undefined)=qwen3.5:2b, and the truthy guard
+    // above blocks any later correction. Even after step 3 fires,
+    // hardware (a fast process-info IPC) typically resolves before
+    // Ollama's HTTP probe, so we also need to wait for the model list
+    // or the "installed wins" branch silently loses to the recommended
+    // default.
+    if (!hardware) return;
+    if (!installedLocalModelsLoaded) return;
+    const installedChatModels = installedLocalModels.filter(
+      (id) => !/embed/i.test(id)
+    );
+    if (installedChatModels.length > 0) {
+      setLocalLlmModel(installedChatModels[0]);
     } else {
-      setLocalLlmModel(recommendLocalModel(hardware?.totalRamGb));
+      setLocalLlmModel(recommendLocalModel(hardware.totalRamGb));
     }
-  }, [llmProvider, hardware, installedLocalModels, localLlmModel]);
+  }, [
+    llmProvider,
+    hardware,
+    installedLocalModels,
+    installedLocalModelsLoaded,
+    localLlmModel,
+  ]);
 
   // Parakeet (MLX) doesn't run on Intel Macs. If hardware detection comes
   // back as Intel and the user is still on the parakeet-mlx default,
@@ -808,7 +845,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       totalRamGb={hardware?.totalRamGb}
                       allowCustom
                       selectableWhenUninstalled
-                      recommendedId={recommendLocalModel(hardware?.totalRamGb)}
+                      recommendedIds={recommendedLocalModelIds(hardware?.totalRamGb)}
                       triggerTestId="local-llm-select"
                     />
                     {localLlmModel && (
@@ -1036,7 +1073,10 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                   download. The wizard never asks the user to open Terminal. */}
 
               {installLog.length > 0 && (
-                <pre className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]">
+                <pre
+                  ref={installLogRef}
+                  className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]"
+                >
                   {installLog.join("\n")}
                 </pre>
               )}

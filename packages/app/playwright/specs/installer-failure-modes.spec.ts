@@ -41,6 +41,8 @@ test.describe("Installer failure modes", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click(); // data dir
     await wizard.nextButton().click(); // transcription
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click(); // deps
 
@@ -85,6 +87,8 @@ test.describe("Installer failure modes", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click();
 
@@ -113,6 +117,8 @@ test.describe("Installer failure modes", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click();
 
@@ -150,6 +156,8 @@ test.describe("Installer failure modes", () => {
     await wizard.getStartedButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click();
 

@@ -22,7 +22,6 @@ import {
   getPromptsDir,
   isAllowedPromptOutputFilename,
   DEFAULT_PROMPTS_DIR,
-  FfmpegRecorder,
   openInObsidian,
   createAppLogger,
   setupAsr,
@@ -454,25 +453,17 @@ export function registerIpcHandlers(): void {
     // doesn't touch is preserved.
     const existing = safeLoadConfig();
 
-    // Auto-detect the default mic from AVFoundation only on FIRST RUN. On
-    // a wizard rerun (existing config present) an empty mic_device in the
-    // request means "wizard didn't change it" — preserve whatever the user
-    // had configured. Without this, every rerun would silently overwrite
-    // the user's selected mic with whichever device AVFoundation lists
-    // first, defeating the non-destructive-rerun guarantee.
+    // On a wizard rerun (existing config present) an empty mic_device in
+    // the request means "wizard didn't change it" — preserve whatever the
+    // user had configured, so a rerun never overwrites their selection.
+    // On first run, leave mic_device empty: the recording / audio-monitor
+    // layer routes empty through pickPhysicalMic(), which strips virtual
+    // loopback devices (BlackHole, Aggregate, etc.). Picking devices[0]
+    // from ffmpeg's raw list at this layer was saving BlackHole 2ch as
+    // the default mic on Macs with BlackHole installed.
     let micDevice = req.recording.mic_device;
-    if (!micDevice) {
-      if (existing?.recording.mic_device) {
-        micDevice = existing.recording.mic_device;
-      } else {
-        try {
-          const recorder = new FfmpegRecorder();
-          const devices = await recorder.listAudioDevices();
-          if (!micDevice) micDevice = devices[0] ?? "";
-        } catch {
-          // ffmpeg missing — leave fields empty; deps step will flag ffmpeg.
-        }
-      }
+    if (!micDevice && existing?.recording.mic_device) {
+      micDevice = existing.recording.mic_device;
     }
     const systemDevice = ""; // System audio handled by AudioTee, not a device
 
