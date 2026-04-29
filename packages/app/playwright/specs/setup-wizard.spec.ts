@@ -124,6 +124,13 @@ test.describe("Setup Wizard", () => {
     // the local model picker has populated.
     await expect(wizard.nextButton()).toBeEnabled({ timeout: 3000 });
 
+    // Regression guard: the auto-select must wait for both the host's
+    // RAM probe and Ollama's installed-models probe before locking in a
+    // default. The mock has qwen3.5:9b installed, so "installed wins"
+    // should pick it. If either probe is skipped on initial mount, the
+    // wizard freezes in recommendLocalModel(undefined) = qwen3.5:2b.
+    await expect(wizard.localModelSelect()).toContainText("qwen3.5:9b");
+
     // Switch summarization to Anthropic Claude — Next must now be disabled
     // until an API key is supplied.
     await wizard.llmProviderSelect().click();
