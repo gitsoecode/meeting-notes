@@ -460,6 +460,7 @@ export async function installMockApi(page: Page) {
       pythonVersion: "3.9.6",
       parakeet: "/Users/test/.gistlist/parakeet",
       whisper: "/opt/homebrew/bin/whisper-cli",
+      ollama: "/opt/homebrew/bin/ollama" as string | null,
       ollamaVersion: "0.7.2",
       brewAvailable: true,
     } as {
@@ -473,6 +474,7 @@ export async function installMockApi(page: Page) {
       pythonVersion: string | null;
       parakeet: string | null;
       whisper: string | null;
+      ollama: string | null;
       ollamaVersion: string | null;
       brewAvailable: boolean | null;
     };
@@ -2055,10 +2057,20 @@ export async function installMockApi(page: Page) {
           parakeet: wrap(depsState.parakeet, "app-installed"),
           whisper: wrap(depsState.whisper ?? null, "system"),
           ollama: {
-            daemon: true,
-            source: "bundled-spawned",
-            installedModels: clone(installedLocalModels),
-            version: depsState.ollamaVersion,
+            // Setting `ollama: null` via setDependencyState simulates a
+            // fresh-install machine where Ollama isn't on disk and nothing
+            // is answering on :11434. The wizard's Install Ollama button
+            // is gated on `daemon: false`, so this is the toggle that
+            // actually exercises the install path in mocks.
+            daemon: depsState.ollama !== null,
+            source:
+              depsState.ollama !== null
+                ? ("bundled-spawned" as const)
+                : undefined,
+            installedModels:
+              depsState.ollama !== null ? clone(installedLocalModels) : [],
+            version:
+              depsState.ollama !== null ? depsState.ollamaVersion : null,
           },
         };
       },
@@ -2092,8 +2104,11 @@ export async function installMockApi(page: Page) {
           if (target === "ffmpeg") depsState.ffmpeg = "/opt/homebrew/bin/ffmpeg";
           if (target === "whisper-cli") depsState.whisper = "/opt/homebrew/bin/whisper-cli";
           if (target === "ollama") {
-            // Ollama install just no-ops in the mock — daemon is already
-            // true. Real installs land the binary in <userData>/bin/.
+            // Flip the daemon state on so the post-install depsCheck
+            // reports installed. Tests that simulate "Ollama installed
+            // but daemon failed to start" leave depsState.ollama as null
+            // and override api.llm.check to return daemon: false.
+            depsState.ollama = "/opt/homebrew/bin/ollama";
           }
           persistState();
           return { ok: true };

@@ -1527,11 +1527,6 @@ function AudioPermissionsPanel({
             </Button>
           ) : null}
         </div>
-        {systemAudioSupported && systemAudioProbe.status === "unknown" ? (
-          <div className="text-xs text-[var(--text-secondary)]">
-            Optional. Plays a brief test tone and asks macOS for permission to capture system audio. Only needed if you record meetings with other speakers playing through your speakers — mic-only recording works without this.
-          </div>
-        ) : null}
         {systemAudioSupported && systemAudioProbe.status === "denied" ? (
           <div className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning-muted,rgba(245,158,11,0.08))] px-3 py-2 text-xs space-y-2">
             <div className="text-[var(--text-secondary)]">
@@ -1577,8 +1572,7 @@ function AudioPermissionsPanel({
           </div>
         ) : systemAudioSupported ? (
           <div className="text-xs text-[var(--text-secondary)]">
-            Captures the other participants in your meeting (browser, Zoom, Teams, etc.). The check plays nothing —
-            it just verifies audio data is flowing through macOS's CoreAudio tap.
+            Captures other participants in your meeting (browser, Zoom, Teams). Optional — mic-only recording works without it. Testing plays a brief tone and asks macOS for permission to capture system audio.
           </div>
         ) : null}
       </div>

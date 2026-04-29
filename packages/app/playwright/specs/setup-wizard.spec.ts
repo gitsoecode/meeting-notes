@@ -313,20 +313,15 @@ test.describe("Setup Wizard", () => {
     // swallow the error — it has to surface "Ollama installed but the
     // daemon failed to start" so the user understands why the LLM row is
     // still red.
+    // Simulate "Ollama not installed" so the wizard renders the Install
+    // Ollama button. The real llm:check IPC handler swallows
+    // ensureOllamaDaemon failures and returns
+    // { daemon: false, installedModels: [] }, so we mirror that resolved-
+    // but-unhealthy shape rather than rejecting.
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ollama: null,
       });
-      // The real llm:check IPC handler swallows ensureOllamaDaemon
-      // failures and returns { daemon: false, installedModels: [] }.
-      // Mirror that here: a resolved-but-unhealthy result drives the
-      // "daemon failed to start" message in the wizard.
-      const api = (window as any).api;
-      const original = api.llm.check;
-      api.llm.check = async () => {
-        api.llm.check = original;
-        return { daemon: false, installedModels: [] };
-      };
     });
 
     await wizard.getStartedButton().click();
@@ -334,6 +329,19 @@ test.describe("Setup Wizard", () => {
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await expect(wizard.depsHeading()).toBeVisible();
+
+    // Step 3's mount effect already called api.llm.check() to populate
+    // the installed-models list, so it's safe to overwrite api.llm.check
+    // here without that call consuming our override. Make the override
+    // sticky so the post-install check (and any subsequent depsCheck-
+    // driven re-renders) all see the same daemon-down result.
+    await page.evaluate(() => {
+      const api = (window as any).api;
+      api.llm.check = async () => ({
+        daemon: false,
+        installedModels: [],
+      });
+    });
 
     await wizard.installButton("Install Ollama").click();
 
@@ -361,8 +369,10 @@ test.describe("Setup Wizard", () => {
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click();
 
-    // System audio should show as optional, not a blocking failure
-    await expect(page.getByText("Optional")).toBeVisible();
+    // System audio should show as optional, not a blocking failure.
+    // Match the badge exactly — the new step-4 intro copy contains the
+    // word "optional" too, so a partial-text locator is now ambiguous.
+    await expect(page.getByText("Optional", { exact: true })).toBeVisible();
     await expect(page.getByText(/mic-only recording still works/)).toBeVisible();
     // Finish should still be enabled (system audio is not a blocker)
     await expect(wizard.finishButton()).toBeEnabled();
