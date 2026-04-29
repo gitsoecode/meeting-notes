@@ -102,16 +102,38 @@ Existing handler is correct (`download.ts:417-419`). One small improvement: incl
 - `packages/app/main/installers/download.ts:296-305` — the existing `verifySignature()` runs through `runProc` which already concatenates stderr into the rejected error (`download.ts:289-291`). Confirmed adequate. No change.
 - New: when `verify-signature` fails, the wizard error block should render a follow-up suggestion: "Try the install once more. If it keeps failing, please share `~/Library/Logs/Gistlist/main.log`." Add to the `installError` rendering in `SetupWizard.tsx`.
 
-#### Branch D — `verify-exec`
+#### Branch D — `verify-exec` (CONFIRMED ROOT CAUSE)
 
-Most insidious mode: `ollama --version` exits non-zero because dyld can't load the sibling `.so`/`.dylib` files. Our pipeline runs `verifyExec` against the *staged* tree (`download.ts:474-477`), and the staged tree contains the binary plus siblings, so dyld resolution should work — *but* `runVerifyExec` may be running with a sanitized environment that strips `DYLD_*` paths or sets a sandboxed CWD.
+**This is the actual failure** per the screenshot attached to issue #3:
 
-- Read `packages/app/main/installers/verifyExec.ts` and confirm:
-  - It runs the binary with `cwd` set to the staged runtime directory (so siblings resolve via `@loader_path`).
-  - It does **not** scrub `HOME` (Ollama needs `HOME` to resolve `~/.ollama`).
-  - It includes the staged runtime dir on `DYLD_FALLBACK_LIBRARY_PATH` if Ollama needs it (it generally doesn't because the binary uses `@loader_path`, but document and verify).
-- If any of those are wrong, fix them.
-- If the call already does the right thing, leave it alone — but ensure the captured `verifyResult.output` tail (`download.ts:489-490`) is making it into the wizard error (it does today; verify it's not truncated to the point of uselessness).
+```
+Install failed [verify-exec]: expected exit 0, got 2
+panic: $HOME is not defined
+goroutine 1 [running]:
+github.com/ollama/ollama/envconfig.Models()
+github.com/ollama/ollama/envconfig.AsMap()
+github.com/ollama/ollama/cmd.NewCLI()
+main.main()
+```
+
+Ollama's `cmd.NewCLI()` calls `envconfig.AsMap()` which requires `$HOME`
+*before* argv parsing — so even `ollama --version` panics if HOME isn't
+set. Our `runVerifyExec` (`packages/app/main/installers/verifyExec.ts:63`)
+spawns the child with `env: { PATH: "/usr/bin:/bin" }` and **nothing
+else**, deliberately stripping HOME. The file header even acknowledged
+this with "most --version invocations don't need them" — Ollama proves
+that wrong.
+
+**Fix:** forward `HOME` from the parent process (and only HOME) through
+to the verify-exec child. Don't blanket-pass the rest of the env — PATH
+remains pinned, every other var stays dropped. Encapsulated in a small
+`buildVerifyExecEnv()` helper so it's directly unit-testable.
+
+This is the only Ollama branch fix that has a confirmed cause-effect
+relationship to the reported failure. The other Ollama-side hardening
+in this plan (PING_TIMEOUT_MS bump, xattr strip, daemon-failure
+surfacing, failedPhase logging) is defense-in-depth — useful for
+adjacent failure modes that were not the actual cause here.
 
 #### Branch E — daemon startup (`ensureOllamaDaemon` post-install)
 

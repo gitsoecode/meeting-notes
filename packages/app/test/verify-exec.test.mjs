@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { runVerifyExec } from "../dist/main/installers/verifyExec.js";
+import { runVerifyExec, buildVerifyExecEnv } from "../dist/main/installers/verifyExec.js";
 
 // runVerifyExec doesn't need Electron — it just spawns a binary and
 // checks the exit code. We exercise it against system utilities that
@@ -63,4 +63,25 @@ test("runVerifyExec: captures stdout output", async () => {
   });
   assert.equal(result.ok, true);
   assert.match(result.output, /hello world/);
+});
+
+test("buildVerifyExecEnv: forwards HOME from parent", () => {
+  // Regression for issue #3: Ollama panics with "$HOME is not defined"
+  // during envconfig.Models() if HOME isn't set, killing the verify-exec
+  // step (see image attached to the issue). We pin PATH but must let
+  // HOME through.
+  const env = buildVerifyExecEnv({ HOME: "/Users/testuser", FOO: "bar" });
+  assert.equal(env.HOME, "/Users/testuser");
+  // PATH stays pinned — that's the whole reason we sanitize the env.
+  assert.equal(env.PATH, "/usr/bin:/bin");
+  // Anything else is dropped — parent FOO must not appear.
+  assert.equal(env.FOO, undefined);
+});
+
+test("buildVerifyExecEnv: omits HOME when parent has no HOME", () => {
+  // Defensive: runVerifyExec must not crash if the parent process
+  // somehow has no HOME (e.g. running under a stripped-down launcher).
+  const env = buildVerifyExecEnv({});
+  assert.equal(env.HOME, undefined);
+  assert.equal(env.PATH, "/usr/bin:/bin");
 });

@@ -8,12 +8,17 @@
  * Constraints (every one is deliberate, listed for the next reader):
  *
  *   - `shell: false`                 No shell expansion. We control argv.
- *   - `env: { PATH: "/usr/bin:/bin" }`
- *                                    Sanitized — the binary cannot leak
- *                                    user PATH preferences into its own
- *                                    behavior. We don't pass through any
- *                                    other env (no LANG, no HOME) — most
- *                                    --version invocations don't need them.
+ *   - Sanitized env                  PATH is pinned to "/usr/bin:/bin" so
+ *                                    the binary can't leak user PATH
+ *                                    preferences into its own behavior.
+ *                                    HOME is forwarded from the parent
+ *                                    process because most CLIs touch a
+ *                                    config dir during init (Ollama
+ *                                    panics in envconfig.Models() with
+ *                                    "$HOME is not defined" otherwise —
+ *                                    that's the exact failure that
+ *                                    motivated forwarding HOME here).
+ *                                    Nothing else passes through.
  *   - Hard timeout via AbortController
  *                                    Hangs are failure. Doesn't matter
  *                                    why a binary hangs (signing, model
@@ -42,6 +47,18 @@ export interface VerifyExecResult {
   durationMs: number;
 }
 
+/** Minimal env for verify-exec children. PATH is pinned; HOME is
+ * forwarded from the parent so CLIs that read `~/.<tool>` on init can
+ * locate it (Ollama is the original motivator — see file header).
+ * Exported for unit testing. */
+export function buildVerifyExecEnv(
+  parentEnv: NodeJS.ProcessEnv = process.env
+): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin" };
+  if (parentEnv.HOME) env.HOME = parentEnv.HOME;
+  return env;
+}
+
 /**
  * Run the binary in a constrained subprocess and assert it returned
  * the manifest's expected exit code within the timeout.
@@ -60,7 +77,7 @@ export async function runVerifyExec(
     return await new Promise<VerifyExecResult>((resolve) => {
       const child = spawn(binaryPath, policy.args, {
         shell: false,
-        env: { PATH: "/usr/bin:/bin" },
+        env: buildVerifyExecEnv(),
         stdio: ["ignore", "pipe", "pipe"],
         signal: controller.signal,
       });
