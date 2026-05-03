@@ -163,6 +163,7 @@ const api: GistlistApi = {
       ipcRenderer.invoke("system:probe-system-audio-permission"),
     getAudioPermissions: () =>
       ipcRenderer.invoke("system:get-audio-permissions"),
+    capabilities: () => ipcRenderer.invoke("system:capabilities"),
   },
   logs: {
     tailApp: (lines) => ipcRenderer.invoke("logs:tail-app", lines),

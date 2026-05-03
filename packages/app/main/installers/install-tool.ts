@@ -22,6 +22,7 @@ import { findManifestEntry, type ToolName } from "./manifest.js";
 import { binDir } from "../paths.js";
 import { runVerifyExec } from "./verifyExec.js";
 import { hasOrphanedKeptPrevAt } from "./recovery.js";
+import { isHostArchBinary } from "./arch.js";
 import {
   downloadAndStage,
   type DownloadAndStageResult,
@@ -145,9 +146,30 @@ export async function isPinnedVersionInstalled(
   const candidate = path.join(binDir(), tool);
   if (!fs.existsSync(candidate)) return false;
 
+  // Arch validation FIRST: if the on-disk binary's Mach-O arch doesn't
+  // match the host, skip the verifyExec spawn entirely. Spawning a
+  // wrong-arch binary on a host without Rosetta returns EBADARCH (libuv
+  // -86) and on some Node versions throws synchronously rather than
+  // emitting `'error'` — see the unit test in test/install-bundle.test.mjs
+  // for the regression guarantee. Returning false here triggers a fresh
+  // install that will replace the wrong-arch binary.
+  if (!(await isHostArchBinary(candidate))) {
+    return false;
+  }
+
   // Run the manifest's verifyExec args (e.g., `python -V`, `ffmpeg -version`)
   // and look for the manifest's pinned version string in the output.
-  const verifyResult = await runVerifyExec(candidate, entry.verifyExec);
+  // Defensive try/catch: even though runVerifyExec returns a structured
+  // result for spawn errors, we wrap to guarantee the helper never throws
+  // out — `isPinnedVersionInstalled` is a "should we install?" probe and
+  // a thrown error here would leak into `installFfmpegBundle` / the
+  // setup-asr chain as an unstructured failure.
+  let verifyResult;
+  try {
+    verifyResult = await runVerifyExec(candidate, entry.verifyExec);
+  } catch {
+    return false;
+  }
   if (!verifyResult.ok) return false;
 
   // Match the manifest version *bounded* by non-version characters so

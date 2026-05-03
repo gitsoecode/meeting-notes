@@ -28,6 +28,7 @@ import {
 } from "@gistlist/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { resolveBin } from "./bundled.js";
+import { resolveAndValidate } from "./installers/validated-resolve.js";
 import { resolveAudioTeeBinary } from "./audiotee-binary.js";
 import { resolveMicCaptureBinary } from "./mic-capture-binary.js";
 import { setFfmpegPath, setFfprobePath, setPythonPath, testAudioCapture } from "@gistlist/engine";
@@ -251,10 +252,14 @@ async function runAudioSmoke(): Promise<void> {
   watchdog.unref?.();
 
   try {
-    const ffmpegBin = await resolveBin("ffmpeg");
-    if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
-    const ffprobeBin = await resolveBin("ffprobe");
-    if (ffprobeBin) setFfprobePath(ffprobeBin.path);
+    // Same validated-injection rule as app startup — a stale wrong-arch
+    // binary would EBADARCH the smoke driver before it could even
+    // record. Use `resolveAndValidate` so the smoke driver picks up
+    // PATH instead when the app-managed binary is broken.
+    const ffmpegRes = await resolveAndValidate("ffmpeg");
+    if (ffmpegRes.injectable && ffmpegRes.path) setFfmpegPath(ffmpegRes.path);
+    const ffprobeRes = await resolveAndValidate("ffprobe");
+    if (ffprobeRes.injectable && ffprobeRes.path) setFfprobePath(ffprobeRes.path);
   } catch {
     // Non-fatal — fall back to PATH; smoke driver will catch silent capture.
   }
@@ -317,22 +322,29 @@ app.whenReady().then(async () => {
     app.dock.setIcon(dockIcon);
   }
 
-  // Resolve ffmpeg via our resolver (app-installed → bundled → PATH) and
-  // tell the engine the absolute path. Without this the engine spawns the
-  // bare `ffmpeg` command, which can fail in packaged GUI apps that miss
-  // a Homebrew prefix on PATH even though the binary exists at a known
-  // location like ~/Library/Application Support/Gistlist/bin/ffmpeg.
+  // Resolve ffmpeg / ffprobe / python and inject their paths into the
+  // engine, but ONLY if the resolved binary actually works on this host.
+  // A returning user with a stale x64 `<binDir>/ffmpeg` on an arm64 Mac
+  // without Rosetta would otherwise boot with the engine path pointing
+  // at a binary that EBADARCHs on first record — silently, before the
+  // wizard or Settings ever runs. The shared `resolveAndValidate` helper
+  // does arch + verifyExec validation for app-managed binaries and
+  // returns `injectable: false` when validation fails. System-PATH
+  // binaries (Homebrew etc.) are still always injected — same posture as
+  // before this validation existed; we don't spawn unknown system
+  // binaries (Phase 2).
   try {
-    const ffmpegBin = await resolveBin("ffmpeg");
-    if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
-    const ffprobeBin = await resolveBin("ffprobe");
-    if (ffprobeBin) setFfprobePath(ffprobeBin.path);
+    const ffmpegRes = await resolveAndValidate("ffmpeg");
+    if (ffmpegRes.injectable && ffmpegRes.path) setFfmpegPath(ffmpegRes.path);
+    const ffprobeRes = await resolveAndValidate("ffprobe");
+    if (ffprobeRes.injectable && ffprobeRes.path) setFfprobePath(ffprobeRes.path);
     // App-managed Python is installed by the Parakeet auto-chain. If
     // it's already present from a previous wizard run, inject the path
     // so engine/setupAsr can build the venv against it without re-doing
-    // the install. Falls back to bare "python3" via PATH for CLI/dev.
-    const pythonBin = await resolveBin("python");
-    if (pythonBin) setPythonPath(pythonBin.path);
+    // the install. Falls back to bare "python3" via PATH for CLI/dev
+    // when no app-managed runtime exists.
+    const pythonRes = await resolveAndValidate("python");
+    if (pythonRes.injectable && pythonRes.path) setPythonPath(pythonRes.path);
   } catch {
     // Non-fatal: engine falls back to bare "ffmpeg"/"ffprobe"/"python3" via PATH.
   }

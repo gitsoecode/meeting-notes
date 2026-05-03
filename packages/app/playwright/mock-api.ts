@@ -968,6 +968,22 @@ export async function installMockApi(page: Page) {
         }
         persistState();
       },
+      /**
+       * Test helper: set the in-memory document content the mock returns
+       * from `runs:read-document`. Used by the transcript-tab cache-
+       * invalidation regression test to rewrite a document AFTER the
+       * renderer has already cached it, simulating a pipeline that
+       * just produced a new transcript.
+       */
+      setDocument(runFolder, fileName, content) {
+        docs[runFolder] ??= {};
+        docs[runFolder][fileName] = content;
+        files[runFolder] ??= [];
+        if (!files[runFolder].some((f) => f.name === fileName)) {
+          files[runFolder].push({ name: fileName, size: content.length, kind: "document" });
+        }
+        persistState();
+      },
       failPromptOutput(runFolder, promptId, error = "Mock prompt failure") {
         failedPromptOutputs[`${runFolder}::${promptId}`] = error;
         persistState();
@@ -1038,6 +1054,17 @@ export async function installMockApi(page: Page) {
       },
       setProgressEmissionDelay(ms) {
         progressEmissionDelayMs = Math.max(0, Number(ms) || 0);
+      },
+      /**
+       * Test helper: synthesize a `pipelineProgress` event from the
+       * outside. Used by the transcript-tab cache-invalidation
+       * regression test to drive a `run-complete` event without going
+       * through the full processRecording / startReprocess flow. The
+       * mock's normal pipeline emissions go through this same listener
+       * fan-out, so the renderer can't tell the difference.
+       */
+      emitPipelineProgress(event) {
+        emit("pipelineProgress", clone(event));
       },
       /** Test helper: number of times config.initProject() has been called. */
       getInitProjectCallCount() {
@@ -1854,14 +1881,31 @@ export async function installMockApi(page: Page) {
             failedPhase: failure.failedPhase,
           };
         }
+        // Mirror the production setup-asr log stream so the wizard's
+        // 4-step rail and activity stream get exercised end-to-end:
+        //   - The three IPC-emitted `→ ensuring …` / `→ building …`
+        //     boundaries for audio-tools, python-runtime, venv.
+        //   - The `→ Downloading Parakeet weights` boundary that the
+        //     real ipc.ts synthesizes when the engine logs
+        //     "Running smoke test (downloads Parakeet weights …)".
+        //     Without this, mock e2e never proves the rail reaches
+        //     the speech-model phase.
+        //   - The engine's "Running smoke test (downloads Parakeet
+        //     weights …)" raw line so the activity stream surfaces it
+        //     too (production users see this text under "View raw log").
+        //   - The engine's `✓ Smoke test transcription: …` success
+        //     marker, which is the activity-stream signal that
+        //     verification happened.
         emit("setupAsrLog", "→ ensuring ffmpeg + ffprobe");
         emit("setupAsrLog", "  ✓ ffmpeg + ffprobe already present");
         emit("setupAsrLog", "→ ensuring app-managed Python runtime");
         emit("setupAsrLog", "  ✓ Python runtime already present");
         emit("setupAsrLog", "→ building venv and installing mlx-audio");
         emit("setupAsrLog", "  Creating venv: ~/.gistlist/parakeet-venv");
-        emit("setupAsrLog", "  Downloading Parakeet weights (~600 MB)…");
-        emit("setupAsrLog", "  ✓ Parakeet ready");
+        emit("setupAsrLog", "  ✓ Installed: ~/.gistlist/parakeet-venv/bin/mlx_audio.stt.generate");
+        emit("setupAsrLog", "→ Downloading Parakeet weights");
+        emit("setupAsrLog", "  Running smoke test (downloads Parakeet weights on first run, ~600 MB)…");
+        emit("setupAsrLog", '  ✓ Smoke test transcription: "Parakeet smoke test is working."');
         deps.parakeet = { path: "/mock/parakeet-venv/bin/mlx_audio.stt.generate" };
         return { ok: true };
       },
@@ -1871,6 +1915,7 @@ export async function installMockApi(page: Page) {
             daemon: true,
             source: "bundled-spawned",
             installedModels: clone(installedLocalModels),
+            verified: "verified" as const,
           };
         },
         async setup({ model }) {
@@ -1978,6 +2023,15 @@ export async function installMockApi(page: Page) {
             totalBytes: 32000,
           };
         },
+        async getAudioPermissions() {
+          return {
+            microphone: micPermissionStatus,
+            systemAudio: "granted" as const,
+          };
+        },
+        async capabilities() {
+          return { systemAudioSupported: true };
+        },
       },
       logs: {
         async tailApp() {
@@ -2035,10 +2089,20 @@ export async function installMockApi(page: Page) {
       },
       async depsCheck() {
         // Wrap flat depsState fields into the ResolvedTool shape the
-        // renderer now expects (path / source / version). Mocked
-        // sources default to "system" (Homebrew-style paths) and
-        // "app-installed" for the parakeet venv, matching the
-        // production resolver semantics.
+        // renderer now expects (path / source / version / verified).
+        // Default `verified` mirrors prod logic: "verified" for app/bundled
+        // sources, "system-unverified" for system-PATH (since Phase 2 no
+        // longer spawns system binaries to confirm), "missing" for null
+        // path. Specs that need to override per-row can do so by composing
+        // their own depsCheck stub.
+        const verifiedFor = (
+          path: string | null,
+          source: "system" | "app-installed" | "bundled"
+        ): "verified" | "system-unverified" | "missing" => {
+          if (!path) return "missing";
+          if (source === "app-installed" || source === "bundled") return "verified";
+          return "system-unverified";
+        };
         const wrap = (
           path: string | null,
           source: "system" | "app-installed" | "bundled",
@@ -2047,6 +2111,7 @@ export async function installMockApi(page: Page) {
           path,
           source: path ? source : null,
           version,
+          verified: verifiedFor(path, source),
         });
         return {
           ffmpeg: wrap(depsState.ffmpeg, "system", depsState.ffmpegVersion),
@@ -2057,11 +2122,6 @@ export async function installMockApi(page: Page) {
           parakeet: wrap(depsState.parakeet, "app-installed"),
           whisper: wrap(depsState.whisper ?? null, "system"),
           ollama: {
-            // Setting `ollama: null` via setDependencyState simulates a
-            // fresh-install machine where Ollama isn't on disk and nothing
-            // is answering on :11434. The wizard's Install Ollama button
-            // is gated on `daemon: false`, so this is the toggle that
-            // actually exercises the install path in mocks.
             daemon: depsState.ollama !== null,
             source:
               depsState.ollama !== null
@@ -2071,6 +2131,10 @@ export async function installMockApi(page: Page) {
               depsState.ollama !== null ? clone(installedLocalModels) : [],
             version:
               depsState.ollama !== null ? depsState.ollamaVersion : null,
+            verified:
+              depsState.ollama !== null
+                ? ("verified" as const)
+                : ("missing" as const),
           },
         };
       },

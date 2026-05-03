@@ -395,19 +395,35 @@ export type BlackHoleStatus = "missing" | "installed-not-loaded" | "loaded";
 /**
  * One row of `DepsCheckResult` for tools the resolver can find in
  * multiple places. The renderer uses `source` to render badges
- * ("App copy" / "System: …") and to offer a "Use a clean copy"
- * affordance when a system-resolved binary is in use but a clean
- * wizard install would be safer.
+ * ("App copy" / "System: …") and `verified` to decide whether to show
+ * an amber "Found (unverified)" affordance with an "Install clean copy"
+ * CTA.
  *
  * `null` source means the binary wasn't found anywhere — `path` is
  * also null in that case. `version` is best-effort: the resolver
  * tries to parse `--version` output for tools where it makes sense,
  * and returns null when parsing fails (which is non-fatal).
+ *
+ * `verified` is computed alongside `source`; both are set together. The
+ * states are:
+ *   - "verified": binary is at <binDir>/<tool>, arch matches process.arch
+ *     (Mach-O thin or universal containing the host arch), passes the
+ *     manifest's verifyExec policy.
+ *   - "system-bundled": binary came from system PATH AND we've confirmed
+ *     it works for our purposes (today this is only the Ollama daemon
+ *     answering on :11434 — for others we don't have a safe non-spawn
+ *     check, so they go to system-unverified instead).
+ *   - "system-unverified": binary came from system PATH; we cannot safely
+ *     spawn it for status (would risk triggering macOS Command Line
+ *     Tools install or other surprise dialogs). Renderer shows amber
+ *     badge + "Install clean copy" CTA.
+ *   - "missing": resolver returned no path. `path` and `source` are null.
  */
 export interface ResolvedTool {
   path: string | null;
   source: "app-installed" | "bundled" | "system" | null;
   version: string | null;
+  verified: "verified" | "system-bundled" | "system-unverified" | "missing";
 }
 
 export interface DepsCheckResult {
@@ -455,7 +471,36 @@ export interface DepsCheckResult {
     source?: "system-running" | "system-spawned" | "bundled-spawned";
     installedModels: string[];
     version?: string | null;
+    /**
+     * Same semantics as `ResolvedTool.verified` adapted for Ollama:
+     *   - "verified": app-managed binary at <binDir>/ollama, daemon up.
+     *   - "system-bundled": system Ollama (Homebrew, official .dmg, etc.)
+     *     with daemon up — we treat it as a working install even though
+     *     we don't manage the binary, because the daemon answering :11434
+     *     is the operational signal.
+     *   - "system-unverified": system Ollama binary present but daemon
+     *     not up; we can't safely spawn it for status without risking
+     *     a surprise (we don't gate against arbitrary Ollama bugs).
+     *   - "missing": no binary, no daemon.
+     */
+    verified: "verified" | "system-bundled" | "system-unverified" | "missing";
   };
+}
+
+/**
+ * `system:capabilities` IPC payload. Returned by a no-spawn handler that
+ * the new Permissions wizard step calls on mount, before depsCheck has
+ * had a chance to run. Keeps the Permissions step decoupled from the
+ * dependency-health pipeline.
+ *
+ * Only `systemAudioSupported` is reported. `micSupported` would be a
+ * tautology (macOS always exposes a microphone surface — what varies is
+ * the permission, not the hardware), so it's omitted. Mic permission is
+ * read separately via `system:get-microphone-permission`, which is also
+ * non-prompting.
+ */
+export interface SystemCapabilities {
+  systemAudioSupported: boolean;
 }
 
 /**
@@ -922,6 +967,13 @@ export interface GistlistApi {
       microphone: "granted" | "denied" | "not-determined" | "restricted" | "unknown";
       systemAudio: "granted" | "denied" | "not-determined" | "restricted" | "unknown";
     }>;
+    /**
+     * No-spawn capability snapshot for the Permissions wizard step. Reports
+     * whether macOS supports system-audio capture (14.2+). Does NOT report
+     * permission state — TCC has no documented non-prompting query for the
+     * ScreenCaptureKit system-audio sub-permission. See `SystemCapabilities`.
+     */
+    capabilities: () => Promise<SystemCapabilities>;
   };
   // Logs
   logs: {

@@ -488,7 +488,20 @@ export async function downloadAndStage(
     // HOME", etc.) lives in verifyResult.output and would be silently
     // dropped otherwise.
     const tail = verifyResult.output.slice(-1024).trim();
-    const detail = tail ? `${verifyResult.error}\n${tail}` : verifyResult.error;
+    let detail = tail ? `${verifyResult.error}\n${tail}` : verifyResult.error;
+    // EBADARCH (libuv -86) means the kernel rejected the spawn because
+    // the binary's CPU type doesn't match the host. Pre-Phase-1A this
+    // happened to ffmpeg on every arm64 Mac without Rosetta; the
+    // Phase-1B `isHostArchBinary` check should keep us from ever
+    // spawning a wrong-arch binary in production now, but a hint here
+    // catches any future arch-mismatch regression.
+    if (
+      /EBADARCH|spawn .* error -86|errno -86|bad CPU type in executable/i.test(
+        detail
+      )
+    ) {
+      detail = `This binary is the wrong architecture for your Mac. macOS error EBADARCH (-86).\n${detail}`;
+    }
     return fail("verify-exec", detail);
   }
 
