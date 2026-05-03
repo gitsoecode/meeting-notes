@@ -345,6 +345,22 @@ export function MeetingShell({
   }, [isDraft, detail]);
 
   // ---- Load detail ----
+  //
+  // Cache invalidation strategy:
+  //   - With a `promptOutputId` → single output finished mid-run; clear
+  //     just that one cacheKey so the user sees the new file when they
+  //     click the corresponding tab.
+  //   - Without one → the whole pipeline completed (or failed). Clear
+  //     `summary`, every `prompt:*`, AND `transcript`. The transcript
+  //     case matters because the IPC returns `""` for ENOENT
+  //     (`runs:read-document` in main/ipc.ts), and `""` satisfies the
+  //     `tabContents[key] != null` cache-hit check at the load
+  //     useEffect's early-out below — so without an explicit
+  //     invalidation here, a draft meeting whose transcript tab was
+  //     visited before processing keeps showing "No transcript
+  //     available" forever, even after the pipeline writes the file.
+  //     Notes are NOT cleared: they're user-edited locally and a stale
+  //     re-load would clobber unsaved edits in the notes pane.
   const invalidateAnalysisCache = (promptOutputId?: string | null) => {
     setTabContents((prev) => {
       if (promptOutputId) {
@@ -357,7 +373,7 @@ export function MeetingShell({
       let changed = false;
       const next: Record<string, string> = {};
       for (const [key, value] of Object.entries(prev)) {
-        if (key === "summary" || key.startsWith("prompt:")) {
+        if (key === "summary" || key === "transcript" || key.startsWith("prompt:")) {
           changed = true;
           continue;
         }

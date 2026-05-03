@@ -134,6 +134,55 @@ test.describe("Meeting detail prefetch + caching", () => {
     expect(afterSecondClick.readDocument[decisionLogKey]).toBe(1);
   });
 
+  test("run-complete invalidates the transcript cache so the tab auto-refreshes", async ({
+    meetingWorkspace,
+    page,
+  }) => {
+    // Regression for the user-reported bug: after processing a recording,
+    // the Transcript tab kept showing "No transcript available" until a
+    // manual page reload. Root cause: `runs:read-document` returns "" for
+    // ENOENT; visiting the Transcript tab on a draft (before the file
+    // exists) cached "" in `tabContents.transcript`. The load helper's
+    // `prev[cacheKey] != null ? prev` guard then prevented any subsequent
+    // load from overwriting the empty value, so the tab stayed empty
+    // forever. `invalidateAnalysisCache()` (called on run-complete) used
+    // to clear only `summary` and `prompt:*` keys — never `transcript` —
+    // so the cache stayed poisoned across the pipeline completion. The
+    // fix adds `transcript` to the keys cleared on run-complete.
+    //
+    // The simulation: load the transcript with one content, mutate the
+    // mock's transcript on disk to different content, fire run-complete,
+    // then click the Transcript tab. With the fix, the cache is cleared
+    // so the next load fetches the NEW content and the user sees it.
+    // Without the fix, the cache holds the OLD content forever.
+    await meetingWorkspace.tab("Transcript").click();
+    await expect(page.getByText("Welcome everyone.")).toBeVisible();
+
+    // Mutate the mock's transcript on disk and fire run-complete. The
+    // cache-clear path is the only way the renderer picks up the new
+    // content without a manual reload.
+    await page.evaluate((runFolder) => {
+      const harness = (window as any).__MEETING_NOTES_TEST;
+      harness.setDocument(
+        runFolder,
+        "transcript.md",
+        "---\nsource: mock-rerun\n---\n### Me\n\n`00:00` Refreshed transcript content from a re-run.\n",
+      );
+      harness.emitPipelineProgress({
+        type: "run-complete",
+        runFolder,
+        succeeded: ["summary"],
+        failed: [],
+      });
+    }, RUN_FOLDER);
+
+    // Without the fix the tab keeps the OLD "Welcome everyone." line
+    // and never picks up the refreshed content.
+    await expect(page.getByText(/Refreshed transcript content/i)).toBeVisible({
+      timeout: 3000,
+    });
+  });
+
   test("rapid tab toggling does not duplicate IPC calls (in-flight dedupe)", async ({
     meetingWorkspace,
     page,

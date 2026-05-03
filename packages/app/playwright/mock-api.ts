@@ -968,6 +968,22 @@ export async function installMockApi(page: Page) {
         }
         persistState();
       },
+      /**
+       * Test helper: set the in-memory document content the mock returns
+       * from `runs:read-document`. Used by the transcript-tab cache-
+       * invalidation regression test to rewrite a document AFTER the
+       * renderer has already cached it, simulating a pipeline that
+       * just produced a new transcript.
+       */
+      setDocument(runFolder, fileName, content) {
+        docs[runFolder] ??= {};
+        docs[runFolder][fileName] = content;
+        files[runFolder] ??= [];
+        if (!files[runFolder].some((f) => f.name === fileName)) {
+          files[runFolder].push({ name: fileName, size: content.length, kind: "document" });
+        }
+        persistState();
+      },
       failPromptOutput(runFolder, promptId, error = "Mock prompt failure") {
         failedPromptOutputs[`${runFolder}::${promptId}`] = error;
         persistState();
@@ -1038,6 +1054,17 @@ export async function installMockApi(page: Page) {
       },
       setProgressEmissionDelay(ms) {
         progressEmissionDelayMs = Math.max(0, Number(ms) || 0);
+      },
+      /**
+       * Test helper: synthesize a `pipelineProgress` event from the
+       * outside. Used by the transcript-tab cache-invalidation
+       * regression test to drive a `run-complete` event without going
+       * through the full processRecording / startReprocess flow. The
+       * mock's normal pipeline emissions go through this same listener
+       * fan-out, so the renderer can't tell the difference.
+       */
+      emitPipelineProgress(event) {
+        emit("pipelineProgress", clone(event));
       },
       /** Test helper: number of times config.initProject() has been called. */
       getInitProjectCallCount() {
