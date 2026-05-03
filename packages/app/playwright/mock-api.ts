@@ -104,6 +104,13 @@ export async function installMockApi(page: Page) {
     // that exercise the not-yet-installed path flip this via
     // `__MEETING_NOTES_TEST.setEmbedModelInstalled(false)`.
     let embedModelInstalled = true;
+    // Counter for the no-surprise-pull regression test. The renderer's
+    // contract is "explicit click only" — Finish must never trigger
+    // `installEmbedModel`, and neither should the main process at
+    // startup. The Playwright spec asserts this counter stays 0 across
+    // the full Finish flow when the user didn't click the dedicated
+    // download row.
+    let installEmbedModelCallCount = 0;
     const installedLocalModels = ["qwen3.5:9b"];
     const jobs = [
       {
@@ -1070,6 +1077,16 @@ export async function installMockApi(page: Page) {
        */
       setEmbedModelInstalled(installed) {
         embedModelInstalled = !!installed;
+      },
+      /**
+       * Test helper: read the count of `installEmbedModel` IPC calls
+       * since the harness was created. The "no surprise install" test
+       * walks Finish with semantic search disabled and asserts this
+       * stays 0 — i.e. neither the renderer nor any main-process
+       * startup hook pulled the model implicitly.
+       */
+      getInstallEmbedModelCallCount() {
+        return installEmbedModelCallCount;
       },
       /**
        * Test helper: synthesize a `pipelineProgress` event from the
@@ -2354,6 +2371,7 @@ export async function installMockApi(page: Page) {
           return { model: "nomic-embed-text", installed: embedModelInstalled };
         },
         async installEmbedModel() {
+          installEmbedModelCallCount += 1;
           embedModelInstalled = true;
           persistState();
           return;
