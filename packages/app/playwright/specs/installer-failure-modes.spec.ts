@@ -44,19 +44,26 @@ test.describe("Installer failure modes", () => {
     await wizard.llmProviderSelect().click();
     await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
-    await wizard.nextButton().click(); // deps
+    await wizard.nextButton().click(); // permissions
+    await wizard.advanceFromPermissionsToDeps();
 
     // Click Install ffmpeg → mock returns the canned failure.
     await wizard.installButton("Install ffmpeg").click();
 
     // Error must surface BOTH the failed phase (so the user knows what
     // step blew up) and the underlying message. The phase + message
-    // appear in two places (live install log + final error banner) —
-    // .first() picks one, which is enough to assert the contract.
+    // appear in two places (DependencyInstallProgress header + activity
+    // stream) — .first() picks one, which is enough to assert the contract.
     await expect(
       page.getByText(/Install failed \[verify-checksum\]/).first()
     ).toBeVisible();
     await expect(page.getByText(/SHA-256 mismatch/).first()).toBeVisible();
+
+    // Dismiss the failure panel before retrying so the row is visible again.
+    await page
+      .getByTestId("dep-install-progress")
+      .getByRole("button", { name: /dismiss/i })
+      .click();
 
     // The Install button stays clickable — failure does NOT permanently
     // disable the row. The override is one-shot, so a retry click hits
@@ -90,7 +97,8 @@ test.describe("Installer failure modes", () => {
     await wizard.llmProviderSelect().click();
     await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
-    await wizard.nextButton().click();
+    await wizard.nextButton().click(); // permissions
+    await wizard.advanceFromPermissionsToDeps();
 
     await wizard.installButton("Install ffmpeg").click();
 
@@ -120,7 +128,8 @@ test.describe("Installer failure modes", () => {
     await wizard.llmProviderSelect().click();
     await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
-    await wizard.nextButton().click();
+    await wizard.nextButton().click(); // permissions
+    await wizard.advanceFromPermissionsToDeps();
 
     await wizard.installButton("Install ffmpeg").click();
 
@@ -159,7 +168,8 @@ test.describe("Installer failure modes", () => {
     await wizard.llmProviderSelect().click();
     await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
-    await wizard.nextButton().click();
+    await wizard.nextButton().click(); // permissions
+    await wizard.advanceFromPermissionsToDeps();
 
     await wizard.installButton("Install Parakeet").click();
 

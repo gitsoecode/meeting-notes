@@ -109,6 +109,50 @@ export interface ToolManifestEntry {
  */
 export const TOOL_MANIFEST: ToolManifestEntry[] = [
   {
+    // arm64 ffmpeg — used on Apple Silicon. Sourced from osxexperts.net
+    // because evermeet.cx (our x64 source) does not ship arm64 builds.
+    // The osxexperts maintainer's published page hash drifts independently
+    // of the bytes (the hash next to the download link is sometimes from
+    // a prior build). We pin the bytes-on-disk SHA-256 we observed at
+    // download time; verify-manifest catches any future byte drift on
+    // re-fetch.
+    //
+    // License is GPL-3.0-or-later — this build is configured with
+    // `--enable-gpl --enable-libx264 --enable-libx265` (visible in
+    // `ffmpeg -version`'s configuration line). The x64 entry below is
+    // LGPL because evermeet ships a no-GPL build; we accept the license
+    // asymmetry per arch because no LGPL arm64 macOS prebuilt exists in
+    // a comparable trust-and-distribution posture today. See
+    // docs/private_plans/privacy-posture-analysis.md for the
+    // distribution analysis. The app spawns ffmpeg as a separate
+    // subprocess (no linking), so GPL-binary distribution alongside
+    // FSL-1.1-ALv2 source is fine.
+    //
+    // The osxexperts binaries are ad-hoc (linker) signed and pass our
+    // strict `codesign --verify --deep --strict` policy.
+    tool: "ffmpeg",
+    version: "8.1",
+    platform: "darwin",
+    arch: "arm64",
+    minMacOS: "12.0",
+    url: "https://www.osxexperts.net/ffmpeg81arm.zip",
+    sha256:
+      "ebb82529562b71170807bbc6b0e7eb4f0b13af8cbb0e085bb9e8f6fe709598ad",
+    archiveType: "zip",
+    binaryPathInArchive: "ffmpeg",
+    installLayout: "single-binary",
+    signatureCheck: "codesign-verify",
+    license: {
+      spdx: "GPL-3.0-or-later",
+      url: "https://www.ffmpeg.org/legal.html",
+      buildVariant:
+        "osxexperts.net static GPL build for Apple Silicon (--enable-gpl --enable-libx264 --enable-libx265, ad-hoc signed, ~22 MB zip → ~52 MB binary)",
+    },
+    verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
+    notes:
+      "Native arm64 build for Apple Silicon. macOS 12.0+ (LC_BUILD_VERSION minOS).",
+  },
+  {
     tool: "ffmpeg",
     version: "7.1.1",
     platform: "darwin",
@@ -133,7 +177,33 @@ export const TOOL_MANIFEST: ToolManifestEntry[] = [
     },
     verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
     notes:
-      "x86_64 only — Apple Silicon runs it via Rosetta 2 (auto-installed by macOS on first invocation). Native arm64 ffmpeg is a follow-up; ffbinaries.com and evermeet.cx don't currently ship arm64 builds.",
+      "x86_64 build — used on Intel Macs only. Apple Silicon resolves the arm64 entry above; Rosetta is no longer the default path for ffmpeg on Apple Silicon.",
+  },
+  {
+    // arm64 ffprobe — paired with arm64 ffmpeg above. Same osxexperts
+    // upstream, same trust posture (page hash drifts, we pin observed
+    // bytes), same GPL build flags, same ad-hoc signature.
+    tool: "ffprobe",
+    version: "8.1",
+    platform: "darwin",
+    arch: "arm64",
+    minMacOS: "12.0",
+    url: "https://www.osxexperts.net/ffprobe81arm.zip",
+    sha256:
+      "a6640a77d38a6f0527c5b597e599cb36a3427a6931444ed80bc62542421950a1",
+    archiveType: "zip",
+    binaryPathInArchive: "ffprobe",
+    installLayout: "single-binary",
+    signatureCheck: "codesign-verify",
+    license: {
+      spdx: "GPL-3.0-or-later",
+      url: "https://www.ffmpeg.org/legal.html",
+      buildVariant:
+        "osxexperts.net static GPL build for Apple Silicon (paired with ffmpeg above, ad-hoc signed, ~22 MB zip → ~52 MB binary)",
+    },
+    verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
+    notes:
+      "Native arm64 build for Apple Silicon. Installed as a side effect of installDep('ffmpeg') — never user-installable on its own.",
   },
   {
     // Paired with ffmpeg above. The wizard installs both as a unit when
@@ -161,7 +231,7 @@ export const TOOL_MANIFEST: ToolManifestEntry[] = [
     },
     verifyExec: { args: ["-version"], expectExit: 0, timeoutMs: 5000 },
     notes:
-      "Same upstream as ffmpeg above; same Rosetta caveat for Apple Silicon. Installed as a side effect of installDep('ffmpeg') in the IPC handler — never user-installable on its own.",
+      "x86_64 build — used on Intel Macs only. Apple Silicon resolves the arm64 entry above. Installed as a side effect of installDep('ffmpeg') — never user-installable on its own.",
   },
   {
     // App-managed Python runtime, used as a sub-step of the Parakeet

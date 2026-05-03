@@ -260,7 +260,27 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
     value: string;
     version: string | null;
     ok: boolean;
+    /**
+     * Phase-1B `verified` state. When `"system-unverified"`, the badge
+     * renders amber and the row's primary action becomes "Install clean
+     * copy" so the user can replace an ambiguous system binary with an
+     * arch-checked, app-managed one. Plain `verified`/`system-bundled`
+     * stay green; `missing` matches `ok: false` and shows the install CTA.
+     */
+    verified?: "verified" | "system-bundled" | "system-unverified" | "missing";
     install?: { run: () => void; busy: boolean; label: string };
+  };
+
+  // Combine two `verified` states (used by the paired ffmpeg+ffprobe row)
+  // by taking the weaker. Order, weakest → strongest:
+  // missing < system-unverified < system-bundled < verified.
+  const weakerVerified = (
+    a: DepRow["verified"],
+    b: DepRow["verified"]
+  ): DepRow["verified"] => {
+    const rank = (v: DepRow["verified"]) =>
+      v === "missing" ? 0 : v === "system-unverified" ? 1 : v === "system-bundled" ? 2 : 3;
+    return rank(a) <= rank(b) ? a : b;
   };
 
   const dependencyRows: DepRow[] =
@@ -285,15 +305,17 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
             } else {
               value = "not found";
             }
+            const verified = weakerVerified(deps.ffmpeg.verified, deps.ffprobe.verified);
             return {
               label: "ffmpeg",
               value,
               version: deps.ffmpeg.version,
               ok: fmHas && fpHas,
+              verified,
               install:
-                fmHas && fpHas
+                fmHas && fpHas && verified !== "system-unverified"
                   ? undefined
-                  : { run: () => void installFfmpeg(), busy: installingFfmpeg, label: "Install" },
+                  : { run: () => void installFfmpeg(), busy: installingFfmpeg, label: verified === "system-unverified" ? "Install clean copy" : "Install" },
             };
           })(),
           {
@@ -301,35 +323,27 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
             value: deps.python.path ?? "not found",
             version: deps.python.version,
             ok: !!deps.python.path,
+            verified: deps.python.verified,
           },
           {
             label: "Parakeet",
             value: deps.parakeet.path ?? "not installed",
             version: deps.parakeet.version,
             ok: !!deps.parakeet.path,
+            verified: deps.parakeet.verified,
           },
           {
             label: "whisper.cpp",
-            // Optional ASR — only used when the user explicitly picks it
-            // as the transcription provider, which the wizard hides for
-            // first beta. Render it as a status-only row (no install
-            // button): whisper.cpp v1.8.4 ships only Windows/Linux/iOS
-            // binaries, not a signed macOS CLI, so the manifest
-            // intentionally has no whisper-cli entry. Surfacing an
-            // Install button would dispatch to a tool we can't fetch.
             value:
               deps.whisper.path
                 ? `${deps.whisper.path}${deps.whisper.source ? ` (${deps.whisper.source})` : ""}`
                 : "not installed (optional)",
             version: deps.whisper.version,
-            // Only flag as "not ok" (red) when the user actually picked
-            // whisper-local as their ASR provider. Parakeet and OpenAI
-            // setups don't depend on whisper.cpp, so a missing binary is
-            // neutral and shouldn't render as a health failure.
             ok:
               config.asr_provider === "whisper-local"
                 ? !!deps.whisper.path
                 : true,
+            verified: deps.whisper.verified,
           },
           {
             label: "Ollama",
@@ -338,6 +352,7 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
               : "not running",
             version: deps.ollama.version ?? null,
             ok: deps.ollama.daemon,
+            verified: deps.ollama.verified,
           },
         ];
 
@@ -961,9 +976,24 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                           <TableCell className="text-[var(--text-tertiary)]">
                             {row.version ?? "—"}
                           </TableCell>
-                          <TableCell className={`text-right ${row.ok ? "text-[var(--success)]" : "text-[var(--error)] font-medium"}`}>
+                          <TableCell
+                            className={`text-right ${
+                              row.verified === "system-unverified"
+                                ? "text-[var(--warning,#a16207)] font-medium"
+                                : row.ok
+                                  ? "text-[var(--success)]"
+                                  : "text-[var(--error)] font-medium"
+                            }`}
+                          >
                             <div className="flex items-center justify-end gap-2">
-                              <span>{row.value}</span>
+                              <span>
+                                {row.value}
+                                {row.verified === "system-unverified" ? (
+                                  <span className="ml-1 text-xs uppercase tracking-[0.06em] text-[var(--warning,#a16207)]">
+                                    · unverified
+                                  </span>
+                                ) : null}
+                              </span>
                               {row.install && (
                                 <Button
                                   size="sm"

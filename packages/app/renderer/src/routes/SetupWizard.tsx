@@ -8,6 +8,7 @@ import type {
   DetectedVault,
   HardwareInfoDTO,
   InitConfigRequest,
+  ResolvedTool,
 } from "../../../shared/ipc";
 import {
   recommendLocalModel,
@@ -21,6 +22,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
+import { DependencyInstallProgress } from "../components/wizard/DependencyInstallProgress";
 import {
   Select,
   SelectContent,
@@ -73,7 +75,19 @@ function retentionFromConfig(days: number | null): {
   return { value: "custom", custom: String(days) };
 }
 
-const TOTAL_STEPS = 5;
+// Named-step indices. Use these instead of magic numbers in `step === N`
+// checks so a future insert/remove only touches this enum + the wizard's
+// step-jsx blocks. The indices themselves still drive the progress dots
+// and the underlying `step: number` state.
+const STEP = {
+  WELCOME: 0,
+  STORAGE: 1,
+  RETENTION: 2,
+  PROVIDERS: 3,
+  PERMISSIONS: 4,
+  DEPS: 5,
+} as const;
+const TOTAL_STEPS = 6;
 
 function hasInstalledLocalModel(
   installedLocalModels: readonly string[],
@@ -141,25 +155,66 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   const [installLog, setInstallLog] = useState<string[]>([]);
   const installLogRef = useRef<HTMLPreElement>(null);
   const [installError, setInstallError] = useState<string | null>(null);
+  // Used by the DependencyInstallProgress "Retry" button to re-fire the
+  // exact install that failed without the user having to re-click the
+  // row. Set at install start; cleared on Dismiss.
+  const lastInstallTargetRef = useRef<
+    DepsInstallTarget | "parakeet" | "local-llm" | null
+  >(null);
   const [skipBlackhole, setSkipBlackhole] = useState(false);
   const [restartingAudio, setRestartingAudio] = useState(false);
   const [restartAudioError, setRestartAudioError] = useState<string | null>(null);
   const [recheckBusy, setRecheckBusy] = useState(false);
 
-  // Audio permissions (macOS). micPermission = native TCC status for mic;
-  // systemAudioProbe = AudioTee zero-sample probe. Both are checked lazily
-  // when the user lands on the dependencies step so we don't pop prompts
-  // early in the flow.
+  // Audio permissions (macOS).
+  //
+  // micPermission: native TCC status for mic, read via the no-prompt
+  // Electron `systemPreferences.getMediaAccessStatus("microphone")`
+  // bridge. Safe to query on mount.
+  //
+  // systemAudioProbe: AudioTee zero-sample probe state machine. Two-stage
+  // (Test → Verify) per the Phase 3 plan to eliminate the "first probe
+  // flashes red while the TCC dialog is still open" flicker:
+  //   unknown          — initial.
+  //   prompting        — first probe in flight (this is what triggers the
+  //                       TCC dialog). UI shows neutral "asking macOS for
+  //                       permission" copy. The probe's eventual result
+  //                       is resolved against `probeRequestIdRef` — only
+  //                       a `granted` settles to `granted` directly;
+  //                       `denied` and `failed` transition to
+  //                       `awaitingVerify` because the user almost
+  //                       certainly hasn't clicked Allow yet.
+  //   awaitingVerify   — first probe came back not-granted. Button:
+  //                       "Verify". User clicks once they've granted in
+  //                       the TCC dialog above.
+  //   verifying        — second probe in flight. Increments
+  //                       probeRequestIdRef, so any late first-probe
+  //                       result is discarded by the requestId guard.
+  //   granted/denied/failed — terminal states from a verified probe.
+  //
+  // The `system:capabilities` IPC (called on mount of the new Permissions
+  // step) tells us whether the macOS host even supports system-audio
+  // capture (14.2+). It does NOT tell us whether the user has previously
+  // granted — TCC for ScreenCaptureKit's system-audio sub-permission has
+  // no documented non-prompting query. So returning users start in
+  // `unknown` and a "Test" click transitions through `prompting → granted`
+  // immediately when the OS already remembers their grant.
   const [micPermission, setMicPermission] = useState<"unknown" | "granted" | "denied" | "not-determined" | "restricted">("unknown");
   const [micPermissionBusy, setMicPermissionBusy] = useState(false);
-  const [systemAudioProbe, setSystemAudioProbe] = useState<
+  type SystemAudioFsm =
     | { status: "unknown" }
-    | { status: "probing" }
+    | { status: "prompting" }
+    | { status: "awaitingVerify" }
+    | { status: "verifying" }
     | { status: "granted" }
     | { status: "denied" }
     | { status: "unsupported" }
-    | { status: "failed"; error: string }
-  >({ status: "unknown" });
+    | { status: "failed"; error: string };
+  const [systemAudioProbe, setSystemAudioProbe] = useState<SystemAudioFsm>({
+    status: "unknown",
+  });
+  const probeRequestIdRef = useRef<number>(0);
+  const [systemAudioSupportedCap, setSystemAudioSupportedCap] = useState<boolean | null>(null);
   const [appIdentity, setAppIdentity] = useState<{
     displayName: string;
     tccBundleName: string;
@@ -204,7 +259,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   }, [installLog]);
 
   useEffect(() => {
-    if (step === 3 && !keysChecked) {
+    if (step === STEP.PROVIDERS && !keysChecked) {
       setKeysChecked(true);
       api.secrets.has("claude").then(setHasClaude).catch(() => {});
       api.secrets.has("openai").then(setHasOpenai).catch(() => {});
@@ -261,19 +316,30 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   }, [hardware?.appleSilicon, asrProvider]);
 
   useEffect(() => {
-    if (step === 4) {
-      // Status reads only — never trigger a permission dialog or run a
-      // subprocess as a side effect of landing on this step. The mic
-      // request and the system-audio probe (which indirectly surfaces
-      // the macOS Screen & System Audio Recording TCC dialog) only run
-      // when the user clicks their respective buttons.
-      api.depsCheck().then(setDeps).catch(() => {});
-      api.deps.checkBrew().then(setBrewAvailable).catch(() => setBrewAvailable(false));
+    if (step === STEP.PERMISSIONS) {
+      // Permissions step is a sibling of Dependencies and runs FIRST
+      // (between providers and deps). Status reads only — never trigger
+      // a permission dialog or run a subprocess as a side effect of
+      // landing on this step. The mic request and the system-audio probe
+      // run only when the user clicks their respective buttons. The
+      // `system:capabilities` IPC is a no-spawn macOS-version check
+      // (factored out of `isSystemAudioSupported`) so the Permissions
+      // step doesn't have to wait on the heavier deps:check pipeline.
+      api.system.capabilities()
+        .then((c) => setSystemAudioSupportedCap(c.systemAudioSupported))
+        .catch(() => setSystemAudioSupportedCap(false));
       api.system.getAppIdentity().then(setAppIdentity).catch(() => {});
       api.system
         .getMicrophonePermission()
         .then(({ status }) => setMicPermission(status as typeof micPermission))
         .catch(() => {});
+    }
+    if (step === STEP.DEPS) {
+      // Status reads only on the dependencies step too; mic/system-audio
+      // already lives on the Permissions step.
+      api.depsCheck().then(setDeps).catch(() => {});
+      api.deps.checkBrew().then(setBrewAvailable).catch(() => setBrewAvailable(false));
+      api.system.getAppIdentity().then(setAppIdentity).catch(() => {});
     }
   }, [step]);
 
@@ -289,16 +355,79 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     }
   };
 
-  const probeSystemAudio = async () => {
-    setSystemAudioProbe({ status: "probing" });
+  // First-stage probe — kicks off the TCC dialog. Per the Phase 3 FSM,
+  // the probe's result handling depends on the user having had a chance
+  // to click Allow:
+  //   - `granted` is treated as final and transitions straight to the
+  //     `granted` terminal state. Returning users who already granted
+  //     fall into this branch and never see the awaitingVerify stage.
+  //   - `denied`/`failed` are treated as "user hasn't responded yet."
+  //     The result is discarded (the badge stays neutral) and the FSM
+  //     moves to `awaitingVerify` for the user to click Verify.
+  //
+  // The requestId guard means a *late* first-probe `denied` arriving
+  // after the user has already moved on to Verify won't overwrite the
+  // verified result.
+  const startSystemAudioPrompt = async () => {
+    const myRequestId = ++probeRequestIdRef.current;
+    setSystemAudioProbe({ status: "prompting" });
     try {
       const res = await api.system.probeSystemAudioPermission();
+      if (probeRequestIdRef.current !== myRequestId) return;
+      if (res.status === "unsupported") {
+        setSystemAudioProbe({ status: "unsupported" });
+        return;
+      }
+      if (res.status === "granted") {
+        setSystemAudioProbe({ status: "granted" });
+        return;
+      }
+      // denied/failed during the first probe — discard and wait for
+      // the user to click Verify.
+      setSystemAudioProbe({ status: "awaitingVerify" });
+    } catch {
+      if (probeRequestIdRef.current !== myRequestId) return;
+      setSystemAudioProbe({ status: "awaitingVerify" });
+    }
+  };
+
+  // Second-stage verify — runs after the user reports they've clicked
+  // Allow in the TCC dialog. Result is now treated as authoritative,
+  // gated by the requestId guard so any in-flight first-stage Promise
+  // can't clobber it.
+  const verifySystemAudio = async () => {
+    const myRequestId = ++probeRequestIdRef.current;
+    setSystemAudioProbe({ status: "verifying" });
+    try {
+      const res = await api.system.probeSystemAudioPermission();
+      if (probeRequestIdRef.current !== myRequestId) return;
       if (res.status === "granted") setSystemAudioProbe({ status: "granted" });
       else if (res.status === "denied") setSystemAudioProbe({ status: "denied" });
       else if (res.status === "unsupported") setSystemAudioProbe({ status: "unsupported" });
       else setSystemAudioProbe({ status: "failed", error: res.error ?? "unknown error" });
     } catch (err) {
-      setSystemAudioProbe({ status: "failed", error: err instanceof Error ? err.message : String(err) });
+      if (probeRequestIdRef.current !== myRequestId) return;
+      setSystemAudioProbe({
+        status: "failed",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  };
+
+  // Re-read the mic permission after the user fixed it in System Settings.
+  // Without this, granting in the OS dialog leaves the wizard's cached
+  // `micPermission` stale and `Next` stays disabled until the user
+  // reloads. Surfaced as a "Re-check microphone permission" button in
+  // the denied/restricted diagnostic block.
+  const recheckMicPermission = async () => {
+    setMicPermissionBusy(true);
+    try {
+      const { status } = await api.system.getMicrophonePermission();
+      setMicPermission(status as typeof micPermission);
+    } catch {
+      // noop
+    } finally {
+      setMicPermissionBusy(false);
     }
   };
 
@@ -327,9 +456,13 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   };
 
   const installDep = async (target: DepsInstallTarget) => {
+    // Phase 5 invariant: starting a new install resets prior result
+    // state so a stale "complete" / "failed" panel from a previous run
+    // doesn't bleed into the next.
     setInstalling(target);
     setInstallLog([]);
     setInstallError(null);
+    lastInstallTargetRef.current = target;
     try {
       const result = await api.deps.install(target);
       if (!result.ok) {
@@ -402,6 +535,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     setInstalling("local-llm");
     setInstallLog([]);
     setInstallError(null);
+    lastInstallTargetRef.current = "local-llm";
     try {
       await api.llm.setup({ model: localLlmModel });
       const res = await api.llm.check();
@@ -417,6 +551,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     setInstalling("parakeet");
     setInstallLog([]);
     setInstallError(null);
+    lastInstallTargetRef.current = "parakeet";
     try {
       // setup-asr returns { ok, error, failedPhase } (mirrors deps:install)
       // so the install pane gets the same `[<phase>]: ...` UX without
@@ -506,16 +641,30 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     if (!deps.ffmpeg.path) return true;
     // ffprobe is paired with ffmpeg — engine audio code requires both.
     if (!deps.ffprobe.path) return true;
-    if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
-    // The system-audio probe is optional and consent-driven (the user has
-    // to click "Test system audio" to start it). Don't block Finish on
-    // "unknown" — that just means the user chose not to run the test, which
-    // is valid: system audio is optional, mic-only recording works.
-    // "probing" still blocks so users don't finish mid-probe.
-    if (deps.systemAudioSupported && systemAudioProbe.status === "probing") {
+    // Phase-1B Finish gate: an app-managed binary that failed arch /
+    // spawn validation (verified === "system-unverified" while source is
+    // app-installed or bundled) means the engine path is poisoned and
+    // recording would EBADARCH on first use. Force the user to "Install
+    // clean copy" before Finish enables. System-PATH binaries (Homebrew)
+    // can finish — same rationale as Phase 2 not spawning them: we
+    // intentionally don't validate them.
+    const blockedByAppManaged = (tool: { source: string | null; verified: ResolvedTool["verified"] | undefined }) =>
+      (tool.source === "app-installed" || tool.source === "bundled") &&
+      tool.verified === "system-unverified";
+    if (blockedByAppManaged(deps.ffmpeg)) return true;
+    if (blockedByAppManaged(deps.ffprobe)) return true;
+    // Python only matters when the user picked Parakeet — cloud ASR
+    // doesn't touch the app-managed Python runtime, so a stale wrong-
+    // arch python in <binDir>/python should NOT silently dead-end the
+    // Finish button for an OpenAI-Whisper user. Gate to parakeet-mlx,
+    // and pair this with the Parakeet repair CTA below so the
+    // parakeet-mlx user has a visible recovery path.
+    if (asrProvider === "parakeet-mlx" && blockedByAppManaged(deps.python)) {
       return true;
     }
-    // BlackHole no longer required — system audio is captured via AudioTee
+    if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
+    // System-audio probe lives on the Permissions step now and is optional
+    // (mic-only recording works); it does not gate Finish on the Deps step.
     if (llmProvider === "ollama") {
       if (!localLlmModel) return true;
       if (!hasInstalledLocalModel(installedLocalModels, localLlmModel)) return true;
@@ -526,7 +675,6 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     installing,
     restartingAudio,
     deps,
-    systemAudioProbe.status,
     asrProvider,
     llmProvider,
     localLlmModel,
@@ -569,11 +717,11 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             ))}
           </div>
 
-          {step === 0 && (
+          {step === STEP.WELCOME && (
             <WizardStep
               title="Welcome to Gistlist"
               description="A local-first desktop app for meeting notes. Record in the app or import an existing recording, and your transcript, summary, and custom outputs land in editable markdown on disk. Obsidian is optional. Let's get you set up."
-              footer={<Button onClick={() => setStep(1)}>Get started</Button>}
+              footer={<Button onClick={() => setStep(STEP.STORAGE)}>Get started</Button>}
             >
               <p
                 className="text-xs leading-5 text-[var(--text-tertiary)]"
@@ -602,16 +750,16 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             </WizardStep>
           )}
 
-          {step === 1 && (
+          {step === STEP.STORAGE && (
             <WizardStep
               title="Do you use Obsidian?"
               description="Obsidian is an optional viewer. The app works perfectly without it — it has its own markdown editor and browser. If you already use Obsidian, we can store meetings inside your vault so they show up alongside your other notes."
               footer={
                 <WizardActions
-                  back={{ label: "Back", onClick: () => setStep(0) }}
+                  back={{ label: "Back", onClick: () => setStep(STEP.WELCOME) }}
                   primary={{
                     label: "Next",
-                    onClick: () => setStep(2),
+                    onClick: () => setStep(STEP.RETENTION),
                     disabled: usesObsidian && !vaultPath,
                   }}
                 />
@@ -668,7 +816,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             </WizardStep>
           )}
 
-          {step === 2 && (
+          {step === STEP.RETENTION && (
             <WizardStep
               title="Where should meetings be stored?"
               description={
@@ -678,10 +826,10 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
               }
               footer={
                 <WizardActions
-                  back={{ label: "Back", onClick: () => setStep(1) }}
+                  back={{ label: "Back", onClick: () => setStep(STEP.STORAGE) }}
                   primary={{
                     label: "Next",
-                    onClick: () => setStep(3),
+                    onClick: () => setStep(STEP.PROVIDERS),
                     disabled: !dataPath,
                   }}
                 />
@@ -733,16 +881,16 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             </WizardStep>
           )}
 
-          {step === 3 && (
+          {step === STEP.PROVIDERS && (
             <WizardStep
               title="Transcription & Summarization"
               description="Pick your AI providers. Cloud models are faster and smarter; local models are private and free."
               footer={
                 <WizardActions
-                  back={{ label: "Back", onClick: () => setStep(2) }}
+                  back={{ label: "Back", onClick: () => setStep(STEP.RETENTION) }}
                   primary={{
                     label: "Next",
-                    onClick: () => setStep(4),
+                    onClick: () => setStep(STEP.PERMISSIONS),
                     disabled:
                       (llmProvider === "claude" && !(claudeKey || hasClaude)) ||
                       (llmProvider === "openai" && !(openaiKey || hasOpenai)) ||
@@ -924,13 +1072,60 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             </WizardStep>
           )}
 
-          {step === 4 && (
+          {step === STEP.PERMISSIONS && (
+            <WizardStep
+              title="Permissions"
+              description="Grant microphone access (required) and optionally test system audio. We won't show any OS dialogs without your click."
+              footer={
+                <WizardActions
+                  back={{ label: "Back", onClick: () => setStep(STEP.PROVIDERS) }}
+                  primary={{
+                    label: "Next",
+                    onClick: () => setStep(STEP.DEPS),
+                    // Mic is required to record meetings — block Next until granted.
+                    // System audio is optional and ignored here.
+                    disabled: micPermission !== "granted",
+                  }}
+                />
+              }
+            >
+              {/* While the system:capabilities IPC is in flight, render a
+                  spinner instead of dropping into the panel with
+                  systemAudioSupported=false (which would flash the
+                  "Unsupported" badge before the real value lands). */}
+              {systemAudioSupportedCap === null ? (
+                <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                  <Spinner className="h-4 w-4" />
+                  Loading capabilities…
+                </div>
+              ) : (
+                <AudioPermissionsPanel
+                  systemAudioSupported={systemAudioSupportedCap}
+                  micPermission={micPermission}
+                  micPermissionBusy={micPermissionBusy}
+                  systemAudioProbe={systemAudioProbe}
+                  appIdentity={appIdentity}
+                  onRequestMic={requestMicrophonePermission}
+                  onRecheckMic={recheckMicPermission}
+                  onStartSystemAudioPrompt={startSystemAudioPrompt}
+                  onVerifySystemAudio={verifySystemAudio}
+                />
+              )}
+              {micPermission !== "granted" && (
+                <p className="text-xs text-[var(--text-tertiary)]">
+                  Grant microphone access to continue.
+                </p>
+              )}
+            </WizardStep>
+          )}
+
+          {step === STEP.DEPS && (
             <WizardStep
               title="Dependencies"
               description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you — no Terminal needed."
               footer={
                 <WizardActions
-                  back={{ label: "Back", onClick: () => setStep(3), disabled: installing !== null }}
+                  back={{ label: "Back", onClick: () => setStep(STEP.PERMISSIONS), disabled: installing !== null }}
                   secondary={{
                     label: "Re-check",
                     onClick: async () => {
@@ -962,6 +1157,26 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                 />
               }
             >
+              {(installing !== null || installError !== null || installLog.length > 0) && (
+                <DependencyInstallProgress
+                  installing={installing}
+                  lastInstallTarget={lastInstallTargetRef.current}
+                  installError={installError}
+                  installLog={installLog}
+                  onDismiss={() => {
+                    setInstallError(null);
+                    setInstallLog([]);
+                    lastInstallTargetRef.current = null;
+                  }}
+                  onRetry={() => {
+                    const target = lastInstallTargetRef.current;
+                    if (!target) return;
+                    if (target === "parakeet") void installParakeet();
+                    else if (target === "local-llm") void installLocalLlm();
+                    else void installDep(target);
+                  }}
+                />
+              )}
               {deps == null ? (
                 <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                   <Spinner className="h-4 w-4" />
@@ -988,38 +1203,60 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                     onInstall={() => installDep("ffmpeg")}
                     footerNote={
                       !deps.ffmpeg.path || !deps.ffprobe.path
-                        ? "Downloads ~50 MB from evermeet.cx (LGPL static builds — ffmpeg + ffprobe). On Apple Silicon, runs via Rosetta 2 — first invocation may prompt for a one-time Rosetta install."
+                        ? "Downloads ~50 MB. Apple Silicon gets a native arm64 build (osxexperts.net, GPL); Intel gets the existing LGPL build (evermeet.cx)."
                         : undefined
                     }
+                    // Combined ffmpeg+ffprobe row: take the weaker of the
+                    // two `verified` states so a clean ffmpeg + system
+                    // ffprobe still shows amber.
+                    verified={
+                      deps.ffmpeg.verified === "system-unverified" ||
+                      deps.ffprobe.verified === "system-unverified"
+                        ? "system-unverified"
+                        : deps.ffmpeg.verified === "missing" ||
+                            deps.ffprobe.verified === "missing"
+                          ? "missing"
+                          : "verified"
+                    }
+                    cleanCopyLabel="Install clean ffmpeg + ffprobe"
                   />
-                  {/* Audio permissions — actionable during setup so recording works on first try */}
-                  <AudioPermissionsPanel
-                    systemAudioSupported={deps.systemAudioSupported}
-                    micPermission={micPermission}
-                    micPermissionBusy={micPermissionBusy}
-                    systemAudioProbe={systemAudioProbe}
-                    appIdentity={appIdentity}
-                    onRequestMic={requestMicrophonePermission}
-                    onProbeSystemAudio={probeSystemAudio}
-                  />
-                  {asrProvider === "parakeet-mlx" && (
-                    <DependencyRow
-                      name="Parakeet"
-                      ok={!!deps.parakeet.path}
-                      value={deps.parakeet.path ?? undefined}
-                      installLabel="Install Parakeet"
-                      installing={installing === "parakeet"}
-                      anyInstalling={installing !== null}
-                      brewAvailable={true}
-                      onInstall={installParakeet}
-                      onCancel={() => api.cancelSetupAsr()}
-                      footerNote={
-                        !deps.parakeet.path
-                          ? "Installs an app-managed Python runtime (Apple-Silicon-only), ffmpeg if missing, and the Parakeet model — about 1 GB total. First run can take a few minutes on a slow connection while the model weights download."
-                          : undefined
-                      }
-                    />
-                  )}
+                  {asrProvider === "parakeet-mlx" && (() => {
+                    // Treat the Parakeet row as broken if EITHER the
+                    // venv binary is missing OR the underlying Python
+                    // runtime failed validation. The venv itself was
+                    // built against that Python, so a wrong-arch Python
+                    // means the venv can't load — the row shouldn't
+                    // claim "Ready" while the runtime is broken.
+                    // Re-running installParakeet (= setup-asr chain)
+                    // reinstalls Python and rebuilds the venv against
+                    // it, so the existing button is the correct repair
+                    // affordance.
+                    const pythonBroken =
+                      (deps.python.source === "app-installed" ||
+                        deps.python.source === "bundled") &&
+                      deps.python.verified === "system-unverified";
+                    const parakeetOk = !!deps.parakeet.path && !pythonBroken;
+                    return (
+                      <DependencyRow
+                        name="Parakeet"
+                        ok={parakeetOk}
+                        value={deps.parakeet.path ?? undefined}
+                        installLabel={pythonBroken ? "Repair Parakeet runtime" : "Install Parakeet"}
+                        installing={installing === "parakeet"}
+                        anyInstalling={installing !== null}
+                        brewAvailable={true}
+                        onInstall={installParakeet}
+                        onCancel={() => api.cancelSetupAsr()}
+                        footerNote={
+                          pythonBroken
+                            ? "The app-managed Python runtime under <binDir>/python failed validation (likely wrong arch — common after upgrading from an Intel install or running in a UTM guest without Rosetta). Repair re-runs the full Parakeet install chain, which reinstalls Python and rebuilds the venv against it."
+                            : !deps.parakeet.path
+                              ? "Installs an app-managed Python runtime (Apple-Silicon-only), ffmpeg if missing, and the Parakeet model — about 1 GB total. First run can take a few minutes on a slow connection while the model weights download."
+                              : undefined
+                        }
+                      />
+                    );
+                  })()}
                   {llmProvider === "ollama" && (
                     <DependencyRow
                       name="Ollama"
@@ -1039,6 +1276,8 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                           ? "Downloads ~130 MB. Lands at <userData>/bin/ollama-runtime/. Models live at ~/.ollama/models so a future system Ollama install picks them up."
                           : undefined
                       }
+                      verified={deps.ollama.verified}
+                      cleanCopyLabel="Install clean Ollama"
                     />
                   )}
                   {llmProvider === "ollama" && localLlmModel && deps.ollama.daemon && (
@@ -1069,21 +1308,9 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
               {/* Brew prompt removed — Phase 2 replaced Homebrew with direct
                   download. The wizard never asks the user to open Terminal. */}
-
-              {installLog.length > 0 && (
-                <pre
-                  ref={installLogRef}
-                  className="max-h-52 overflow-auto rounded-xl border border-[var(--border-default)] bg-[var(--text-primary)] px-4 py-3 font-mono text-xs leading-6 text-[rgba(255,255,255,0.88)]"
-                >
-                  {installLog.join("\n")}
-                </pre>
-              )}
-
-              {installError && (
-                <div className="text-sm text-[var(--error)]">{installError}</div>
-              )}
-
-              {/* BlackHole skip checkbox removed — system audio is automatic */}
+              {/* The raw install log + standalone error live inside the
+                  DependencyInstallProgress panel above (Phase 5 — they
+                  share state but render under the new chrome). */}
 
               {busy && embedProgress && (
                 <div
@@ -1266,6 +1493,17 @@ interface DependencyRowProps {
    */
   onCancel?: () => void;
   footerNote?: string;
+  /**
+   * Phase-1B `verified` discriminator from `ResolvedTool.verified`. Drives
+   * the badge color and the "Install clean copy" CTA:
+   *   - "verified" / undefined → green Ready
+   *   - "system-bundled"       → green Ready (system Ollama with daemon up)
+   *   - "system-unverified"    → amber "Found (unverified)" + "Install clean copy"
+   *   - "missing"              → red "Missing" + the regular Install CTA
+   */
+  verified?: "verified" | "system-bundled" | "system-unverified" | "missing";
+  /** Label for the "Install clean copy" CTA when verified === "system-unverified". */
+  cleanCopyLabel?: string;
 }
 
 function DependencyRow({
@@ -1279,18 +1517,26 @@ function DependencyRow({
   onInstall,
   onCancel,
   footerNote,
+  verified,
+  cleanCopyLabel,
 }: DependencyRowProps) {
+  const isUnverified = verified === "system-unverified";
   return (
     <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
       <div className="flex flex-col gap-3 md:flex-row md:items-center">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <div className="text-sm font-medium text-[var(--text-primary)]">{name}</div>
-            <DependencyStateBadge ok={ok} warning={false} />
+            <DependencyStateBadge ok={ok} warning={isUnverified} />
             {value ? <span className="truncate font-mono text-xs text-[var(--text-secondary)]">{value}</span> : null}
             {!value ? <span className="text-xs text-[var(--text-secondary)]">{ok ? "installed" : "not installed"}</span> : null}
           </div>
           {footerNote && !ok ? <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{footerNote}</div> : null}
+          {isUnverified ? (
+            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
+              Found a system-installed copy at this path. We can't safely verify it without spawning, so the wizard treats it as unverified. Install a clean app-managed copy to remove the ambiguity.
+            </div>
+          ) : null}
         </div>
         {!ok ? (
           <div className="flex flex-wrap items-center gap-2">
@@ -1302,6 +1548,12 @@ function DependencyRow({
                 Cancel
               </Button>
             ) : null}
+          </div>
+        ) : isUnverified ? (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" onClick={onInstall} disabled={anyInstalling}>
+              {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : (cleanCopyLabel ?? "Install clean copy")}
+            </Button>
           </div>
         ) : null}
       </div>
@@ -1316,19 +1568,23 @@ function DependencyStateBadge({
   ok: boolean;
   warning: boolean;
 }) {
+  // Warning takes precedence over ok. A row that resolves to a path
+  // (`ok=true`) but is `system-unverified` (`warning=true`) must NOT
+  // render green Ready — that was the regression the previous patch
+  // shipped. Amber wins, then green, then red.
+  if (warning) {
+    return (
+      <Badge variant="warning" className="gap-1 normal-case tracking-normal">
+        <AlertTriangle className="h-3 w-3" />
+        Found (unverified)
+      </Badge>
+    );
+  }
   if (ok) {
     return (
       <Badge variant="success" className="gap-1 normal-case tracking-normal">
         <CheckCircle2 className="h-3 w-3" />
         Ready
-      </Badge>
-    );
-  }
-  if (warning) {
-    return (
-      <Badge variant="warning" className="gap-1 normal-case tracking-normal">
-        <AlertTriangle className="h-3 w-3" />
-        Needs attention
       </Badge>
     );
   }
@@ -1350,11 +1606,21 @@ function basename(p: string): string {
   return parts[parts.length - 1] ?? "";
 }
 
-// ---- Audio permissions panel used in the Dependencies wizard step ----
+// ---- Audio permissions panel used in the Permissions wizard step ----
+//
+// The system-audio block is a two-stage Test → Verify FSM (see the
+// `startSystemAudioPrompt` / `verifySystemAudio` helpers in SetupWizard
+// for the state diagram). The first probe triggers the macOS TCC
+// dialog; its result is intentionally discarded (the badge stays
+// neutral) so the user doesn't see a red "Failed" badge while they're
+// still deciding whether to click Allow. The second probe runs after
+// the user clicks "Verify" and writes the authoritative state.
 
 type SystemAudioProbeState =
   | { status: "unknown" }
-  | { status: "probing" }
+  | { status: "prompting" }
+  | { status: "awaitingVerify" }
+  | { status: "verifying" }
   | { status: "granted" }
   | { status: "denied" }
   | { status: "unsupported" }
@@ -1367,7 +1633,9 @@ function AudioPermissionsPanel({
   systemAudioProbe,
   appIdentity,
   onRequestMic,
-  onProbeSystemAudio,
+  onRecheckMic,
+  onStartSystemAudioPrompt,
+  onVerifySystemAudio,
 }: {
   systemAudioSupported: boolean;
   micPermission: "unknown" | "granted" | "denied" | "not-determined" | "restricted";
@@ -1375,7 +1643,9 @@ function AudioPermissionsPanel({
   systemAudioProbe: SystemAudioProbeState;
   appIdentity: { displayName: string; tccBundleName: string; bundlePath: string | null; isDev: boolean; isPackaged: boolean } | null;
   onRequestMic: () => void;
-  onProbeSystemAudio: () => void;
+  onRecheckMic: () => void;
+  onStartSystemAudioPrompt: () => void;
+  onVerifySystemAudio: () => void;
 }) {
   const bundleLabel = appIdentity?.tccBundleName ?? "Gistlist";
   const isDev = appIdentity?.isDev ?? false;
@@ -1461,6 +1731,17 @@ function AudioPermissionsPanel({
               >
                 Reveal {isDev ? "Electron" : bundleLabel} in Finder
               </Button>
+              {/* Re-check after the user fixed permission in System Settings. Without
+                  this, the wizard's cached `micPermission` stays "denied" until the
+                  user reloads, and Next on the Permissions step stays disabled. */}
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={onRecheckMic}
+                disabled={micPermissionBusy}
+              >
+                {micPermissionBusy ? "Checking…" : "Re-check microphone permission"}
+              </Button>
             </div>
           </div>
         ) : (
@@ -1497,10 +1778,20 @@ function AudioPermissionsPanel({
               <XCircle className="h-3 w-3" />
               Not granted
             </Badge>
-          ) : systemAudioProbe.status === "probing" ? (
+          ) : systemAudioProbe.status === "prompting" ? (
             <Badge variant="secondary" className="gap-1">
               <Spinner className="h-3 w-3" />
-              Checking (≈2s)…
+              Awaiting permission…
+            </Badge>
+          ) : systemAudioProbe.status === "awaitingVerify" ? (
+            <Badge variant="secondary" className="gap-1">
+              <Info className="h-3 w-3" />
+              Waiting to verify
+            </Badge>
+          ) : systemAudioProbe.status === "verifying" ? (
+            <Badge variant="secondary" className="gap-1">
+              <Spinner className="h-3 w-3" />
+              Verifying…
             </Badge>
           ) : systemAudioProbe.status === "failed" ? (
             <Badge variant="destructive" className="gap-1">
@@ -1513,20 +1804,38 @@ function AudioPermissionsPanel({
               Not yet checked
             </Badge>
           )}
-          {systemAudioSupported && systemAudioProbe.status !== "probing" ? (
-            <Button
-              size="sm"
-              variant={systemAudioProbe.status === "unknown" ? "default" : "secondary"}
-              onClick={onProbeSystemAudio}
-            >
-              {systemAudioProbe.status === "unknown"
-                ? "Test system audio"
-                : systemAudioProbe.status === "granted"
-                  ? "Re-test"
-                  : "Test again"}
-            </Button>
-          ) : null}
+          {systemAudioSupported && systemAudioProbe.status === "prompting" ? null : null}
+          {systemAudioSupported && systemAudioProbe.status === "verifying" ? null : null}
+          {systemAudioSupported &&
+            (systemAudioProbe.status === "unknown" ||
+              systemAudioProbe.status === "granted") && (
+              <Button
+                size="sm"
+                variant={systemAudioProbe.status === "unknown" ? "default" : "secondary"}
+                onClick={onStartSystemAudioPrompt}
+              >
+                {systemAudioProbe.status === "granted" ? "Re-test" : "Test system audio"}
+              </Button>
+            )}
+          {systemAudioSupported &&
+            (systemAudioProbe.status === "awaitingVerify" ||
+              systemAudioProbe.status === "denied" ||
+              systemAudioProbe.status === "failed") && (
+              <Button size="sm" variant="default" onClick={onVerifySystemAudio}>
+                Verify
+              </Button>
+            )}
         </div>
+        {systemAudioSupported && systemAudioProbe.status === "prompting" ? (
+          <div className="text-xs text-[var(--text-secondary)]">
+            macOS is asking for permission. Click <strong>Allow</strong> in the dialog above, then click <em>Verify</em>.
+          </div>
+        ) : null}
+        {systemAudioSupported && systemAudioProbe.status === "awaitingVerify" ? (
+          <div className="text-xs text-[var(--text-secondary)]">
+            Click <em>Verify</em> once you've granted permission in the macOS dialog.
+          </div>
+        ) : null}
         {systemAudioSupported && systemAudioProbe.status === "denied" ? (
           <div className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning-muted,rgba(245,158,11,0.08))] px-3 py-2 text-xs space-y-2">
             <div className="text-[var(--text-secondary)]">
@@ -1546,7 +1855,7 @@ function AudioPermissionsPanel({
                 the list, turn its switch on. Otherwise click <strong className="text-[var(--text-primary)]">+</strong>{" "}
                 and drag it from the Finder window (use <em>Reveal in Finder</em>).
               </li>
-              <li>Come back here and click <em>Check system audio</em>.</li>
+              <li>Come back here and click <em>Verify</em>.</li>
             </ol>
             {appIdentity?.bundlePath ? (
               <div className="font-mono text-[10px] text-[var(--text-tertiary)] break-all">

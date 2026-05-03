@@ -44,8 +44,48 @@ export class SetupWizardPage {
     });
   }
 
+  permissionsHeading() {
+    return this.page.getByRole("heading", { name: "Permissions" });
+  }
+
   depsHeading() {
     return this.page.getByRole("heading", { name: "Dependencies" });
+  }
+
+  // Permissions step controls
+  grantMicButton() {
+    return this.page.getByRole("button", { name: /grant microphone access/i });
+  }
+
+  testSystemAudioButton() {
+    return this.page.getByRole("button", { name: /^test system audio$/i });
+  }
+
+  reTestSystemAudioButton() {
+    return this.page.getByRole("button", { name: /^re-test$/i });
+  }
+
+  verifySystemAudioButton() {
+    return this.page.getByRole("button", { name: /^verify$/i });
+  }
+
+  recheckMicButton() {
+    return this.page.getByRole("button", {
+      name: /re-check microphone permission/i,
+    });
+  }
+
+  /**
+   * Convenience: walk from the Permissions step into the Dependencies
+   * step, granting the mic if needed (Next is disabled until granted).
+   * Used by specs that don't care about the Permissions UI itself.
+   */
+  async advanceFromPermissionsToDeps() {
+    const grant = this.grantMicButton();
+    if (await grant.isVisible().catch(() => false)) {
+      await grant.click();
+    }
+    await this.nextButton().click();
   }
 
   // Navigation buttons

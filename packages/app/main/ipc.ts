@@ -48,6 +48,7 @@ import {
 const appLogger = createAppLogger(Boolean(process.env.VITE_DEV_SERVER_URL));
 import { ensureOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import { resolveBin } from "./bundled.js";
+import { resolveAndValidate } from "./installers/validated-resolve.js";
 import {
   installTool,
   findEntry,
@@ -733,6 +734,17 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("system:get-microphone-permission", async () => {
     if (process.platform !== "darwin") return { status: "granted" as const };
     return { status: systemPreferences.getMediaAccessStatus("microphone") };
+  });
+
+  // Lightweight system-capability snapshot used by the Permissions wizard
+  // step on mount, before any deps:check runs. Pure read — no spawn, no
+  // dialogs. Currently exposes only `systemAudioSupported` (a macOS
+  // version check). `micSupported` is intentionally omitted — macOS
+  // always exposes a microphone surface; what varies is permission, not
+  // hardware, and permission is queried separately via
+  // `system:get-microphone-permission`.
+  ipcMain.handle("system:capabilities", async () => {
+    return { systemAudioSupported: isSystemAudioSupported() };
   });
 
   ipcMain.handle("system:get-audio-permissions", async () => {
@@ -1618,22 +1630,95 @@ export function registerIpcHandlers(): void {
         log("  ✓ Python runtime already present");
       }
 
-      // Step 3: inject resolved paths into engine
-      const ffmpegBin = await resolveBin("ffmpeg");
-      const ffprobeBin = await resolveBin("ffprobe");
-      const pythonBin = await resolveBin("python");
-      if (ffmpegBin) setFfmpegPath(ffmpegBin.path);
-      if (ffprobeBin) setFfprobePath(ffprobeBin.path);
-      if (pythonBin) setPythonPath(pythonBin.path);
+      // Step 3: inject resolved paths into engine. We just installed
+      // ffmpeg + ffprobe (via `installFfmpegBundle`, which calls
+      // `isPinnedVersionInstalled` — arch + verifyExec validated) and
+      // Python (via `installTool`'s download → verifyExec pipeline), so
+      // these binaries are known-good. Still, route through the same
+      // `resolveAndValidate` invariant the rest of the codebase uses,
+      // so a regression in any of those install paths surfaces here as
+      // a fail-fast chain failure rather than silently injecting a
+      // bad path.
+      //
+      // Critical: a validation failure here happens AFTER Python may
+      // have been installed with `keepPrev: true`. Returning early
+      // without rolling back leaks an orphaned `<binDir>/python-runtime.prev`
+      // forever and can leave the user with a half-replaced runtime.
+      // Failures route through `failChainWithRollback` which mirrors
+      // the venv try/catch's rollback semantics — `pythonInstallNeedsCommit`
+      // gates whether `rollbackKeptPrev` runs.
+      const failChainWithRollback = (
+        failedPhase: "verify-exec",
+        error: string
+      ): DepsInstallResult => {
+        if (pythonInstallNeedsCommit) {
+          const pythonEntry = findEntry("python");
+          if (pythonEntry) {
+            log("  ✘ post-install validation failed — rolling Python runtime back");
+            rollbackKeptPrev(pythonEntry);
+          }
+        }
+        return { ok: false, error, failedPhase };
+      };
+      const ffmpegInject = await resolveAndValidate("ffmpeg");
+      if (!ffmpegInject.injectable || !ffmpegInject.path) {
+        return failChainWithRollback(
+          "verify-exec",
+          "ffmpeg installed but failed post-install validation (arch or verifyExec)"
+        );
+      }
+      setFfmpegPath(ffmpegInject.path);
+      const ffprobeInject = await resolveAndValidate("ffprobe");
+      if (!ffprobeInject.injectable || !ffprobeInject.path) {
+        return failChainWithRollback(
+          "verify-exec",
+          "ffprobe installed but failed post-install validation (arch or verifyExec)"
+        );
+      }
+      setFfprobePath(ffprobeInject.path);
+      const pythonInject = await resolveAndValidate("python");
+      if (!pythonInject.injectable || !pythonInject.path) {
+        return failChainWithRollback(
+          "verify-exec",
+          "Python runtime installed but failed post-install validation (arch or verifyExec)"
+        );
+      }
+      setPythonPath(pythonInject.path);
 
       // Step 4: engine venv build + pip + smoke test. If this throws,
       // the catch below rolls Python back to the previous version so
       // the user isn't left with a half-installed runtime.
       log("→ building venv and installing mlx-audio");
+      // The engine emits "Running smoke test (downloads Parakeet weights
+      // on first run, ...)" when it kicks off the combined download +
+      // smoke test (one Python invocation that loads weights and
+      // transcribes — see engine/setup-asr.ts:runSmokeTest). The
+      // wizard's 4-step rail in DependencyInstallProgress expects a
+      // `→`-prefixed boundary to advance to "Speech model", so we
+      // synthesize one when that engine line comes through.
+      //
+      // Why a single boundary, not two: the smoke-test subprocess has
+      // no observable signal between weights-loaded and transcription-
+      // start. A separate "Verify" rail step would either fire too
+      // late (only on the success line) or simultaneously with
+      // speech-model (visually implying both are running). The activity
+      // stream still surfaces the engine's "✓ Smoke test transcription:
+      // …" success marker so users see verification happened.
+      let speechModelBoundaryEmitted = false;
+      const engineLog = (line: string) => {
+        if (
+          !speechModelBoundaryEmitted &&
+          /downloads parakeet weights/i.test(line)
+        ) {
+          log("→ Downloading Parakeet weights");
+          speechModelBoundaryEmitted = true;
+        }
+        log(line);
+      };
       try {
         await setupAsr({
           force: opts.force,
-          onLog: log,
+          onLog: engineLog,
           abort: controller.signal,
         });
       } catch (venvErr) {
@@ -2031,83 +2116,73 @@ export function registerIpcHandlers(): void {
   });
 
   // ---- deps check ----
+  //
+  // **Spawn-safety rule (Phase 2 / issue #3 follow-up):** never run
+  // `execFileAsync` against a binary whose source is `system` (PATH).
+  // Apple's `/usr/bin/python3` stub triggers the macOS "Install command
+  // line developer tools" dialog when invoked on a fresh Mac without
+  // CLT — exactly the kind of surprise dialog the wizard must not
+  // produce. The same risk class applies to `ffmpeg`/`ffprobe`/`ollama`
+  // when they came from PATH: we don't know what they are. The rule:
+  // run version probes ONLY when the resolver returned source
+  // `app-installed` or `bundled`. System-resolved binaries get
+  // path-only reporting (`version: null`, `verified: "system-unverified"`).
   ipcMain.handle("deps:check", async (): Promise<DepsCheckResult> => {
-    // ffmpeg — resolved app-installed → bundled → system. Source is
-    // surfaced so the wizard can show "App copy" vs "System: …" badges.
-    // Python is an internal sub-step of the Parakeet install chain and
-    // never appears in DepsCheckResult — but we still want to refresh
-    // the engine's injected python path here so a Re-check after the
-    // chain completes makes a follow-up `setupAsr({ force: true })`
-    // pick up the freshly-installed runtime.
-    const pythonBinForRefresh = await resolveBin("python");
-    if (pythonBinForRefresh) setPythonPath(pythonBinForRefresh.path);
-
-    const ffmpegBin = await resolveBin("ffmpeg");
-    let ffmpegVersion: string | null = null;
-    if (ffmpegBin) {
-      // Keep the engine's ffmpeg path in sync — covers the case where the
-      // wizard just installed ffmpeg and the engine still has the startup
-      // value (or the default "ffmpeg") cached.
-      setFfmpegPath(ffmpegBin.path);
-      try {
-        const { stdout } = await execFileAsync(ffmpegBin.path, ["-version"]);
-        const m = stdout.match(/ffmpeg version (\S+)/);
-        if (m) ffmpegVersion = m[1];
-      } catch { /* ignore */ }
-    }
+    // All three engine-injectable binaries (ffmpeg, ffprobe, python)
+    // flow through the same `resolveAndValidate` helper used at app
+    // startup. The helper:
+    //   - skips spawn for system-PATH binaries (Phase 2 — would risk
+    //     triggering macOS CLT install for /usr/bin/python3),
+    //   - validates arch + verifyExec for app-managed binaries,
+    //   - returns `injectable: false` when validation fails so we
+    //     never point the engine at a broken binary.
+    // Sharing this with index.ts means a returning user with a stale
+    // wrong-arch app-managed binary gets the same protection at boot
+    // as they get on the wizard's Re-check button.
+    const ffmpegRes = await resolveAndValidate("ffmpeg");
+    if (ffmpegRes.injectable && ffmpegRes.path) setFfmpegPath(ffmpegRes.path);
     const ffmpeg: ResolvedTool = {
-      path: ffmpegBin?.path ?? null,
-      source: ffmpegBin?.source ?? null,
-      version: ffmpegVersion,
+      path: ffmpegRes.path,
+      source: ffmpegRes.source,
+      version: ffmpegRes.version,
+      verified: ffmpegRes.verified,
     };
 
-    // ffprobe — paired with ffmpeg in the wizard installer (same upstream
-    // zip from evermeet.cx, same SHA-anchored trust). The engine's audio
-    // duration / stream-info code uses ffprobe specifically, so a missing
-    // ffprobe makes the System Health "ffmpeg" row not-ok even when ffmpeg
-    // itself is present. Sync the engine's ffprobe path injection too.
-    const ffprobeBin = await resolveBin("ffprobe");
-    let ffprobeVersion: string | null = null;
-    if (ffprobeBin) {
-      setFfprobePath(ffprobeBin.path);
-      try {
-        const { stdout } = await execFileAsync(ffprobeBin.path, ["-version"]);
-        const m = stdout.match(/ffprobe version (\S+)/);
-        if (m) ffprobeVersion = m[1];
-      } catch { /* ignore */ }
-    }
+    const ffprobeRes = await resolveAndValidate("ffprobe");
+    if (ffprobeRes.injectable && ffprobeRes.path) setFfprobePath(ffprobeRes.path);
     const ffprobe: ResolvedTool = {
-      path: ffprobeBin?.path ?? null,
-      source: ffprobeBin?.source ?? null,
-      version: ffprobeVersion,
+      path: ffprobeRes.path,
+      source: ffprobeRes.source,
+      version: ffprobeRes.version,
+      verified: ffprobeRes.verified,
     };
 
-    // Python — prefer the app-managed runtime (installed by the
-    // Parakeet auto-chain at <binDir>/python), then fall back to a
-    // system Python only for honest reporting. resolveBin walks
-    // app-installed → bundled → PATH. Without this, after a successful
-    // Parakeet install the Settings health row could still show "not
-    // found" because we'd only check `which python3.12` and the user
-    // never installed system Python.
-    const pythonResolved = await resolveBin("python");
+    // Python — prefer the app-managed runtime via `resolveAndValidate`
+    // (which arch-validates AND spawn-validates app-managed entries
+    // before injecting). When app-managed isn't present, fall back to
+    // a system Python ON PATH for honest reporting only — the Parakeet
+    // chain itself never accepts a system Python (see install-tool.ts
+    // `isPinnedVersionInstalled` comment). Spawn-safety: we never
+    // execute `/usr/bin/python3` for status because it would trigger
+    // macOS CLT install on a fresh Mac (Phase 2).
+    const pythonRes = await resolveAndValidate("python");
+    if (pythonRes.injectable && pythonRes.path) setPythonPath(pythonRes.path);
     const pythonPath =
-      pythonResolved?.path ??
+      pythonRes.path ??
       (await whichCmd("python3.12")) ??
       (await whichCmd("python3.11")) ??
       (await whichCmd("python3"));
-    let pythonVersion: string | null = null;
-    if (pythonPath) {
-      try {
-        const args = pythonResolved ? ["-V"] : ["--version"];
-        const { stdout, stderr } = await execFileAsync(pythonPath, args);
-        const m = (stdout || stderr).match(/Python (\S+)/);
-        if (m) pythonVersion = m[1];
-      } catch { /* ignore */ }
-    }
+    const pythonSource: ResolvedTool["source"] =
+      pythonRes.source ?? (pythonPath ? "system" : null);
     const python: ResolvedTool = {
       path: pythonPath,
-      source: pythonResolved?.source ?? (pythonPath ? "system" : null),
-      version: pythonVersion,
+      source: pythonSource,
+      version: pythonRes.version,
+      verified: !pythonPath
+        ? "missing"
+        : pythonRes.path
+          ? pythonRes.verified
+          : "system-unverified",
     };
 
     // System audio: check macOS version for AudioTee support (14.2+).
@@ -2142,6 +2217,7 @@ export function registerIpcHandlers(): void {
       path: parakeetPath,
       source: parakeetPath ? "app-installed" : null,
       version: null,
+      verified: parakeetPath ? "verified" : "missing",
     };
 
     // whisper-cli — system PATH only in practice. The resolver still
@@ -2155,6 +2231,11 @@ export function registerIpcHandlers(): void {
       path: whisperBin?.path ?? null,
       source: whisperBin?.source ?? null,
       version: null,
+      verified: !whisperBin
+        ? "missing"
+        : whisperBin.source === "app-installed" || whisperBin.source === "bundled"
+          ? "verified"
+          : "system-unverified",
     };
 
     // Ollama: ask the daemon module what state it's in (or attempt to ping a
@@ -2164,6 +2245,7 @@ export function registerIpcHandlers(): void {
     let ollamaDaemonUp = false;
     let ollamaSource: DepsCheckResult["ollama"]["source"] | undefined;
     let installedModels: string[] = [];
+    let ollamaBaseUrlForVersion: string | null = null;
     try {
       const state = getOllamaState();
       if (state) {
@@ -2171,26 +2253,57 @@ export function registerIpcHandlers(): void {
         const status = await checkOllama(state.baseUrl);
         ollamaDaemonUp = status.daemon;
         installedModels = status.installedModels;
+        ollamaBaseUrlForVersion = state.baseUrl;
       } else {
         const status = await checkOllama();
         ollamaDaemonUp = status.daemon;
         installedModels = status.installedModels;
-        if (ollamaDaemonUp) ollamaSource = "system-running";
+        if (ollamaDaemonUp) {
+          ollamaSource = "system-running";
+          ollamaBaseUrlForVersion = "http://127.0.0.1:11434";
+        }
       }
     } catch {
       ollamaDaemonUp = false;
     }
+    // Read Ollama version via the daemon's HTTP API instead of spawning
+    // the binary. `GET /api/version` returns `{"version":"0.x.y"}` —
+    // safe regardless of whether the binary on disk is app-installed
+    // or system. This keeps us honest with the Phase 2 spawn-safety
+    // rule even for system-PATH Ollama installs.
     let ollamaVersion: string | null = null;
-    if (ollamaDaemonUp) {
+    if (ollamaDaemonUp && ollamaBaseUrlForVersion) {
       try {
-        const ollamaBin = await whichCmd("ollama");
-        if (ollamaBin) {
-          const { stdout } = await execFileAsync(ollamaBin, ["--version"]);
-          const m = stdout.match(/(\d+\.\d+\S*)/);
-          if (m) ollamaVersion = m[1];
+        const ac = new AbortController();
+        const t = setTimeout(() => ac.abort(), 1500);
+        try {
+          const res = await fetch(`${ollamaBaseUrlForVersion}/api/version`, {
+            signal: ac.signal,
+          });
+          if (res.ok) {
+            const body = (await res.json()) as { version?: string };
+            if (body.version && typeof body.version === "string") {
+              ollamaVersion = body.version;
+            }
+          }
+        } finally {
+          clearTimeout(t);
         }
       } catch { /* ignore */ }
     }
+    // verified for Ollama: app-installed-and-running → "verified",
+    // system binary present and daemon up → "system-bundled" (the
+    // operational signal is the daemon answering, not the binary path),
+    // system binary present but daemon not up → "system-unverified",
+    // nothing → "missing".
+    const ollamaVerified: DepsCheckResult["ollama"]["verified"] =
+      ollamaSource === "bundled-spawned"
+        ? "verified"
+        : ollamaDaemonUp
+          ? "system-bundled"
+          : ollamaSource
+            ? "system-unverified"
+            : "missing";
     return {
       ffmpeg,
       ffprobe,
@@ -2204,6 +2317,7 @@ export function registerIpcHandlers(): void {
         source: ollamaSource,
         installedModels,
         version: ollamaVersion,
+        verified: ollamaVerified,
       },
     };
   });
@@ -2216,13 +2330,26 @@ export function registerIpcHandlers(): void {
       // "start daemon" UI step.
       const state = await ensureOllamaDaemon();
       const status = await checkOllama(state.baseUrl);
+      // Same `verified` semantics as deps:check: app-managed bundled
+      // daemon is "verified", system daemon answering is
+      // "system-bundled", anything else where we have a source but
+      // daemon is down is "system-unverified", nothing is "missing".
+      const verified: DepsCheckResult["ollama"]["verified"] =
+        state.source === "bundled-spawned"
+          ? "verified"
+          : status.daemon
+            ? "system-bundled"
+            : state.source
+              ? "system-unverified"
+              : "missing";
       return {
         daemon: status.daemon,
         source: state.source,
         installedModels: status.installedModels,
+        verified,
       };
     } catch {
-      return { daemon: false, installedModels: [] };
+      return { daemon: false, installedModels: [], verified: "missing" };
     }
   });
 

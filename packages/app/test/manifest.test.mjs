@@ -19,16 +19,24 @@ test("findManifestEntry: returns null for unsupported archs", () => {
   assert.equal(findManifestEntry("ffmpeg", "arm"), null);
 });
 
-test("findManifestEntry: ffmpeg on arm64 falls back to x64 entry (Rosetta)", () => {
+test("findManifestEntry: ffmpeg on arm64 returns native arm64 entry (no Rosetta)", () => {
+  // We now ship a native arm64 ffmpeg from osxexperts.net. The Rosetta
+  // fallback in findManifestEntry is unreachable for ffmpeg/ffprobe and
+  // exists only for tools that lack an arm64 entry. This test pins the
+  // post-Phase-1A behavior — without it, a future revert to "fall back
+  // to x64" would silently re-introduce the EBADARCH bug on
+  // no-Rosetta arm64 hosts.
   const entry = findManifestEntry("ffmpeg", "arm64");
-  assert.ok(entry, "expected ffmpeg entry for arm64 via Rosetta fallback");
+  assert.ok(entry, "expected native arm64 ffmpeg entry");
   assert.equal(entry.tool, "ffmpeg");
-  assert.equal(entry.arch, "x64");
-  assert.match(
-    entry.notes ?? "",
-    /Rosetta/i,
-    "Rosetta-fallback entries should explain the caveat in notes"
-  );
+  assert.equal(entry.arch, "arm64");
+});
+
+test("findManifestEntry: ffprobe on arm64 returns native arm64 entry", () => {
+  const entry = findManifestEntry("ffprobe", "arm64");
+  assert.ok(entry, "expected native arm64 ffprobe entry");
+  assert.equal(entry.tool, "ffprobe");
+  assert.equal(entry.arch, "arm64");
 });
 
 test("findManifestEntry: ffmpeg on x64 returns x64 entry directly", () => {

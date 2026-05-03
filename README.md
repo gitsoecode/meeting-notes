@@ -15,12 +15,29 @@ Local-first desktop meeting workspace for macOS. Records mic and system audio, t
 
 End-users do not need to install runtime dependencies by hand: the in-app
 Setup Wizard installs the bits their choices require into app-managed
-locations, including ffmpeg/ffprobe from evermeet.cx, Python from
-python-build-standalone for Parakeet, and Ollama/local models for local
-analysis or semantic search. For contributor work where you want to run
-the engine outside the wizard (CLI, headless tests), system-PATH `ffmpeg`
-and `python3.12` still work as fallbacks — they're not required to develop
-the app itself.
+locations:
+
+- **ffmpeg / ffprobe** — native arm64 build from osxexperts.net for Apple
+  Silicon (GPL, ad-hoc signed), or LGPL static build from evermeet.cx
+  for Intel Macs. The wizard picks per host arch.
+- **Python** — CPython 3.12.13 from python-build-standalone (Parakeet
+  auto-chain only).
+- **Ollama** — universal tarball from the Ollama GitHub release.
+- **Embedding model** — pulled via Ollama if the user opts into semantic
+  search (Claude Desktop / MCP integration).
+
+The wizard runs in 6 steps: Welcome → Storage → Retention → Providers →
+**Permissions** (mic + optional system-audio test) → **Dependencies**
+(install deps + Finish). The Permissions step is dedicated and only
+prompts the OS when the user clicks Test/Grant — never on mount. The
+Dependencies step renders a live install-progress panel above the row
+list with an honest current-download progress bar, MB/s, ETA, an
+activity stream of phase boundaries / ✓ / ✘ markers, and a "View raw
+log" toggle.
+
+For contributor work where you want to run the engine outside the wizard
+(CLI, headless tests), system-PATH `ffmpeg` and `python3.12` still work
+as fallbacks — they're not required to develop the app itself.
 
 The Parakeet ASR path is **Apple Silicon only** (it depends on MLX). On
 Intel Macs the wizard hides the Parakeet option and steers users to
