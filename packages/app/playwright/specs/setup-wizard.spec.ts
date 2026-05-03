@@ -537,6 +537,51 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.finishButton()).toBeDisabled();
   });
 
+  test("Finish with semantic search disabled does NOT trigger an embed-model pull", async ({
+    wizard,
+    page,
+  }) => {
+    // v0.1.9 regression-2: the explicit row removed the surprise pull
+    // from `Finish setup`, but the main process still had a startup
+    // auto-pull (`ensureMeetingIndexEmbeddingModel` in main/index.ts)
+    // that ran on every launch when the model wasn't installed yet.
+    // The user's stated rule is "explicit click, no surprise installs"
+    // — startup violated that just as much as Finish did. The fix
+    // removed the startup hook entirely. This test pins the
+    // never-pull-without-explicit-click contract from the renderer
+    // side: the user can complete setup with semantic search off and
+    // `installEmbedModel` is never called.
+    await page.evaluate(() => {
+      const harness = (window as any).__MEETING_NOTES_TEST;
+      harness.setEmbedModelInstalled(false);
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    // Toggle semantic search OFF on the providers step. The default is
+    // on; we explicitly opt out so no embed-model row appears, no
+    // Finish gate, no pull anywhere. The shadcn switch is rendered as
+    // a button with role=switch + an aria-label tied to the
+    // SettingToggle's `id` prop.
+    await page.locator("#wizard-enable-semantic-search").click();
+    await wizard.nextButton().click();
+    await wizard.advanceFromPermissionsToDeps();
+
+    // No embed-model row should be visible.
+    await expect(
+      page.getByText("Embedding model (nomic-embed-text)")
+    ).toHaveCount(0);
+
+    await wizard.finishButton().click();
+    await expect(page.getByRole("heading", { name: "Home" })).toBeVisible();
+
+    const calls = await page.evaluate(() =>
+      (window as any).__MEETING_NOTES_TEST.getInstallEmbedModelCallCount()
+    );
+    expect(calls).toBe(0);
+  });
+
   test("Semantic search + Claude LLM: Ollama row appears, embed-model gate works (P1)", async ({
     wizard,
     page,

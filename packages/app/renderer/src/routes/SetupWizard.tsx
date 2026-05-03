@@ -548,8 +548,12 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   // which threw on a fresh install. v0.1.9 made both handlers accept
   // an optional `baseUrl` and added a default fallback
   // (`http://127.0.0.1:11434`, matching the bundled-spawned daemon).
-  // The wizard pins the daemon URL here so it works regardless of
-  // whether config exists yet.
+  // We rely on the IPC's default fallback rather than passing a
+  // `baseUrl` from the renderer — the default lives in main where the
+  // daemon URL is canonically known, and a fresh install always uses
+  // it. (Re-runs from Settings still pull from config.) If we ever
+  // need to run the wizard against a non-default daemon, threading
+  // `{ baseUrl }` through here is a one-line change.
   const installEmbedModel = async () => {
     setInstalling("embed-model");
     setInstallLog([]);

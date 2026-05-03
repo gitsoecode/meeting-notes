@@ -20,11 +20,7 @@ import { setupTray } from "./tray.js";
 import { ensureOllamaDaemon, stopOllamaDaemon, getOllamaState } from "./ollama-daemon.js";
 import {
   DEFAULT_CONFIG,
-  DEFAULT_EMBEDDING_MODEL,
-  listOllamaModels,
   loadConfig,
-  pullOllamaModel,
-  type AppConfig,
 } from "@gistlist/engine";
 import { setToggleRecordingHandler, syncToggleRecordingShortcut } from "./shortcuts.js";
 import { resolveBin } from "./bundled.js";
@@ -52,29 +48,21 @@ const __dirname = path.dirname(__filename);
  * embeddings are unavailable — so this is a quality-of-life improvement
  * rather than a correctness requirement.
  */
-async function ensureMeetingIndexEmbeddingModel(config: AppConfig): Promise<void> {
-  try {
-    const installed = await listOllamaModels(config.ollama.base_url);
-    const have = installed.some(
-      (m) => m.name === DEFAULT_EMBEDDING_MODEL || m.name.startsWith(`${DEFAULT_EMBEDDING_MODEL}:`)
-    );
-    if (have) return;
-    appLoggerRef?.info("Pulling meeting-index embedding model in background", {
-      detail: DEFAULT_EMBEDDING_MODEL,
-    });
-    await pullOllamaModel(DEFAULT_EMBEDDING_MODEL, {
-      baseUrl: config.ollama.base_url,
-    });
-    appLoggerRef?.info("Meeting-index embedding model pulled", {
-      detail: DEFAULT_EMBEDDING_MODEL,
-    });
-  } catch (err) {
-    appLoggerRef?.warn(
-      "ensureMeetingIndexEmbeddingModel failed; meeting-index search will run FTS-only until resolved",
-      { detail: err instanceof Error ? err.message : String(err) },
-    );
-  }
-}
+// `ensureMeetingIndexEmbeddingModel(config)` used to live here and
+// silently pull `nomic-embed-text` into Ollama on app startup whenever
+// the model wasn't already installed. v0.1.9 removed it: the user's
+// stated rule for v0.1.9 was "explicit click, no surprise installs."
+// We removed the silent pull from `Finish setup` (renderer) but the
+// startup auto-pull was the same product violation hiding in main —
+// the next launch after Finish would pull the 274 MB model regardless
+// of whether the user had clicked the explicit "Download embedding
+// model" button. The model now installs ONLY through the wizard's
+// dedicated row (`installEmbedModel` → `meeting-index:install-embed-
+// model` IPC) or, in the future, an equivalent explicit Settings
+// affordance. No auto-pull. The MCP server's meeting-index search
+// degrades to FTS-only when embeddings are missing — that's a
+// quality-of-life cost, not a correctness bug, and the user has
+// explicitly chosen the trade-off.
 
 let appLoggerRef: ReturnType<typeof createAppLogger> | null = null;
 
@@ -405,12 +393,11 @@ app.whenReady().then(async () => {
         // Logged to ~/.gistlist/ollama.log; nothing more to do here.
       });
     }
-    // Ensure the meeting-index embedding model is present. Small (~274MB);
-    // pulled silently in the background so semantic search via MCP works
-    // without any setup steps from the user.
-    void ensureMeetingIndexEmbeddingModel(config).catch(() => {
-      // Logged below; non-fatal.
-    });
+    // Embedding-model pull was previously triggered here on every
+    // launch. Removed in v0.1.9 — see the comment block at
+    // `ensureMeetingIndexEmbeddingModel` (now deleted) for the
+    // rationale. The model installs only via the wizard's explicit
+    // "Download embedding model" row.
   } catch {
     // No config yet (first run) — wizard will start the daemon at finish.
   }
