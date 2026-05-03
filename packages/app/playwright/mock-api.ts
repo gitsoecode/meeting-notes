@@ -97,6 +97,13 @@ export async function installMockApi(page: Page) {
     // streaming LLM providers (Claude, OpenAI). Zero = old synchronous
     // behavior, used by the bulk of specs.
     let progressEmissionDelayMs = 0;
+    // Tracks the embedding model state for the new dedicated row on the
+    // Dependencies wizard step. Defaults to true so most existing specs
+    // (which don't care about semantic search) continue to walk through
+    // the wizard without an extra install row blocking Finish. Specs
+    // that exercise the not-yet-installed path flip this via
+    // `__MEETING_NOTES_TEST.setEmbedModelInstalled(false)`.
+    let embedModelInstalled = true;
     const installedLocalModels = ["qwen3.5:9b"];
     const jobs = [
       {
@@ -1054,6 +1061,15 @@ export async function installMockApi(page: Page) {
       },
       setProgressEmissionDelay(ms) {
         progressEmissionDelayMs = Math.max(0, Number(ms) || 0);
+      },
+      /**
+       * Test helper: toggle the mock's embedding-model installed state.
+       * Used by the embed-model wizard regression test to drive the
+       * "row appears + Finish blocked + click installs + Finish enables"
+       * flow without standing up an Ollama daemon.
+       */
+      setEmbedModelInstalled(installed) {
+        embedModelInstalled = !!installed;
       },
       /**
        * Test helper: synthesize a `pipelineProgress` event from the
@@ -2335,9 +2351,11 @@ export async function installMockApi(page: Page) {
           return clone(meetingIndexHealthState);
         },
         async embedModelStatus() {
-          return { model: "nomic-embed-text", installed: true };
+          return { model: "nomic-embed-text", installed: embedModelInstalled };
         },
         async installEmbedModel() {
+          embedModelInstalled = true;
+          persistState();
           return;
         },
       },

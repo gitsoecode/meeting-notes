@@ -29,6 +29,8 @@ import { spawn } from "node:child_process";
 import http from "node:http";
 import https from "node:https";
 import path from "node:path";
+import { Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { binDir, downloadStageDir, ensureDir } from "../paths.js";
 import type { ToolManifestEntry } from "./manifest.js";
 import { runVerifyExec } from "./verifyExec.js";
@@ -186,7 +188,26 @@ function rmSilent(target: string): void {
  */
 const DEFAULT_BODY_INACTIVITY_MS = 60_000;
 
-/** Stream a source into a write target while updating a hasher. */
+/**
+ * Stream a source into a write target while updating a hasher.
+ *
+ * Implementation note (v0.1.9 fix for `ERR_STREAM_DESTROYED` on aborted
+ * downloads): the previous hand-rolled pipe + `out.destroy()` + manual
+ * cleanup raced against Node's fs.WriteStream internals. When abort or
+ * inactivity-timeout fired, the source could still have buffered data
+ * that the pipe had already scheduled as `out.write(chunk)`. The fs
+ * write-completion callback (node:fs:809 → node:internal/fs/streams:432)
+ * would then try to drive the next write on a destroyed stream and
+ * surface as an unhandled main-process JavaScript error dialog.
+ *
+ * We now use `node:stream/promises.pipeline()` which handles teardown
+ * order correctly — including AbortSignal propagation through every
+ * stage of the pipeline. The hashing + progress + inactivity-timer
+ * concerns live in a Transform stage so the pipeline owns lifecycle
+ * for them too. `AbortSignal.any` (Node 20.3+, available on Electron
+ * 41's Node 22 runtime) merges the caller's signal with our internal
+ * inactivity-watchdog signal.
+ */
 async function streamToFileWithHash(
   source: NodeJS.ReadableStream,
   destPath: string,
@@ -196,62 +217,59 @@ async function streamToFileWithHash(
   inactivityMs: number
 ): Promise<{ sha256: string; bytes: number }> {
   const hasher = crypto.createHash("sha256");
-  const out = fs.createWriteStream(destPath);
   let bytes = 0;
 
-  return await new Promise<{ sha256: string; bytes: number }>((resolve, reject) => {
-    let inactivityTimer: NodeJS.Timeout | null = null;
-    const armInactivity = () => {
-      if (inactivityTimer) clearTimeout(inactivityTimer);
-      inactivityTimer = setTimeout(() => {
-        cleanup();
-        out.destroy();
-        if ("destroy" in source && typeof (source as { destroy?: () => void }).destroy === "function") {
-          (source as { destroy: () => void }).destroy();
-        }
-        reject(new Error(`stalled: no data received for ${inactivityMs}ms`));
-      }, inactivityMs);
-    };
-    const cleanup = () => {
-      if (inactivityTimer) {
-        clearTimeout(inactivityTimer);
-        inactivityTimer = null;
-      }
-      source.removeAllListeners();
-      out.removeAllListeners();
-    };
-    if (signal) {
-      const onAbort = () => {
-        source.unpipe(out);
-        out.destroy(new Error("aborted"));
-        cleanup();
-        reject(new Error("aborted"));
-      };
-      if (signal.aborted) return onAbort();
-      signal.addEventListener("abort", onAbort, { once: true });
-    }
-    source.on("data", (chunk: Buffer) => {
+  // Inactivity watchdog: if no chunk arrives for `inactivityMs`, abort
+  // the pipeline. Re-armed on every chunk by the Transform below.
+  const inactivityController = new AbortController();
+  let inactivityTimer: NodeJS.Timeout | null = null;
+  const armInactivity = () => {
+    if (inactivityTimer) clearTimeout(inactivityTimer);
+    inactivityTimer = setTimeout(() => {
+      inactivityController.abort(
+        new Error(`stalled: no data received for ${inactivityMs}ms`)
+      );
+    }, inactivityMs);
+  };
+
+  // Single Transform stage that hashes + counts + reports progress + arms
+  // the inactivity timer. Sits between source and the file writer so
+  // pipeline() owns its lifecycle.
+  const tap = new Transform({
+    transform(chunk: Buffer, _enc, cb) {
       hasher.update(chunk);
       bytes += chunk.length;
       if (onProgress) onProgress(bytes, contentLength);
       armInactivity();
-    });
-    source.on("error", (err) => {
-      cleanup();
-      out.destroy();
-      reject(err);
-    });
-    out.on("error", (err) => {
-      cleanup();
-      reject(err);
-    });
-    out.on("close", () => {
-      cleanup();
-      resolve({ sha256: hasher.digest("hex"), bytes });
-    });
-    armInactivity();
-    source.pipe(out);
+      cb(null, chunk);
+    },
   });
+
+  const out = fs.createWriteStream(destPath);
+  const combinedSignal = signal
+    ? AbortSignal.any([signal, inactivityController.signal])
+    : inactivityController.signal;
+
+  armInactivity();
+  try {
+    await pipeline(source, tap, out, { signal: combinedSignal });
+    return { sha256: hasher.digest("hex"), bytes };
+  } catch (err) {
+    // pipeline() destroys all stages on error/abort, so we don't need
+    // to call out.destroy() / source.destroy() manually here. The
+    // inactivity-watchdog AbortError is rethrown verbatim so the caller
+    // sees the "stalled: …" reason rather than "AbortError".
+    if (inactivityController.signal.aborted) {
+      const reason = inactivityController.signal.reason;
+      if (reason instanceof Error) throw reason;
+    }
+    throw err;
+  } finally {
+    if (inactivityTimer) {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = null;
+    }
+  }
 }
 
 /** Spawn `tar -xzf` or `unzip` to extract into extractDirFor(entry). */
