@@ -51,6 +51,15 @@ interface Props {
   installLog: readonly string[];
   onDismiss: () => void;
   onRetry: () => void;
+  /**
+   * Optional cancel handler for the active install. Rendered as a header
+   * "Cancel" button when present and `installing` is non-null. Lets the
+   * panel own the cancel affordance instead of duplicating it on the
+   * underlying DependencyRow (the row is suppressed for the actively-
+   * installing tool to remove the "two surfaces for the same install"
+   * confusion users hit in v0.1.8).
+   */
+  onCancel?: () => void;
 }
 
 interface ProgressSample {
@@ -112,13 +121,31 @@ function humanElapsed(startedAt: number): string {
  * Includes phase boundaries (`→`), substep success (`✓`), substep
  * failure (`✘`), and the most recent ~3 raw lines preceding any
  * failure marker so the user sees diagnostic context inline.
+ *
+ * Drops `✓ <tool>: <path>` informational lines (the engine's
+ * `✓ Python: /path/to/python` and `✓ ffmpeg: /path/to/ffmpeg` info
+ * dumps from setup-asr.ts). Those are the noisy verbose path-output
+ * lines users complained about; the activity stream should be
+ * milestones, not configuration receipts.
  */
 function activityStream(log: readonly string[], cap = 6): readonly string[] {
+  const isPathInfo = (trimmed: string): boolean => {
+    // `✓ Python: /Users/jessevaughan/...` etc. — short label + colon + path.
+    // Real milestones don't have a colon-and-path-after-tool-name shape.
+    if (!trimmed.startsWith("✓")) return false;
+    const after = trimmed.slice(1).trim();
+    const colonIdx = after.indexOf(":");
+    if (colonIdx < 0 || colonIdx > 20) return false;
+    const tail = after.slice(colonIdx + 1).trim();
+    return tail.startsWith("/") || tail.startsWith("~");
+  };
+
   const indices = new Set<number>();
   for (let i = 0; i < log.length; i++) {
     const line = log[i];
     if (!line) continue;
     const trimmed = line.trimStart();
+    if (isPathInfo(trimmed)) continue;
     if (
       trimmed.startsWith("→") ||
       trimmed.startsWith("✓") ||
@@ -136,7 +163,7 @@ function activityStream(log: readonly string[], cap = 6): readonly string[] {
 }
 
 export function DependencyInstallProgress(props: Props) {
-  const { installing, lastInstallTarget, installError, installLog, onDismiss, onRetry } = props;
+  const { installing, lastInstallTarget, installError, installLog, onDismiss, onRetry, onCancel } = props;
 
   const lifecycle: "active" | "complete" | "failed" = installing
     ? "active"
@@ -268,6 +295,18 @@ export function DependencyInstallProgress(props: Props) {
               {headerCopy}
             </p>
           </div>
+          {lifecycle === "active" && onCancel ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onCancel}
+              className="h-7 gap-1 text-xs text-[var(--text-secondary)]"
+              aria-label="Cancel install"
+            >
+              <X className="h-3 w-3" />
+              Cancel
+            </Button>
+          ) : null}
           {lifecycle !== "active" && (
             <Button
               size="sm"
@@ -339,9 +378,16 @@ export function DependencyInstallProgress(props: Props) {
                       >
                         {step.label}
                       </div>
-                      <div className="font-mono text-[10px] text-[var(--text-tertiary)]">
-                        {step.sub}
-                      </div>
+                      {/* Sub-text (technical detail like "ffmpeg + ffprobe",
+                          "3.12.13") is only shown for the ACTIVE step.
+                          Showing it on done/pending steps puts step
+                          details visually above the operable step and
+                          competes with the activity stream for focus. */}
+                      {status === "active" ? (
+                        <div className="font-mono text-[10px] text-[var(--text-tertiary)]">
+                          {step.sub}
+                        </div>
+                      ) : null}
                     </div>
                   </li>
                 );
@@ -351,9 +397,34 @@ export function DependencyInstallProgress(props: Props) {
         )}
 
         <section className="p-4 space-y-4">
-          {/* Active step header / progress bar / meta */}
+          {/* Active step. The active step's NAME is the headline for the
+              right pane so it reads top-down: "what's happening now"
+              first, then progress / activity. The 4-step rail at left is
+              the orientation breadcrumb. The previous 3-up stat strip
+              (Elapsed/Current step/Total install) duplicated information
+              the rail already shows AND surfaced a static "~1.0 GB"
+              marketing number in the middle of an active install — that
+              turned out to compete with the actual progress for focus.
+              Dropped in v0.1.9. */}
           {lifecycle === "active" && (
             <>
+              {showRail ? (
+                <div className="space-y-0.5">
+                  <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    {RAIL_STEPS.find((s) => s.phase === activePhase)?.label ??
+                      "Working…"}
+                  </div>
+                  <div className="text-[11px] text-[var(--text-tertiary)] font-mono">
+                    Step{" "}
+                    {Math.max(
+                      1,
+                      RAIL_STEPS.findIndex((s) => s.phase === activePhase) + 1,
+                    )}{" "}
+                    of {RAIL_STEPS.length}
+                    {progress.startedAt ? ` · ${humanElapsed(progress.startedAt)} elapsed` : ""}
+                  </div>
+                </div>
+              ) : null}
               {progress.inDownload && pct !== null ? (
                 <div className="space-y-1">
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
@@ -364,7 +435,7 @@ export function DependencyInstallProgress(props: Props) {
                   </div>
                   <div className="flex items-center justify-between font-mono text-[11px] text-[var(--text-tertiary)]">
                     <span>
-                      Current download: {humanBytes(progress.bytesDone)} /{" "}
+                      {humanBytes(progress.bytesDone)} /{" "}
                       {progress.bytesTotal
                         ? humanBytes(progress.bytesTotal)
                         : "?"}{" "}
@@ -385,30 +456,6 @@ export function DependencyInstallProgress(props: Props) {
                   {progress.tool
                     ? `Working on ${progress.tool}…`
                     : "Working…"}
-                </div>
-              )}
-
-              {showRail && (
-                <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--border-subtle)]">
-                  {[
-                    { label: "Elapsed", value: humanElapsed(progress.startedAt) },
-                    {
-                      label: "Current step",
-                      value:
-                        RAIL_STEPS.find((s) => s.phase === activePhase)?.label ??
-                        "—",
-                    },
-                    { label: "Total install", value: "~1.0 GB" },
-                  ].map((cell) => (
-                    <div key={cell.label} className="bg-[var(--bg-primary)] px-3 py-2">
-                      <div className="text-[10px] uppercase tracking-[0.06em] text-[var(--text-tertiary)]">
-                        {cell.label}
-                      </div>
-                      <div className="font-mono text-xs text-[var(--text-primary)]">
-                        {cell.value}
-                      </div>
-                    </div>
-                  ))}
                 </div>
               )}
             </>

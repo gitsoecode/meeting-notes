@@ -537,6 +537,47 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.finishButton()).toBeDisabled();
   });
 
+  test("Embedding model has its own row and gates Finish (no surprise install)", async ({
+    wizard,
+    page,
+  }) => {
+    // v0.1.9 regression: previously the embedding model (~274 MB
+    // nomic-embed-text via Ollama) was pulled silently as a side effect
+    // of clicking Finish setup. That surprised users — they hadn't
+    // explicitly approved the download. The fix makes it a dedicated
+    // row on the Dependencies step with an "Download embedding model"
+    // button, and Finish is disabled until it's installed (when the
+    // user opted into semantic search).
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setEmbedModelInstalled(false);
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    // Default ASR is parakeet-mlx; default LLM is Ollama with semantic
+    // search enabled. Don't touch the toggle — the default is on.
+    await wizard.nextButton().click(); // permissions
+    await wizard.advanceFromPermissionsToDeps();
+
+    // The embedding-model row should be visible with the explicit
+    // "Download embedding model" CTA. Finish must be disabled.
+    await expect(
+      page.getByText("Embedding model (nomic-embed-text)")
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /download embedding model/i })
+    ).toBeVisible();
+    await expect(wizard.finishButton()).toBeDisabled();
+
+    // Click the install button. Mock flips embedModelInstalled = true,
+    // the renderer re-fetches status, and Finish unblocks.
+    await page
+      .getByRole("button", { name: /download embedding model/i })
+      .click();
+    await expect(wizard.finishButton()).toBeEnabled({ timeout: 5000 });
+  });
+
   test("Parakeet install rail advances through all 4 phases including speech-model", async ({
     wizard,
     page,

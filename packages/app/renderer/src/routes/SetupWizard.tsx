@@ -530,6 +530,32 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     }
   };
 
+  // Pull the local embedding model (nomic-embed-text via Ollama) on
+  // explicit click — not as a surprise side effect of Finish. See the
+  // `embed-model` row on the Dependencies step. Reuses the same
+  // `installLog` plumbing as the other installs so the
+  // DependencyInstallProgress panel surfaces progress + raw log.
+  const installEmbedModel = async () => {
+    setInstalling("embed-model" as DepsInstallTarget);
+    setInstallLog([]);
+    setInstallError(null);
+    lastInstallTargetRef.current = "embed-model" as DepsInstallTarget;
+    const unsub = api.on.setupLlmProgress((p) =>
+      setEmbedProgress({ pct: p.pct })
+    );
+    try {
+      await api.meetingIndex.installEmbedModel();
+      const fresh = await api.meetingIndex.embedModelStatus().catch(() => null);
+      setEmbedAlreadyInstalled(!!fresh?.installed);
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : String(err));
+    } finally {
+      unsub();
+      setEmbedProgress(null);
+      setInstalling(null);
+    }
+  };
+
   const installLocalLlm = async () => {
     if (!localLlmModel) return;
     setInstalling("local-llm");
@@ -609,24 +635,15 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
               : parseInt(retentionValue, 10),
       };
       await api.config.initProject(req);
-      // Embeddings are always local (Ollama + nomic-embed-text) regardless
-      // of which LLM provider the user picked. Only pull if the user
-      // opted in on step 3 and the model isn't already installed. Failure
-      // is non-fatal — meeting-index search degrades to FTS-only without it.
-      if (enableSemanticSearch && !embedAlreadyInstalled) {
-        setEmbedProgress({ pct: 0 });
-        const unsub = api.on.setupLlmProgress((p) =>
-          setEmbedProgress({ pct: p.pct })
-        );
-        try {
-          await api.meetingIndex.installEmbedModel();
-        } catch (err) {
-          console.warn("embedding model pull during setup failed", err);
-        } finally {
-          unsub();
-          setEmbedProgress(null);
-        }
-      }
+      // The embedding model used to be pulled silently here as a side
+      // effect of Finish — surprising users with a 274 MB download
+      // they hadn't explicitly approved. As of v0.1.9 the model is its
+      // own dependency row on the Dependencies step (when semantic
+      // search is enabled), with an explicit "Download embedding
+      // model" button. Finish gates on it via `finishDisabled` below
+      // when semantic search is on, so users can't reach this point
+      // without having already done the install (or having toggled
+      // semantic search off).
       onComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -669,6 +686,12 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
       if (!localLlmModel) return true;
       if (!hasInstalledLocalModel(installedLocalModels, localLlmModel)) return true;
     }
+    // The embedding model used to be pulled silently on Finish — that
+    // surprised users with a 274 MB download. v0.1.9 moved it to a
+    // dedicated row with explicit click. Gate Finish so the user can't
+    // ship without having explicitly downloaded the model they
+    // opted into.
+    if (enableSemanticSearch && !embedAlreadyInstalled) return true;
     return false;
   }, [
     busy,
@@ -679,6 +702,8 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     llmProvider,
     localLlmModel,
     installedLocalModels,
+    enableSemanticSearch,
+    embedAlreadyInstalled,
   ]);
 
   return (
@@ -1175,6 +1200,15 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                     else if (target === "local-llm") void installLocalLlm();
                     else void installDep(target);
                   }}
+                  // Only Parakeet exposes a working cancel today (engine
+                  // setup-asr respects the AbortController). Others
+                  // ignore the cancel — better to omit the button than
+                  // show a no-op.
+                  onCancel={
+                    installing === "parakeet"
+                      ? () => api.cancelSetupAsr()
+                      : undefined
+                  }
                 />
               )}
               {deps == null ? (
@@ -1184,6 +1218,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                 </div>
               ) : (
                 <div className="space-y-3">
+                  {installing !== "ffmpeg" && (
                   <DependencyRow
                     name="ffmpeg"
                     ok={!!deps.ffmpeg.path && !!deps.ffprobe.path}
@@ -1220,7 +1255,8 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                     }
                     cleanCopyLabel="Install clean ffmpeg + ffprobe"
                   />
-                  {asrProvider === "parakeet-mlx" && (() => {
+                  )}
+                  {asrProvider === "parakeet-mlx" && installing !== "parakeet" && (() => {
                     // Treat the Parakeet row as broken if EITHER the
                     // venv binary is missing OR the underlying Python
                     // runtime failed validation. The venv itself was
@@ -1257,7 +1293,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       />
                     );
                   })()}
-                  {llmProvider === "ollama" && (
+                  {llmProvider === "ollama" && installing !== "ollama" && (
                     <DependencyRow
                       name="Ollama"
                       ok={deps.ollama.daemon}
@@ -1278,6 +1314,29 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       }
                       verified={deps.ollama.verified}
                       cleanCopyLabel="Install clean Ollama"
+                    />
+                  )}
+                  {/* Embedding model row — only shown when the user
+                      opted into semantic search (Claude Desktop / MCP
+                      integration) on the Providers step. Pulls
+                      nomic-embed-text via Ollama on click; previously
+                      this was a surprise 274 MB download triggered by
+                      Finish setup. */}
+                  {enableSemanticSearch && installing !== ("embed-model" as DepsInstallTarget) && (
+                    <DependencyRow
+                      name="Embedding model (nomic-embed-text)"
+                      ok={embedAlreadyInstalled}
+                      value={embedAlreadyInstalled ? "ready" : undefined}
+                      installLabel="Download embedding model"
+                      installing={installing === ("embed-model" as DepsInstallTarget)}
+                      anyInstalling={installing !== null}
+                      brewAvailable={true}
+                      onInstall={installEmbedModel}
+                      footerNote={
+                        !embedAlreadyInstalled
+                          ? "Downloads ~274 MB to ~/.ollama/models. Powers semantic meeting search via the Claude Desktop MCP integration. Runs locally — your transcripts never leave your machine."
+                          : undefined
+                      }
                     />
                   )}
                   {llmProvider === "ollama" && localLlmModel && deps.ollama.daemon && (
