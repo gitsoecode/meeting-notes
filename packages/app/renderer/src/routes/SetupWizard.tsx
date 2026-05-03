@@ -151,16 +151,24 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [brewAvailable, setBrewAvailable] = useState<boolean | null>(null);
-  const [installing, setInstalling] = useState<DepsInstallTarget | "parakeet" | "local-llm" | null>(null);
+  // `installing` carries the active install's target. Includes the
+  // wizard-only labels `parakeet`, `local-llm`, `embed-model` that
+  // aren't part of the cross-IPC `DepsInstallTarget` union — the
+  // renderer dispatches them to the right helper (installParakeet,
+  // installLocalLlm, installEmbedModel) instead of going through the
+  // generic deps:install IPC. v0.1.9 added `embed-model` so the embed-
+  // model row's Retry calls the right helper instead of fall-through to
+  // installDep("embed-model") which would dispatch through the wrong
+  // IPC entirely.
+  type InstallTarget = DepsInstallTarget | "parakeet" | "local-llm" | "embed-model";
+  const [installing, setInstalling] = useState<InstallTarget | null>(null);
   const [installLog, setInstallLog] = useState<string[]>([]);
   const installLogRef = useRef<HTMLPreElement>(null);
   const [installError, setInstallError] = useState<string | null>(null);
   // Used by the DependencyInstallProgress "Retry" button to re-fire the
   // exact install that failed without the user having to re-click the
   // row. Set at install start; cleared on Dismiss.
-  const lastInstallTargetRef = useRef<
-    DepsInstallTarget | "parakeet" | "local-llm" | null
-  >(null);
+  const lastInstallTargetRef = useRef<InstallTarget | null>(null);
   const [skipBlackhole, setSkipBlackhole] = useState(false);
   const [restartingAudio, setRestartingAudio] = useState(false);
   const [restartAudioError, setRestartAudioError] = useState<string | null>(null);
@@ -532,20 +540,29 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
   // Pull the local embedding model (nomic-embed-text via Ollama) on
   // explicit click — not as a surprise side effect of Finish. See the
-  // `embed-model` row on the Dependencies step. Reuses the same
-  // `installLog` plumbing as the other installs so the
-  // DependencyInstallProgress panel surfaces progress + raw log.
+  // `embed-model` row on the Dependencies step.
+  //
+  // First-install accommodation: the wizard runs BEFORE
+  // `config.initProject()` writes ~/.gistlist/config.yaml. The
+  // meeting-index IPC handlers used to call `loadConfig()` directly,
+  // which threw on a fresh install. v0.1.9 made both handlers accept
+  // an optional `baseUrl` and added a default fallback
+  // (`http://127.0.0.1:11434`, matching the bundled-spawned daemon).
+  // The wizard pins the daemon URL here so it works regardless of
+  // whether config exists yet.
   const installEmbedModel = async () => {
-    setInstalling("embed-model" as DepsInstallTarget);
+    setInstalling("embed-model");
     setInstallLog([]);
     setInstallError(null);
-    lastInstallTargetRef.current = "embed-model" as DepsInstallTarget;
+    lastInstallTargetRef.current = "embed-model";
     const unsub = api.on.setupLlmProgress((p) =>
       setEmbedProgress({ pct: p.pct })
     );
     try {
       await api.meetingIndex.installEmbedModel();
-      const fresh = await api.meetingIndex.embedModelStatus().catch(() => null);
+      const fresh = await api.meetingIndex
+        .embedModelStatus()
+        .catch(() => null);
       setEmbedAlreadyInstalled(!!fresh?.installed);
     } catch (err) {
       setInstallError(err instanceof Error ? err.message : String(err));
@@ -690,8 +707,16 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     // surprised users with a 274 MB download. v0.1.9 moved it to a
     // dedicated row with explicit click. Gate Finish so the user can't
     // ship without having explicitly downloaded the model they
-    // opted into.
-    if (enableSemanticSearch && !embedAlreadyInstalled) return true;
+    // opted into. Also gate on Ollama daemon when semantic search is
+    // on (the embed model lives in Ollama; if the daemon's down a
+    // Claude/OpenAI user with semantic search would otherwise reach
+    // Finish without the prerequisite Ollama install — the embed row
+    // is correctly disabled in that state but Finish was still
+    // enabled).
+    if (enableSemanticSearch) {
+      if (!deps.ollama.daemon) return true;
+      if (!embedAlreadyInstalled) return true;
+    }
     return false;
   }, [
     busy,
@@ -1198,6 +1223,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                     if (!target) return;
                     if (target === "parakeet") void installParakeet();
                     else if (target === "local-llm") void installLocalLlm();
+                    else if (target === "embed-model") void installEmbedModel();
                     else void installDep(target);
                   }}
                   // Only Parakeet exposes a working cancel today (engine
@@ -1208,6 +1234,16 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                     installing === "parakeet"
                       ? () => api.cancelSetupAsr()
                       : undefined
+                  }
+                  // Embed-model pulls report progress via
+                  // `setup-llm:progress` (pct only, no bytes), bridged
+                  // through the `embedProgress` state. Pass it through
+                  // to the panel so the progress bar is real instead of
+                  // a perpetual "Working on embed-model…" spinner.
+                  pctOverride={
+                    installing === "embed-model" && embedProgress
+                      ? embedProgress.pct
+                      : null
                   }
                 />
               )}
@@ -1293,7 +1329,15 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       />
                     );
                   })()}
-                  {llmProvider === "ollama" && installing !== "ollama" && (
+                  {/* Ollama row: shown when EITHER the LLM provider is
+                      Ollama (chat models live there) OR semantic search
+                      is enabled (the embedding model is pulled via
+                      Ollama, regardless of LLM provider). v0.1.9 added
+                      the `enableSemanticSearch` branch — without it,
+                      Claude/OpenAI users with semantic search opted in
+                      could hit the embed-model gate without an obvious
+                      Ollama prerequisite or repair path. */}
+                  {(llmProvider === "ollama" || enableSemanticSearch) && installing !== "ollama" && (
                     <DependencyRow
                       name="Ollama"
                       ok={deps.ollama.daemon}
@@ -1309,7 +1353,9 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       onInstall={() => installDep("ollama")}
                       footerNote={
                         !deps.ollama.daemon
-                          ? "Downloads ~130 MB. Lands at <userData>/bin/ollama-runtime/. Models live at ~/.ollama/models so a future system Ollama install picks them up."
+                          ? llmProvider === "ollama"
+                            ? "Downloads ~130 MB. Lands at <userData>/bin/ollama-runtime/. Models live at ~/.ollama/models so a future system Ollama install picks them up."
+                            : "Downloads ~130 MB. Required for the local embedding model used by semantic meeting search (Claude Desktop / MCP). Lands at <userData>/bin/ollama-runtime/."
                           : undefined
                       }
                       verified={deps.ollama.verified}
@@ -1322,19 +1368,25 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                       nomic-embed-text via Ollama on click; previously
                       this was a surprise 274 MB download triggered by
                       Finish setup. */}
-                  {enableSemanticSearch && installing !== ("embed-model" as DepsInstallTarget) && (
+                  {enableSemanticSearch && installing !== "embed-model" && (
                     <DependencyRow
                       name="Embedding model (nomic-embed-text)"
                       ok={embedAlreadyInstalled}
                       value={embedAlreadyInstalled ? "ready" : undefined}
                       installLabel="Download embedding model"
-                      installing={installing === ("embed-model" as DepsInstallTarget)}
+                      installing={installing === "embed-model"}
                       anyInstalling={installing !== null}
-                      brewAvailable={true}
+                      // Prereq: Ollama daemon must be up. Re-using
+                      // `brewAvailable` as the generic "prerequisite ok"
+                      // gate (it's already wired to disable the install
+                      // button). Footer note above explains what to fix.
+                      brewAvailable={deps.ollama.daemon}
                       onInstall={installEmbedModel}
                       footerNote={
                         !embedAlreadyInstalled
-                          ? "Downloads ~274 MB to ~/.ollama/models. Powers semantic meeting search via the Claude Desktop MCP integration. Runs locally — your transcripts never leave your machine."
+                          ? !deps.ollama.daemon
+                            ? "Requires Ollama. Install Ollama first (above), then download this model. ~274 MB → ~/.ollama/models. Powers semantic meeting search via the Claude Desktop MCP integration; runs locally."
+                            : "Downloads ~274 MB to ~/.ollama/models. Powers semantic meeting search via the Claude Desktop MCP integration. Runs locally — your transcripts never leave your machine."
                           : undefined
                       }
                     />

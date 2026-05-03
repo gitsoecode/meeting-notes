@@ -537,6 +537,45 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.finishButton()).toBeDisabled();
   });
 
+  test("Semantic search + Claude LLM: Ollama row appears, embed-model gate works (P1)", async ({
+    wizard,
+    page,
+  }) => {
+    // v0.1.9 P1 regression: when the user picks a cloud LLM (Claude /
+    // OpenAI) AND keeps semantic search enabled, the previous wizard
+    // hid the Ollama row entirely (it was gated on `llmProvider ===
+    // "ollama"`). They could then hit the embed-model gate without an
+    // obvious Ollama prerequisite. Fix: show the Ollama row whenever
+    // semantic search is on, and gate Finish on the daemon being up.
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setEmbedModelInstalled(false);
+    });
+
+    await wizard.getStartedButton().click();
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
+    // Switch LLM to Claude — Ollama row should still appear (semantic
+    // search is on by default and pulls the embed model via Ollama).
+    await wizard.llmProviderSelect().click();
+    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
+    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    await wizard.nextButton().click();
+    await wizard.advanceFromPermissionsToDeps();
+
+    // Both rows should be visible: Ollama (because semantic search is
+    // on) and the embedding model (the new explicit install row).
+    await expect(page.getByText("Ollama").first()).toBeVisible();
+    await expect(
+      page.getByText("Embedding model (nomic-embed-text)")
+    ).toBeVisible();
+    // Mock has Ollama daemon up, so Ollama row is Ready and the embed
+    // install button is enabled. Click → Finish unblocks.
+    await page
+      .getByRole("button", { name: /download embedding model/i })
+      .click();
+    await expect(wizard.finishButton()).toBeEnabled({ timeout: 5000 });
+  });
+
   test("Embedding model has its own row and gates Finish (no surprise install)", async ({
     wizard,
     page,

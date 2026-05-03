@@ -225,8 +225,10 @@ const api: GistlistApi = {
     backfillStatus: () => ipcRenderer.invoke("meeting-index:backfill-status"),
     backfillCountPending: () => ipcRenderer.invoke("meeting-index:backfill-count-pending"),
     health: () => ipcRenderer.invoke("meeting-index:health"),
-    embedModelStatus: () => ipcRenderer.invoke("meeting-index:embed-model-status"),
-    installEmbedModel: () => ipcRenderer.invoke("meeting-index:install-embed-model"),
+    embedModelStatus: (opts) =>
+      ipcRenderer.invoke("meeting-index:embed-model-status", opts),
+    installEmbedModel: (opts) =>
+      ipcRenderer.invoke("meeting-index:install-embed-model", opts),
   },
   on: {
     recordingStatus: (cb: (s: RecordingStatus) => void) => {

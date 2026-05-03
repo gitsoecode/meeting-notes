@@ -60,6 +60,15 @@ interface Props {
    * confusion users hit in v0.1.8).
    */
   onCancel?: () => void;
+  /**
+   * Override percentage (0..100) for installs that don't go through the
+   * standard `installer-progress` IPC channel. The Ollama embed-model
+   * pull comes through `setup-llm:progress` instead, with only a
+   * percentage (no byte count). When this is provided AND `installing`
+   * is non-null, the panel renders a percentage-only bar instead of the
+   * usual bytes/MB-per-second meta row.
+   */
+  pctOverride?: number | null;
 }
 
 interface ProgressSample {
@@ -163,7 +172,7 @@ function activityStream(log: readonly string[], cap = 6): readonly string[] {
 }
 
 export function DependencyInstallProgress(props: Props) {
-  const { installing, lastInstallTarget, installError, installLog, onDismiss, onRetry, onCancel } = props;
+  const { installing, lastInstallTarget, installError, installLog, onDismiss, onRetry, onCancel, pctOverride } = props;
 
   const lifecycle: "active" | "complete" | "failed" = installing
     ? "active"
@@ -425,7 +434,23 @@ export function DependencyInstallProgress(props: Props) {
                   </div>
                 </div>
               ) : null}
-              {progress.inDownload && pct !== null ? (
+              {pctOverride !== null && pctOverride !== undefined ? (
+                // Percentage-only bar for installs that don't expose
+                // byte counts (the Ollama embed-model pull is the
+                // current consumer; setup-llm:progress only carries
+                // pct). No MB/s, no ETA — those would be fake data.
+                <div className="space-y-1">
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
+                    <div
+                      className="h-full bg-[var(--accent)] transition-[width] duration-200"
+                      style={{ width: `${pctOverride}%` }}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between font-mono text-[11px] text-[var(--text-tertiary)]">
+                    <span>{pctOverride}%</span>
+                  </div>
+                </div>
+              ) : progress.inDownload && pct !== null ? (
                 <div className="space-y-1">
                   <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--bg-tertiary)]">
                     <div

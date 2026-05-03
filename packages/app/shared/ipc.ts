@@ -1018,9 +1018,12 @@ export interface GistlistApi {
      */
     health: () => Promise<MeetingIndexHealthDTO>;
     /** Check whether the embedding model is installed via Ollama. */
-    embedModelStatus: () => Promise<{ model: string; installed: boolean }>;
+    embedModelStatus: (opts?: { baseUrl?: string }) => Promise<{
+      model: string;
+      installed: boolean;
+    }>;
     /** Start a pull of the embedding model. Progress streams via setupLlmLog. */
-    installEmbedModel: () => Promise<void>;
+    installEmbedModel: (opts?: { baseUrl?: string }) => Promise<void>;
   };
   // Deps check
   depsCheck: () => Promise<DepsCheckResult>;
