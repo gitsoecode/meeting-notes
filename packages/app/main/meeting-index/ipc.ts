@@ -176,14 +176,38 @@ export function registerMeetingIndexIpc(): void {
     },
   );
 
+  // Default Ollama base URL — matches the bundled-spawned daemon address
+  // and the engine's DEFAULT_CONFIG.ollama.base_url. Used as the fallback
+  // when the wizard calls these handlers BEFORE config has been written
+  // (fresh first-run install). Without this fallback, `loadConfig()`
+  // throws and the user dead-ends on the embed-model row.
+  const DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434";
+
+  // Resolve an Ollama base URL given an optional caller hint. Tries the
+  // hint first, then loadConfig (re-run from Settings path), then the
+  // default. Never throws — first-run callers can always pull the model.
+  const resolveOllamaBaseUrl = (hint?: string): string => {
+    if (hint) return hint;
+    try {
+      return loadConfig().ollama.base_url;
+    } catch {
+      return DEFAULT_OLLAMA_BASE_URL;
+    }
+  };
+
   ipcMain.handle(
     "meeting-index:embed-model-status",
-    async (): Promise<{ model: string; installed: boolean }> => {
-      // The wizard calls this *before* config exists. Don't blow up — fall
-      // back to "not installed" so the UI can offer to pull the model.
+    async (
+      _e,
+      opts?: { baseUrl?: string },
+    ): Promise<{ model: string; installed: boolean }> => {
+      // The wizard calls this *before* config exists on a fresh install.
+      // Accept an optional `baseUrl` so the caller can drive the lookup
+      // without `loadConfig()`. Falls back to config → default daemon
+      // URL. Always returns a valid result; never throws.
       try {
-        const config = loadConfig();
-        const models = await listOllamaModels(config.ollama.base_url);
+        const baseUrl = resolveOllamaBaseUrl(opts?.baseUrl);
+        const models = await listOllamaModels(baseUrl);
         const installed = models.some(
           (m) =>
             m.name === DEFAULT_EMBEDDING_MODEL ||
@@ -196,23 +220,31 @@ export function registerMeetingIndexIpc(): void {
     },
   );
 
-  ipcMain.handle("meeting-index:install-embed-model", async (): Promise<void> => {
-    const config = loadConfig();
-    const broadcast = (channel: string, payload: unknown) => {
-      for (const win of BrowserWindow.getAllWindows()) {
-        win.webContents.send(channel, payload);
+  ipcMain.handle(
+    "meeting-index:install-embed-model",
+    async (_e, opts?: { baseUrl?: string }): Promise<void> => {
+      // Same fresh-install accommodation as the status handler above:
+      // the wizard can call this BEFORE `config.initProject()` writes
+      // the YAML config to disk. The optional `baseUrl` lets the caller
+      // pin the daemon URL; falls back to config / default on rerun
+      // paths from Settings.
+      const baseUrl = resolveOllamaBaseUrl(opts?.baseUrl);
+      const broadcast = (channel: string, payload: unknown) => {
+        for (const win of BrowserWindow.getAllWindows()) {
+          win.webContents.send(channel, payload);
+        }
+      };
+      try {
+        await pullOllamaModel(DEFAULT_EMBEDDING_MODEL, {
+          baseUrl,
+          onLog: (line) => broadcast("setup-llm:log", line),
+          onProgress: (progress) => broadcast("setup-llm:progress", progress),
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        appLogger.warn("meeting-index:install-embed-model failed", { detail: message });
+        throw err;
       }
-    };
-    try {
-      await pullOllamaModel(DEFAULT_EMBEDDING_MODEL, {
-        baseUrl: config.ollama.base_url,
-        onLog: (line) => broadcast("setup-llm:log", line),
-        onProgress: (progress) => broadcast("setup-llm:progress", progress),
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      appLogger.warn("meeting-index:install-embed-model failed", { detail: message });
-      throw err;
-    }
-  });
+    },
+  );
 }
