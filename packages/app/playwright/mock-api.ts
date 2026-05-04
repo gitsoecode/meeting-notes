@@ -506,6 +506,20 @@ export async function installMockApi(page: Page) {
     let mockSetupAsrFailure:
       | { error: string; failedPhase?: string; logLines?: string[] }
       | null = null;
+    // Ordered record of every install IPC the wizard fires, regardless of
+    // surface (deps:install / setup-asr / meetingIndex.installEmbedModel /
+    // llm:setup). Lets the chain-install spec assert the chain executes
+    // ffmpeg → parakeet → ollama → embed-model → local-llm in order
+    // without scraping log lines.
+    const installCallOrder: string[] = [];
+    // Per-install artificial delay in ms. Default 0 = mock returns
+    // synchronously. The cancel-during-install spec sets this to a small
+    // positive value so the test has a window to click Cancel before the
+    // active install resolves.
+    let installDelayMs = 0;
+    // Flipped to true by `cancelSetupAsr()`, watched by the in-flight
+    // `setupAsr()` poll loop. Mirrors the real engine's AbortController.
+    let setupAsrAbortRequested = false;
     // Spy state for the Setup Wizard tests. The "Cancel from reopened
     // wizard" assertion needs to verify config:init was NOT called, and
     // the "retention can clear back to null" assertion needs to read the
@@ -1087,6 +1101,37 @@ export async function installMockApi(page: Page) {
        */
       getInstallEmbedModelCallCount() {
         return installEmbedModelCallCount;
+      },
+      /**
+       * Test helper: ordered record of every install IPC the wizard
+       * fired in this session, regardless of surface. The chain-install
+       * spec asserts the chain executes in the expected dependency
+       * order without scraping log lines.
+       */
+      getInstallCallOrder() {
+        return installCallOrder.slice();
+      },
+      resetInstallCallOrder() {
+        installCallOrder.length = 0;
+      },
+      /**
+       * Test helper: replace the mock's "installed local LLM models" list.
+       * Default fixture has `["qwen3.5:9b"]` installed so the wizard's
+       * provider step can auto-select. Specs that need to drive the
+       * install path (chain runs local-llm row) reset this to [].
+       */
+      setInstalledLocalModels(models) {
+        installedLocalModels.length = 0;
+        for (const m of models) installedLocalModels.push(m);
+      },
+      /**
+       * Test helper: artificially delay every install IPC (deps.install,
+       * setupAsr, meetingIndex.installEmbedModel, llm.setup) by ms.
+       * Used by the cancel-during-install spec so the test has a window
+       * to click Cancel before the active install resolves.
+       */
+      setInstallDelayMs(ms) {
+        installDelayMs = Math.max(0, Number(ms) || 0);
       },
       /**
        * Test helper: synthesize a `pipelineProgress` event from the
@@ -1894,10 +1939,34 @@ export async function installMockApi(page: Page) {
         },
       },
       cancelSetupAsr() {
-        // Mock no-op: real impl sends "setup-asr:abort" IPC; tests
-        // that exercise cancellation can poke a hook here when needed.
+        // Real impl sends "setup-asr:abort" IPC and the engine's
+        // setup-asr respects the AbortController. The mock mirrors this
+        // by flipping a shared flag that the in-flight setupAsr poll
+        // loop watches — when set, it rejects with an abort error,
+        // which the chain hook reclassifies as `cancelled` (mode="abort").
+        setupAsrAbortRequested = true;
       },
       async setupAsr() {
+        installCallOrder.push("parakeet");
+        setupAsrAbortRequested = false;
+        // If the spec set an installDelayMs, sleep in small slices so
+        // we can observe a cancel mid-install. Without slicing, a
+        // single setTimeout would delay-then-finish even after Cancel.
+        if (installDelayMs > 0) {
+          const sliceMs = 25;
+          let remaining = installDelayMs;
+          while (remaining > 0) {
+            if (setupAsrAbortRequested) {
+              throw new Error("setup-asr aborted by user");
+            }
+            const wait = Math.min(sliceMs, remaining);
+            await new Promise((r) => setTimeout(r, wait));
+            remaining -= wait;
+          }
+        }
+        if (setupAsrAbortRequested) {
+          throw new Error("setup-asr aborted by user");
+        }
         // Mock implementation of the new chain: emit log lines for each
         // sub-step and report success. Real spec failure-mode tests
         // override this via __MEETING_NOTES_TEST.setNextSetupAsrFailure()
@@ -1939,7 +2008,8 @@ export async function installMockApi(page: Page) {
         emit("setupAsrLog", "→ Downloading Parakeet weights");
         emit("setupAsrLog", "  Running smoke test (downloads Parakeet weights on first run, ~600 MB)…");
         emit("setupAsrLog", '  ✓ Smoke test transcription: "Parakeet smoke test is working."');
-        deps.parakeet = { path: "/mock/parakeet-venv/bin/mlx_audio.stt.generate" };
+        depsState.parakeet = "/mock/parakeet-venv/bin/mlx_audio.stt.generate";
+        persistState();
         return { ok: true };
       },
       llm: {
@@ -1952,6 +2022,8 @@ export async function installMockApi(page: Page) {
           };
         },
         async setup({ model }) {
+          installCallOrder.push("local-llm");
+          if (installDelayMs > 0) await new Promise((r) => setTimeout(r, installDelayMs));
           if (!installedLocalModels.includes(model)) installedLocalModels.push(model);
           emit("setupLlmLog", `Pulled ${model}`);
           persistState();
@@ -2173,6 +2245,8 @@ export async function installMockApi(page: Page) {
       },
       deps: {
         async install(target) {
+          installCallOrder.push(target);
+          if (installDelayMs > 0) await new Promise((r) => setTimeout(r, installDelayMs));
           // Test seam: if a spec primed an install-failure for this
           // target via setNextInstallFailure, return that exact failure
           // (and clear it so a follow-up Retry hits the happy path).
@@ -2371,6 +2445,8 @@ export async function installMockApi(page: Page) {
           return { model: "nomic-embed-text", installed: embedModelInstalled };
         },
         async installEmbedModel() {
+          installCallOrder.push("embed-model");
+          if (installDelayMs > 0) await new Promise((r) => setTimeout(r, installDelayMs));
           installEmbedModelCallCount += 1;
           embedModelInstalled = true;
           persistState();

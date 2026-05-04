@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, XCircle } from "lucide-react";
 import { api } from "../ipc-client";
 import type {
@@ -8,7 +8,7 @@ import type {
   DetectedVault,
   HardwareInfoDTO,
   InitConfigRequest,
-  ResolvedTool,
+  InstallerProgressEvent,
 } from "../../../shared/ipc";
 import {
   recommendLocalModel,
@@ -22,7 +22,21 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
-import { DependencyInstallProgress } from "../components/wizard/DependencyInstallProgress";
+import {
+  DependencyChecklist,
+  humanBytes,
+} from "../components/wizard/DependencyChecklist";
+import { useInstallChain } from "../components/wizard/useInstallChain";
+import {
+  deriveRequiredInstalls,
+  totalRemainingBytes,
+  // @ts-expect-error — adjacent .mjs file with JSDoc types only.
+} from "../components/wizard/installChain.mjs";
+import type {
+  DepId,
+  ProgressSnapshot,
+  RequiredInstall,
+} from "../components/wizard/installChain.types";
 import {
   Select,
   SelectContent,
@@ -32,6 +46,20 @@ import {
 } from "../components/ui/select";
 import { Spinner } from "../components/ui/spinner";
 import { Switch } from "../components/ui/switch";
+
+const deriveRequiredInstallsFn = deriveRequiredInstalls as (input: {
+  deps: DepsCheckResult;
+  asrProvider: string;
+  llmProvider: string;
+  enableSemanticSearch: boolean;
+  localLlmModel: string | null;
+  localLlmInstalled: boolean;
+  embedAlreadyInstalled: boolean;
+  localLlmSizeGb?: number | null;
+}) => RequiredInstall[];
+const totalRemainingBytesFn = totalRemainingBytes as (
+  plan: readonly RequiredInstall[],
+) => number;
 
 interface SetupWizardProps {
   onComplete: () => void;
@@ -98,6 +126,31 @@ function hasInstalledLocalModel(
   );
 }
 
+/**
+ * Translate an `installer-progress` event into a short human label for
+ * the chain row. Mirrors the InstallerPhase enum without coupling to it.
+ */
+function phaseLabel(ev: InstallerProgressEvent): string | undefined {
+  switch (ev.phase) {
+    case "download":
+      return "Downloading";
+    case "verify-checksum":
+      return "Verifying checksum";
+    case "extract":
+      return "Extracting";
+    case "verify-signature":
+      return "Verifying signature";
+    case "verify-exec":
+      return "Verifying executable";
+    case "complete":
+      return "Finishing";
+    case "failed":
+      return "Failed";
+    default:
+      return undefined;
+  }
+}
+
 export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizardProps) {
   const [step, setStep] = useState(0);
 
@@ -151,28 +204,14 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
   const [deps, setDeps] = useState<DepsCheckResult | null>(null);
   const [brewAvailable, setBrewAvailable] = useState<boolean | null>(null);
-  // `installing` carries the active install's target. Includes the
-  // wizard-only labels `parakeet`, `local-llm`, `embed-model` that
-  // aren't part of the cross-IPC `DepsInstallTarget` union — the
-  // renderer dispatches them to the right helper (installParakeet,
-  // installLocalLlm, installEmbedModel) instead of going through the
-  // generic deps:install IPC. v0.1.9 added `embed-model` so the embed-
-  // model row's Retry calls the right helper instead of fall-through to
-  // installDep("embed-model") which would dispatch through the wrong
-  // IPC entirely.
-  type InstallTarget = DepsInstallTarget | "parakeet" | "local-llm" | "embed-model";
-  const [installing, setInstalling] = useState<InstallTarget | null>(null);
+  // Activity log — fed by `deps-install:log`, `setup-asr:log`, and
+  // `setup-llm:log` IPC streams. Rendered inside a collapsed accordion
+  // below the dependency checklist.
   const [installLog, setInstallLog] = useState<string[]>([]);
   const installLogRef = useRef<HTMLPreElement>(null);
-  const [installError, setInstallError] = useState<string | null>(null);
-  // Used by the DependencyInstallProgress "Retry" button to re-fire the
-  // exact install that failed without the user having to re-click the
-  // row. Set at install start; cleared on Dismiss.
-  const lastInstallTargetRef = useRef<InstallTarget | null>(null);
   const [skipBlackhole, setSkipBlackhole] = useState(false);
   const [restartingAudio, setRestartingAudio] = useState(false);
   const [restartAudioError, setRestartAudioError] = useState<string | null>(null);
-  const [recheckBusy, setRecheckBusy] = useState(false);
 
   // Audio permissions (macOS).
   //
@@ -233,9 +272,6 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [embedProgress, setEmbedProgress] = useState<{
-    pct: number;
-  } | null>(null);
   const [enableSemanticSearch, setEnableSemanticSearch] = useState(true);
   const [embedAlreadyInstalled, setEmbedAlreadyInstalled] = useState(false);
 
@@ -463,61 +499,58 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     }
   };
 
-  const installDep = async (target: DepsInstallTarget) => {
-    // Phase 5 invariant: starting a new install resets prior result
-    // state so a stale "complete" / "failed" panel from a previous run
-    // doesn't bleed into the next.
-    setInstalling(target);
-    setInstallLog([]);
-    setInstallError(null);
-    lastInstallTargetRef.current = target;
+  // Refresh `deps` from main after any install completes so the
+  // chain-derived plan re-derives `alreadyReady` for follow-on rows
+  // (e.g. an Ollama install flips the embed-model row's prereq).
+  const refreshDeps = useCallback(async () => {
     try {
+      const fresh = await api.depsCheck();
+      setDeps(fresh);
+    } catch (err) {
+      throw new Error(
+        `Install completed but post-install check failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }, []);
+
+  // Per-dep dispatchers used by the install-chain hook. Each resolves
+  // on success or throws with a user-readable message on failure. The
+  // chain owns row state (running/done/failed/cancelled); these
+  // helpers no longer touch wizard UI state directly.
+  const installDep = useCallback(
+    async (target: DepsInstallTarget): Promise<void> => {
       const result = await api.deps.install(target);
       if (!result.ok) {
-        // failedPhase tells the user *which* step blew up (download
-        // / verify-checksum / extract / verify-signature / verify-exec).
-        // Surfacing it makes a Retry button less frustrating — the user
-        // knows whether to expect a quick fix or a network reset.
+        // failedPhase tells the user *which* step blew up (download /
+        // verify-checksum / extract / verify-signature / verify-exec).
+        // Surfacing it makes a Retry less frustrating — the user knows
+        // whether to expect a quick fix or a network reset.
         const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
-        setInstallError(`Install failed${phase}: ${result.error ?? "unknown error"}`);
-      } else if (target === "ollama") {
+        throw new Error(
+          `Install failed${phase}: ${result.error ?? "unknown error"}`,
+        );
+      }
+      if (target === "ollama") {
         // Ollama just landed on disk. Bring the daemon up so subsequent
         // model pulls don't pay the cold-start cost. The IPC handler
         // returns `daemon: false` when ensureOllamaDaemon throws (e.g.
         // the binary spawned but :11434 never answered, or codesign
         // refused to launch it). Treat that as an install-completion
-        // problem the user needs to see — silent swallowing here leaves
-        // them staring at a green "installed" row with a red LLM
-        // provider check and no idea why.
+        // problem the user needs to see — silent success here would
+        // leave the embed-model row blocked with no obvious cause.
         const llmStatus = await api.llm.check().catch(() => null);
         if (!llmStatus || !llmStatus.daemon) {
-          setInstallError(
-            "Ollama installed but the daemon failed to start. See ~/.gistlist/ollama.log for details."
+          throw new Error(
+            "Ollama installed but the daemon failed to start. See ~/.gistlist/ollama.log for details.",
           );
         }
       }
-      try {
-        const fresh = await api.depsCheck();
-        setDeps(fresh);
-      } catch (err) {
-        // depsCheck failure leaves the row in stale state — surface it
-        // explicitly so the user doesn't think the install silently failed.
-        setInstallError(
-          `Install completed but post-install check failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`
-        );
-      }
-    } catch (err) {
-      // IPC throw / preload failure — the install never returned. Without
-      // this catch the spinner clears with no error and the row keeps its
-      // pre-install "Missing" state, looking like the install silently
-      // succeeded but did nothing.
-      setInstallError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setInstalling(null);
-    }
-  };
+      await refreshDeps();
+    },
+    [refreshDeps],
+  );
 
   const restartAudio = async () => {
     setRestartingAudio(true);
@@ -538,95 +571,244 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     }
   };
 
-  // Pull the local embedding model (nomic-embed-text via Ollama) on
-  // explicit click — not as a surprise side effect of Finish. See the
-  // `embed-model` row on the Dependencies step.
+  // Pull the local embedding model (nomic-embed-text via Ollama) when
+  // the chain reaches the embed-model row. The IPC handler accepts an
+  // optional baseUrl; we rely on its default fallback
+  // (`http://127.0.0.1:11434`) which lives in main where the bundled
+  // daemon URL is canonically known. Re-runs from Settings still pull
+  // from config. v0.1.9 specifically removed the silent-pull-on-Finish
+  // path; the chain now performs the pull explicitly when the user
+  // clicks Install all.
   //
-  // First-install accommodation: the wizard runs BEFORE
-  // `config.initProject()` writes ~/.gistlist/config.yaml. The
-  // meeting-index IPC handlers used to call `loadConfig()` directly,
-  // which threw on a fresh install. v0.1.9 made both handlers accept
-  // an optional `baseUrl` and added a default fallback
-  // (`http://127.0.0.1:11434`, matching the bundled-spawned daemon).
-  // We rely on the IPC's default fallback rather than passing a
-  // `baseUrl` from the renderer — the default lives in main where the
-  // daemon URL is canonically known, and a fresh install always uses
-  // it. (Re-runs from Settings still pull from config.) If we ever
-  // need to run the wizard against a non-default daemon, threading
-  // `{ baseUrl }` through here is a one-line change.
-  const installEmbedModel = async () => {
-    setInstalling("embed-model");
-    setInstallLog([]);
-    setInstallError(null);
-    lastInstallTargetRef.current = "embed-model";
-    const unsub = api.on.setupLlmProgress((p) =>
-      setEmbedProgress({ pct: p.pct })
-    );
-    try {
-      await api.meetingIndex.installEmbedModel();
-      const fresh = await api.meetingIndex
-        .embedModelStatus()
-        .catch(() => null);
-      setEmbedAlreadyInstalled(!!fresh?.installed);
-    } catch (err) {
-      setInstallError(err instanceof Error ? err.message : String(err));
-    } finally {
-      unsub();
-      setEmbedProgress(null);
-      setInstalling(null);
+  // Post-install readiness gate: we MUST confirm the status check says
+  // installed before resolving. Otherwise the chain marks the row done,
+  // Finish unlocks, and the user ships with a missing dep that we just
+  // claimed succeeded. Throwing here keeps the row in `failed` state so
+  // Retry surfaces — and Finish stays gated by `allDepsReady`.
+  const installEmbedModel = useCallback(async (): Promise<void> => {
+    await api.meetingIndex.installEmbedModel();
+    const fresh = await api.meetingIndex.embedModelStatus();
+    setEmbedAlreadyInstalled(!!fresh.installed);
+    if (!fresh.installed) {
+      throw new Error(
+        "Embedding model install reported success but the post-install status check still says missing.",
+      );
     }
-  };
+  }, []);
 
-  const installLocalLlm = async () => {
-    if (!localLlmModel) return;
-    setInstalling("local-llm");
-    setInstallLog([]);
-    setInstallError(null);
-    lastInstallTargetRef.current = "local-llm";
-    try {
-      await api.llm.setup({ model: localLlmModel });
-      const res = await api.llm.check();
-      setInstalledLocalModels(res.installedModels);
-    } catch (err) {
-      setInstallError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setInstalling(null);
+  const installLocalLlm = useCallback(async (): Promise<void> => {
+    if (!localLlmModel) {
+      throw new Error("No local LLM model selected");
     }
-  };
+    await api.llm.setup({ model: localLlmModel });
+    const res = await api.llm.check();
+    setInstalledLocalModels(res.installedModels);
+    // Same readiness gate as embed-model: confirm the daemon now lists
+    // the model we just pulled. Without this, a silent-failure setup
+    // (daemon mid-restart, model name typo, partial download) would let
+    // the chain mark the row done despite the model still being absent.
+    if (!hasInstalledLocalModel(res.installedModels, localLlmModel)) {
+      throw new Error(
+        `Local LLM install reported success but the daemon does not list ${localLlmModel}.`,
+      );
+    }
+  }, [localLlmModel]);
 
-  const installParakeet = async () => {
-    setInstalling("parakeet");
-    setInstallLog([]);
-    setInstallError(null);
-    lastInstallTargetRef.current = "parakeet";
-    try {
-      // setup-asr returns { ok, error, failedPhase } (mirrors deps:install)
-      // so the install pane gets the same `[<phase>]: ...` UX without
-      // string-parsing a thrown Error. The chain auto-installs ffmpeg +
-      // ffprobe + Python before building the venv, so a one-click flow.
-      const result = await api.setupAsr({ force: false });
-      if (!result.ok) {
-        const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
-        setInstallError(`Install failed${phase}: ${result.error ?? "unknown error"}`);
-      }
-      try {
-        const fresh = await api.depsCheck();
-        setDeps(fresh);
-      } catch (err) {
-        setInstallError(
-          (prev) =>
-            prev ??
-            `Install completed but post-install check failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`
-        );
-      }
-    } catch (err) {
-      setInstallError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setInstalling(null);
+  const installParakeet = useCallback(async (): Promise<void> => {
+    // setup-asr returns { ok, error, failedPhase } (mirrors deps:install).
+    // The auto-chain installs ffmpeg + ffprobe + Python before building
+    // the venv, so this single call is the user-visible "Install
+    // Parakeet" action.
+    const result = await api.setupAsr({ force: false });
+    if (!result.ok) {
+      const phase = result.failedPhase ? ` [${result.failedPhase}]` : "";
+      throw new Error(
+        `Install failed${phase}: ${result.error ?? "unknown error"}`,
+      );
     }
-  };
+    await refreshDeps();
+  }, [refreshDeps]);
+
+  // Compute the install plan from current wizard inputs. Re-derives
+  // when any input changes — but the chain hook only resets state when
+  // the plan signature changes AND the chain isn't running, so a
+  // mid-install re-derive (e.g. a depsCheck refresh after one row
+  // finishes) is a safe no-op.
+  const requiredInstalls = useMemo<RequiredInstall[]>(() => {
+    if (!deps) return [];
+    return deriveRequiredInstallsFn({
+      deps,
+      asrProvider,
+      llmProvider,
+      enableSemanticSearch,
+      localLlmModel: localLlmModel || null,
+      localLlmInstalled: hasInstalledLocalModel(
+        installedLocalModels,
+        localLlmModel,
+      ),
+      embedAlreadyInstalled,
+      localLlmSizeGb: findModelEntry(localLlmModel)?.sizeGb ?? null,
+    });
+  }, [
+    deps,
+    asrProvider,
+    llmProvider,
+    enableSemanticSearch,
+    localLlmModel,
+    installedLocalModels,
+    embedAlreadyInstalled,
+  ]);
+
+  const dispatchers = useMemo(
+    () => ({
+      ffmpeg: () => installDep("ffmpeg"),
+      parakeet: () => installParakeet(),
+      ollama: () => installDep("ollama"),
+      "embed-model": () => installEmbedModel(),
+      "local-llm": () => installLocalLlm(),
+    }),
+    [installDep, installParakeet, installEmbedModel, installLocalLlm],
+  );
+
+  const installChain = useInstallChain({
+    plan: requiredInstalls,
+    dispatchers,
+    // The hook only fires onCancel when isCancellable returns true, so
+    // the activeId here is always parakeet. Calling cancelSetupAsr is
+    // safe to dispatch unconditionally since the IPC owns the no-op
+    // case (no active setup → no-op).
+    onCancel: () => {
+      void api.cancelSetupAsr();
+    },
+    // Today only Parakeet exposes a real abort signal (engine setup-asr
+    // respects an AbortController). For other deps, Cancel is a
+    // graceful "stop after this finishes" — the row stays Failed if it
+    // genuinely fails after the cancel request, instead of being
+    // misclassified as Cancelled.
+    isCancellable: (id) => id === "parakeet",
+  });
+
+  // EMA-smoothed transfer-rate sample for the active install. Reset
+  // when the active dep changes OR when the underlying tool changes
+  // (Parakeet's auto-chain emits installer-progress for ffmpeg first
+  // then python — different download streams, so the rate window
+  // shouldn't span them). EMA alpha matches the deleted Variation B
+  // panel's smoothing so users see comparable MB/s readouts.
+  const progressSampleRef = useRef<{
+    rowId: DepId | null;
+    tool: string | null;
+    lastSampleAt: number;
+    lastBytesDone: number;
+    bytesPerSec: number;
+  }>({
+    rowId: null,
+    tool: null,
+    lastSampleAt: 0,
+    lastBytesDone: 0,
+    bytesPerSec: 0,
+  });
+  const PROGRESS_EMA_ALPHA = 0.3;
+
+  // Forward `installer-progress` events into the active chain row.
+  // The event's `tool` field can be a sub-tool of Parakeet's auto-chain
+  // (`ffmpeg`, `python`); when Parakeet is active, route everything
+  // there so the user sees one unified progress for that row.
+  useEffect(() => {
+    return api.on.installerProgress((ev: InstallerProgressEvent) => {
+      const id = installChain.currentId;
+      if (id === null) return;
+      // Decide which chain row this event belongs to. For Parakeet we
+      // forward every sub-tool's bytes to the parakeet row; for direct
+      // installs we only accept events whose tool matches the row. The
+      // ffmpeg row represents the ffmpeg+ffprobe bundle, so accept
+      // both tool names — `installFfmpegBundle` emits progress for
+      // each in sequence (ffmpeg, then ffprobe) and the row should
+      // track the active sub-tool, not stall at "ffmpeg done" while
+      // ffprobe is still downloading.
+      let targetId: DepId | null = null;
+      if (id === "parakeet") {
+        targetId = "parakeet";
+      } else if (
+        ((ev.tool === "ffmpeg" || ev.tool === "ffprobe") && id === "ffmpeg") ||
+        (ev.tool === "ollama" && id === "ollama")
+      ) {
+        targetId = id;
+      }
+      if (targetId === null) return;
+
+      // Compute speed (bytes/sec) and ETA from a per-tool EMA. Reset
+      // the window when the row OR sub-tool changes so a Parakeet
+      // ffmpeg→python boundary doesn't smear the rate readout.
+      const sample = progressSampleRef.current;
+      const now = Date.now();
+      const bytesDone =
+        typeof ev.bytesDone === "number" ? ev.bytesDone : 0;
+      const bytesTotal =
+        typeof ev.bytesTotal === "number" ? ev.bytesTotal : null;
+
+      let bytesPerSec = sample.bytesPerSec;
+      if (sample.rowId !== targetId || sample.tool !== ev.tool) {
+        // New stream — reset.
+        sample.rowId = targetId;
+        sample.tool = ev.tool;
+        sample.lastSampleAt = now;
+        sample.lastBytesDone = bytesDone;
+        sample.bytesPerSec = 0;
+        bytesPerSec = 0;
+      } else if (now > sample.lastSampleAt && bytesDone > sample.lastBytesDone) {
+        const dtSec = (now - sample.lastSampleAt) / 1000;
+        const instant = (bytesDone - sample.lastBytesDone) / dtSec;
+        bytesPerSec =
+          sample.bytesPerSec === 0
+            ? instant
+            : PROGRESS_EMA_ALPHA * instant +
+              (1 - PROGRESS_EMA_ALPHA) * sample.bytesPerSec;
+        sample.lastSampleAt = now;
+        sample.lastBytesDone = bytesDone;
+        sample.bytesPerSec = bytesPerSec;
+      }
+
+      const etaSeconds =
+        bytesTotal && bytesPerSec > 0
+          ? Math.max(0, (bytesTotal - bytesDone) / bytesPerSec)
+          : undefined;
+
+      const snapshot: ProgressSnapshot = {
+        phase: phaseLabel(ev),
+        bytes:
+          typeof ev.bytesDone === "number" && bytesTotal !== null
+            ? { done: ev.bytesDone, total: bytesTotal }
+            : undefined,
+        speed: bytesPerSec > 0 ? bytesPerSec : undefined,
+        eta: etaSeconds,
+      };
+      installChain.setProgress(targetId, snapshot);
+    });
+  }, [installChain]);
+
+  // Forward `setup-llm:progress` events (pct only) into the embed-model
+  // and local-llm rows. Both pulls report through this channel.
+  useEffect(() => {
+    return api.on.setupLlmProgress((p) => {
+      const id = installChain.currentId;
+      if (id === "embed-model" || id === "local-llm") {
+        installChain.setProgress(id, { percent: p.pct });
+      }
+    });
+  }, [installChain]);
+
+  const allDepsReady = useMemo(() => {
+    if (requiredInstalls.length === 0) return false;
+    return requiredInstalls.every((item) => {
+      const row = installChain.rows[item.id];
+      return row && (row.kind === "ready" || row.kind === "done");
+    });
+  }, [requiredInstalls, installChain.rows]);
+
+  const remainingBytes = useMemo(
+    () => totalRemainingBytesFn(requiredInstalls),
+    [requiredInstalls],
+  );
 
   const onFinish = async () => {
     setError(null);
@@ -673,72 +855,18 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     }
   };
 
-  const finishDisabled = useMemo(() => {
-    if (busy || installing || restartingAudio) return true;
-    if (!deps) return true;
-    if (!deps.ffmpeg.path) return true;
-    // ffprobe is paired with ffmpeg — engine audio code requires both.
-    if (!deps.ffprobe.path) return true;
-    // Phase-1B Finish gate: an app-managed binary that failed arch /
-    // spawn validation (verified === "system-unverified" while source is
-    // app-installed or bundled) means the engine path is poisoned and
-    // recording would EBADARCH on first use. Force the user to "Install
-    // clean copy" before Finish enables. System-PATH binaries (Homebrew)
-    // can finish — same rationale as Phase 2 not spawning them: we
-    // intentionally don't validate them.
-    const blockedByAppManaged = (tool: { source: string | null; verified: ResolvedTool["verified"] | undefined }) =>
-      (tool.source === "app-installed" || tool.source === "bundled") &&
-      tool.verified === "system-unverified";
-    if (blockedByAppManaged(deps.ffmpeg)) return true;
-    if (blockedByAppManaged(deps.ffprobe)) return true;
-    // Python only matters when the user picked Parakeet — cloud ASR
-    // doesn't touch the app-managed Python runtime, so a stale wrong-
-    // arch python in <binDir>/python should NOT silently dead-end the
-    // Finish button for an OpenAI-Whisper user. Gate to parakeet-mlx,
-    // and pair this with the Parakeet repair CTA below so the
-    // parakeet-mlx user has a visible recovery path.
-    if (asrProvider === "parakeet-mlx" && blockedByAppManaged(deps.python)) {
-      return true;
-    }
-    if (asrProvider === "parakeet-mlx" && !deps.parakeet.path) return true;
-    // System-audio probe lives on the Permissions step now and is optional
-    // (mic-only recording works); it does not gate Finish on the Deps step.
-    if (llmProvider === "ollama") {
-      if (!localLlmModel) return true;
-      if (!hasInstalledLocalModel(installedLocalModels, localLlmModel)) return true;
-    }
-    // The embedding model used to be pulled silently on Finish — that
-    // surprised users with a 274 MB download. v0.1.9 moved it to a
-    // dedicated row with explicit click. Gate Finish so the user can't
-    // ship without having explicitly downloaded the model they
-    // opted into. Also gate on Ollama daemon when semantic search is
-    // on (the embed model lives in Ollama; if the daemon's down a
-    // Claude/OpenAI user with semantic search would otherwise reach
-    // Finish without the prerequisite Ollama install — the embed row
-    // is correctly disabled in that state but Finish was still
-    // enabled).
-    if (enableSemanticSearch) {
-      if (!deps.ollama.daemon) return true;
-      if (!embedAlreadyInstalled) return true;
-    }
-    return false;
-  }, [
-    busy,
-    installing,
-    restartingAudio,
-    deps,
-    asrProvider,
-    llmProvider,
-    localLlmModel,
-    installedLocalModels,
-    enableSemanticSearch,
-    embedAlreadyInstalled,
-  ]);
+  // Finish enables only when every required dep is `ready` or `done`.
+  // The chain owns the per-dep status; a system-unverified app-managed
+  // binary surfaces as `pending` (deriveRequiredInstalls treats it as
+  // not-ready), so the chain's Install all flow repairs it before
+  // Finish unlocks. No separate gate needed here.
+  const finishDisabled =
+    busy || restartingAudio || !deps || !allDepsReady;
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[radial-gradient(circle_at_top,rgba(45,107,63,0.08),transparent_32%),var(--bg-secondary)]">
       <div className="h-8 shrink-0 pl-20 [-webkit-app-region:drag]" />
-      <div className="flex-1 overflow-y-auto px-6 pb-10 pt-5">
+      <div className="flex-1 overflow-y-auto px-6 pb-16 pt-5">
         <div className="mx-auto flex w-full max-w-[35rem] flex-col gap-4">
           <div className="flex items-center justify-between gap-2 text-sm font-medium text-[var(--text-secondary)]">
             <div className="flex items-center gap-2">
@@ -750,7 +878,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
                 variant="ghost"
                 size="sm"
                 onClick={onCancel}
-                disabled={busy || installing !== null}
+                disabled={busy || installChain.chainState === "running"}
                 data-testid="wizard-cancel"
               >
                 Cancel
@@ -1175,293 +1303,166 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
           {step === STEP.DEPS && (
             <WizardStep
-              title="Dependencies"
-              description="These are the tools Gistlist uses to record and transcribe audio. Missing items can be installed for you — no Terminal needed."
+              title="Setting up Gistlist"
+              description="Installing the tools needed to record and transcribe."
               footer={
-                <WizardActions
-                  back={{ label: "Back", onClick: () => setStep(STEP.PERMISSIONS), disabled: installing !== null }}
-                  secondary={{
-                    label: "Re-check",
-                    onClick: async () => {
-                      setRecheckBusy(true);
-                      try {
-                        const [fresh, brew] = await Promise.allSettled([
-                          api.depsCheck(),
-                          api.deps.checkBrew(),
-                        ]);
-                        if (fresh.status === "fulfilled") setDeps(fresh.value);
-                        if (brew.status === "fulfilled")
-                          setBrewAvailable(brew.value);
-                      } finally {
-                        setRecheckBusy(false);
-                      }
-                    },
-                    disabled: installing !== null,
-                    busy: recheckBusy,
-                  }}
-                  primary={{
-                    label: busy
-                      ? embedProgress
-                        ? `Pulling embedding model… ${embedProgress.pct}%`
-                        : "Finishing…"
-                      : "Finish setup",
-                    onClick: onFinish,
-                    disabled: finishDisabled,
-                  }}
+                <DepsStepFooter
+                  busy={busy}
+                  finishDisabled={finishDisabled}
+                  installChainState={installChain.chainState}
+                  remainingBytes={remainingBytes}
+                  onBack={() => setStep(STEP.PERMISSIONS)}
+                  onInstallAll={installChain.start}
+                  onRetry={installChain.retry}
+                  onCancel={installChain.cancel}
+                  onResume={installChain.retry}
+                  onFinish={onFinish}
                 />
               }
             >
-              {(installing !== null || installError !== null || installLog.length > 0) && (
-                <DependencyInstallProgress
-                  installing={installing}
-                  lastInstallTarget={lastInstallTargetRef.current}
-                  installError={installError}
-                  installLog={installLog}
-                  onDismiss={() => {
-                    setInstallError(null);
-                    setInstallLog([]);
-                    lastInstallTargetRef.current = null;
-                  }}
-                  onRetry={() => {
-                    const target = lastInstallTargetRef.current;
-                    if (!target) return;
-                    if (target === "parakeet") void installParakeet();
-                    else if (target === "local-llm") void installLocalLlm();
-                    else if (target === "embed-model") void installEmbedModel();
-                    else void installDep(target);
-                  }}
-                  // Only Parakeet exposes a working cancel today (engine
-                  // setup-asr respects the AbortController). Others
-                  // ignore the cancel — better to omit the button than
-                  // show a no-op.
-                  onCancel={
-                    installing === "parakeet"
-                      ? () => api.cancelSetupAsr()
-                      : undefined
-                  }
-                  // Embed-model pulls report progress via
-                  // `setup-llm:progress` (pct only, no bytes), bridged
-                  // through the `embedProgress` state. Pass it through
-                  // to the panel so the progress bar is real instead of
-                  // a perpetual "Working on embed-model…" spinner.
-                  pctOverride={
-                    installing === "embed-model" && embedProgress
-                      ? embedProgress.pct
-                      : null
-                  }
-                />
-              )}
               {deps == null ? (
                 <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
                   <Spinner className="h-4 w-4" />
                   Checking dependencies…
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {installing !== "ffmpeg" && (
-                  <DependencyRow
-                    name="ffmpeg"
-                    ok={!!deps.ffmpeg.path && !!deps.ffprobe.path}
-                    value={
-                      deps.ffmpeg.path && deps.ffprobe.path
-                        ? `${deps.ffmpeg.path}${deps.ffmpeg.source ? ` (${deps.ffmpeg.source})` : ""}`
-                        : deps.ffmpeg.path && !deps.ffprobe.path
-                          ? "ffmpeg present · ffprobe missing"
-                          : !deps.ffmpeg.path && deps.ffprobe.path
-                            ? "ffprobe present · ffmpeg missing"
-                            : undefined
-                    }
-                    installLabel="Install ffmpeg + ffprobe"
-                    installing={installing === "ffmpeg"}
-                    anyInstalling={installing !== null}
-                    brewAvailable={true}
-                    onInstall={() => installDep("ffmpeg")}
-                    footerNote={
-                      !deps.ffmpeg.path || !deps.ffprobe.path
-                        ? "Downloads ~50 MB. Apple Silicon gets a native arm64 build (osxexperts.net, GPL); Intel gets the existing LGPL build (evermeet.cx)."
-                        : undefined
-                    }
-                    // Combined ffmpeg+ffprobe row: take the weaker of the
-                    // two `verified` states so a clean ffmpeg + system
-                    // ffprobe still shows amber.
-                    verified={
-                      deps.ffmpeg.verified === "system-unverified" ||
-                      deps.ffprobe.verified === "system-unverified"
-                        ? "system-unverified"
-                        : deps.ffmpeg.verified === "missing" ||
-                            deps.ffprobe.verified === "missing"
-                          ? "missing"
-                          : "verified"
-                    }
-                    cleanCopyLabel="Install clean ffmpeg + ffprobe"
-                  />
-                  )}
-                  {asrProvider === "parakeet-mlx" && installing !== "parakeet" && (() => {
-                    // Treat the Parakeet row as broken if EITHER the
-                    // venv binary is missing OR the underlying Python
-                    // runtime failed validation. The venv itself was
-                    // built against that Python, so a wrong-arch Python
-                    // means the venv can't load — the row shouldn't
-                    // claim "Ready" while the runtime is broken.
-                    // Re-running installParakeet (= setup-asr chain)
-                    // reinstalls Python and rebuilds the venv against
-                    // it, so the existing button is the correct repair
-                    // affordance.
-                    const pythonBroken =
-                      (deps.python.source === "app-installed" ||
-                        deps.python.source === "bundled") &&
-                      deps.python.verified === "system-unverified";
-                    const parakeetOk = !!deps.parakeet.path && !pythonBroken;
-                    return (
-                      <DependencyRow
-                        name="Parakeet"
-                        ok={parakeetOk}
-                        value={deps.parakeet.path ?? undefined}
-                        installLabel={pythonBroken ? "Repair Parakeet runtime" : "Install Parakeet"}
-                        installing={installing === "parakeet"}
-                        anyInstalling={installing !== null}
-                        brewAvailable={true}
-                        onInstall={installParakeet}
-                        onCancel={() => api.cancelSetupAsr()}
-                        footerNote={
-                          pythonBroken
-                            ? "The app-managed Python runtime under <binDir>/python failed validation (likely wrong arch — common after upgrading from an Intel install or running in a UTM guest without Rosetta). Repair re-runs the full Parakeet install chain, which reinstalls Python and rebuilds the venv against it."
-                            : !deps.parakeet.path
-                              ? "Installs an app-managed Python runtime (Apple-Silicon-only), ffmpeg if missing, and the Parakeet model — about 1 GB total. First run can take a few minutes on a slow connection while the model weights download."
-                              : undefined
-                        }
-                      />
-                    );
-                  })()}
-                  {/* Ollama row: shown when EITHER the LLM provider is
-                      Ollama (chat models live there) OR semantic search
-                      is enabled (the embedding model is pulled via
-                      Ollama, regardless of LLM provider). v0.1.9 added
-                      the `enableSemanticSearch` branch — without it,
-                      Claude/OpenAI users with semantic search opted in
-                      could hit the embed-model gate without an obvious
-                      Ollama prerequisite or repair path. */}
-                  {(llmProvider === "ollama" || enableSemanticSearch) && installing !== "ollama" && (
-                    <DependencyRow
-                      name="Ollama"
-                      ok={deps.ollama.daemon}
-                      value={
-                        deps.ollama.daemon
-                          ? `running${deps.ollama.source ? ` (${deps.ollama.source})` : ""}`
-                          : undefined
-                      }
-                      installLabel="Install Ollama"
-                      installing={installing === "ollama"}
-                      anyInstalling={installing !== null}
-                      brewAvailable={true}
-                      onInstall={() => installDep("ollama")}
-                      footerNote={
-                        !deps.ollama.daemon
-                          ? llmProvider === "ollama"
-                            ? "Downloads ~130 MB. Lands at <userData>/bin/ollama-runtime/. Models live at ~/.ollama/models so a future system Ollama install picks them up."
-                            : "Downloads ~130 MB. Required for the local embedding model used by semantic meeting search (Claude Desktop / MCP). Lands at <userData>/bin/ollama-runtime/."
-                          : undefined
-                      }
-                      verified={deps.ollama.verified}
-                      cleanCopyLabel="Install clean Ollama"
-                    />
-                  )}
-                  {/* Embedding model row — only shown when the user
-                      opted into semantic search (Claude Desktop / MCP
-                      integration) on the Providers step. Pulls
-                      nomic-embed-text via Ollama on click; previously
-                      this was a surprise 274 MB download triggered by
-                      Finish setup. */}
-                  {enableSemanticSearch && installing !== "embed-model" && (
-                    <DependencyRow
-                      name="Embedding model (nomic-embed-text)"
-                      ok={embedAlreadyInstalled}
-                      value={embedAlreadyInstalled ? "ready" : undefined}
-                      installLabel="Download embedding model"
-                      installing={installing === "embed-model"}
-                      anyInstalling={installing !== null}
-                      // Prereq: Ollama daemon must be up. Re-using
-                      // `brewAvailable` as the generic "prerequisite ok"
-                      // gate (it's already wired to disable the install
-                      // button). Footer note above explains what to fix.
-                      brewAvailable={deps.ollama.daemon}
-                      onInstall={installEmbedModel}
-                      footerNote={
-                        !embedAlreadyInstalled
-                          ? !deps.ollama.daemon
-                            ? "Requires Ollama. Install Ollama first (above), then download this model. ~274 MB → ~/.ollama/models. Powers semantic meeting search via the Claude Desktop MCP integration; runs locally."
-                            : "Downloads ~274 MB to ~/.ollama/models. Powers semantic meeting search via the Claude Desktop MCP integration. Runs locally — your transcripts never leave your machine."
-                          : undefined
-                      }
-                    />
-                  )}
-                  {llmProvider === "ollama" && localLlmModel && deps.ollama.daemon && (
-                    <DependencyRow
-                      name={`Model: ${localLlmModel}`}
-                      ok={hasInstalledLocalModel(installedLocalModels, localLlmModel)}
-                      value={
-                        hasInstalledLocalModel(installedLocalModels, localLlmModel)
-                          ? "ready"
-                          : undefined
-                      }
-                      installLabel={`Download ${localLlmModel}`}
-                      installing={installing === "local-llm"}
-                      anyInstalling={installing !== null}
-                      brewAvailable={true}
-                      onInstall={installLocalLlm}
-                      footerNote={
-                        !hasInstalledLocalModel(installedLocalModels, localLlmModel)
-                          ? `Downloads ${
-                              findModelEntry(localLlmModel)?.sizeGb ?? "~5"
-                            } GB to ~/.ollama/models. One-time. Shared with any system Ollama install.`
-                          : undefined
-                      }
-                    />
-                  )}
-                </div>
+                <DependencyChecklist
+                  plan={requiredInstalls}
+                  rows={installChain.rows}
+                  currentId={installChain.currentId}
+                  onRetry={installChain.retry}
+                />
               )}
 
-              {/* Brew prompt removed — Phase 2 replaced Homebrew with direct
-                  download. The wizard never asks the user to open Terminal. */}
-              {/* The raw install log + standalone error live inside the
-                  DependencyInstallProgress panel above (Phase 5 — they
-                  share state but render under the new chrome). */}
-
-              {busy && embedProgress && (
-                <div
-                  className="space-y-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
-                  data-testid="embed-pull-progress"
+              {installLog.length > 0 ? (
+                <details
+                  className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3"
+                  data-testid="install-activity-log"
                 >
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-[var(--text-primary)]">
-                      Downloading embedding model (~274 MB)
-                    </span>
-                    <span className="font-mono text-xs text-[var(--text-secondary)]">
-                      {embedProgress.pct}%
-                    </span>
-                  </div>
-                  <div className="h-1 w-full overflow-hidden rounded bg-[var(--bg-tertiary)]">
-                    <div
-                      className="h-full bg-[var(--accent)] transition-[width]"
-                      style={{ width: `${embedProgress.pct}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-[var(--text-secondary)]">
-                    Powers semantic meeting search (used by Claude Desktop
-                    via MCP). Runs locally — your transcripts never leave
-                    your machine.
-                  </p>
-                </div>
-              )}
+                  <summary className="cursor-pointer text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                    Activity log
+                  </summary>
+                  <pre
+                    ref={installLogRef}
+                    className="mt-3 max-h-48 overflow-y-auto whitespace-pre-wrap text-[11px] leading-5 text-[var(--text-secondary)]"
+                  >
+                    {installLog.join("\n")}
+                  </pre>
+                </details>
+              ) : null}
 
-              {error && (
+              {error ? (
                 <div className="text-sm text-[var(--error)]">{error}</div>
-              )}
+              ) : null}
             </WizardStep>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+interface DepsStepFooterProps {
+  busy: boolean;
+  finishDisabled: boolean;
+  installChainState:
+    | "idle"
+    | "running"
+    | "paused"
+    | "cancelled"
+    | "done";
+  remainingBytes: number;
+  onBack: () => void;
+  onInstallAll: () => void;
+  onRetry: () => void;
+  onCancel: () => void;
+  onResume: () => void;
+  onFinish: () => void;
+}
+
+/**
+ * Footer for the Dependencies step. Drives the per-state action set:
+ *   - idle       → [Back] [Install all (~X)]   (or [Finish setup] when nothing pending)
+ *   - running    → [Cancel]                    (Back disabled)
+ *   - paused     → [Back] [Retry]              (failed row blocks chain)
+ *   - cancelled  → [Back] [Resume install]
+ *   - done       → [Back] [Finish setup]
+ */
+function DepsStepFooter({
+  busy,
+  finishDisabled,
+  installChainState,
+  remainingBytes,
+  onBack,
+  onInstallAll,
+  onRetry,
+  onCancel,
+  onResume,
+  onFinish,
+}: DepsStepFooterProps) {
+  const backDisabled = installChainState === "running" || busy;
+
+  if (installChainState === "running") {
+    return (
+      <WizardActions
+        back={{ label: "Back", onClick: onBack, disabled: true }}
+        primary={{
+          label: "Cancel",
+          onClick: onCancel,
+          // The reducer accepts only one cancel; subsequent clicks are
+          // no-ops. We don't need to disable the button — the action is
+          // idempotent — but a cleaner UI: leave it enabled.
+        }}
+      />
+    );
+  }
+
+  if (installChainState === "paused") {
+    return (
+      <WizardActions
+        back={{ label: "Back", onClick: onBack, disabled: backDisabled }}
+        primary={{ label: "Retry", onClick: onRetry }}
+      />
+    );
+  }
+
+  if (installChainState === "cancelled") {
+    return (
+      <WizardActions
+        back={{ label: "Back", onClick: onBack, disabled: backDisabled }}
+        primary={{
+          label: remainingBytes > 0
+            ? `Resume install (~${humanBytes(remainingBytes)})`
+            : "Resume install",
+          onClick: onResume,
+        }}
+      />
+    );
+  }
+
+  // idle or done — show Install all if there's anything pending,
+  // otherwise the chain is effectively done and Finish takes over.
+  if (remainingBytes > 0 && installChainState !== "done") {
+    return (
+      <WizardActions
+        back={{ label: "Back", onClick: onBack, disabled: backDisabled }}
+        primary={{
+          label: `Install all (~${humanBytes(remainingBytes)})`,
+          onClick: onInstallAll,
+        }}
+      />
+    );
+  }
+
+  return (
+    <WizardActions
+      back={{ label: "Back", onClick: onBack, disabled: backDisabled }}
+      primary={{
+        label: busy ? "Finishing…" : "Finish setup",
+        onClick: onFinish,
+        disabled: finishDisabled,
+      }}
+    />
   );
 }
 
@@ -1476,6 +1477,12 @@ function WizardStep({
   children?: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  // The footer renders as a sticky bottom bar inside the Card. `sticky
+  // bottom-0` pins it to the bottom of the wizard's scroll container
+  // (the `overflow-y-auto` ancestor) so a tall step (Dependencies on a
+  // fresh install with the activity log expanded) keeps Back/Continue
+  // visible without manual scrolling. The negative margins extend the
+  // bar flush with the Card edges; the rounded-b matches the Card.
   return (
     <Card className="rounded-2xl border-[var(--border-default)] bg-white shadow-[0_18px_44px_rgba(31,45,28,0.10)]">
       <CardContent className="space-y-6 p-7">
@@ -1484,7 +1491,11 @@ function WizardStep({
           <p className="text-sm leading-6 text-[var(--text-secondary)]">{description}</p>
         </div>
         {children ? <div className="space-y-5">{children}</div> : null}
-        {footer ? <div className="border-t border-[var(--border-subtle)] pt-5">{footer}</div> : null}
+        {footer ? (
+          <div className="sticky bottom-0 -mx-7 -mb-7 rounded-b-2xl border-t border-[var(--border-subtle)] bg-white/95 px-7 py-5 backdrop-blur supports-[backdrop-filter]:bg-white/85">
+            {footer}
+          </div>
+        ) : null}
       </CardContent>
     </Card>
   );
@@ -1587,127 +1598,6 @@ function SettingToggle({
         {description ? <div className="text-sm leading-5 text-[var(--text-secondary)]">{description}</div> : null}
       </label>
     </div>
-  );
-}
-
-interface DependencyRowProps {
-  name: string;
-  ok: boolean;
-  value?: string;
-  installLabel: string;
-  installing: boolean;
-  anyInstalling: boolean;
-  brewAvailable: boolean | null;
-  onInstall: () => void;
-  /**
-   * Optional cancel handler. When provided AND `installing` is true,
-   * the row renders an enabled "Cancel" button next to the spinner so
-   * the user can abort a long-running install (e.g. Parakeet's
-   * model-weight download). Without this, the install button is just
-   * a disabled "Installing…" spinner with no exit.
-   */
-  onCancel?: () => void;
-  footerNote?: string;
-  /**
-   * Phase-1B `verified` discriminator from `ResolvedTool.verified`. Drives
-   * the badge color and the "Install clean copy" CTA:
-   *   - "verified" / undefined → green Ready
-   *   - "system-bundled"       → green Ready (system Ollama with daemon up)
-   *   - "system-unverified"    → amber "Found (unverified)" + "Install clean copy"
-   *   - "missing"              → red "Missing" + the regular Install CTA
-   */
-  verified?: "verified" | "system-bundled" | "system-unverified" | "missing";
-  /** Label for the "Install clean copy" CTA when verified === "system-unverified". */
-  cleanCopyLabel?: string;
-}
-
-function DependencyRow({
-  name,
-  ok,
-  value,
-  installLabel,
-  installing,
-  anyInstalling,
-  brewAvailable,
-  onInstall,
-  onCancel,
-  footerNote,
-  verified,
-  cleanCopyLabel,
-}: DependencyRowProps) {
-  const isUnverified = verified === "system-unverified";
-  return (
-    <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-secondary)] px-4 py-3">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="text-sm font-medium text-[var(--text-primary)]">{name}</div>
-            <DependencyStateBadge ok={ok} warning={isUnverified} />
-            {value ? <span className="truncate font-mono text-xs text-[var(--text-secondary)]">{value}</span> : null}
-            {!value ? <span className="text-xs text-[var(--text-secondary)]">{ok ? "installed" : "not installed"}</span> : null}
-          </div>
-          {footerNote && !ok ? <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{footerNote}</div> : null}
-          {isUnverified ? (
-            <div className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
-              Found a system-installed copy at this path. We can't safely verify it without spawning, so the wizard treats it as unverified. Install a clean app-managed copy to remove the ambiguity.
-            </div>
-          ) : null}
-        </div>
-        {!ok ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" onClick={onInstall} disabled={anyInstalling || brewAvailable === false}>
-              {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : installLabel}
-            </Button>
-            {installing && onCancel ? (
-              <Button variant="ghost" size="sm" onClick={onCancel}>
-                Cancel
-              </Button>
-            ) : null}
-          </div>
-        ) : isUnverified ? (
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="secondary" onClick={onInstall} disabled={anyInstalling}>
-              {installing ? <><Spinner className="h-3.5 w-3.5" /> Installing…</> : (cleanCopyLabel ?? "Install clean copy")}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  );
-}
-
-function DependencyStateBadge({
-  ok,
-  warning,
-}: {
-  ok: boolean;
-  warning: boolean;
-}) {
-  // Warning takes precedence over ok. A row that resolves to a path
-  // (`ok=true`) but is `system-unverified` (`warning=true`) must NOT
-  // render green Ready — that was the regression the previous patch
-  // shipped. Amber wins, then green, then red.
-  if (warning) {
-    return (
-      <Badge variant="warning" className="gap-1 normal-case tracking-normal">
-        <AlertTriangle className="h-3 w-3" />
-        Found (unverified)
-      </Badge>
-    );
-  }
-  if (ok) {
-    return (
-      <Badge variant="success" className="gap-1 normal-case tracking-normal">
-        <CheckCircle2 className="h-3 w-3" />
-        Ready
-      </Badge>
-    );
-  }
-  return (
-    <Badge variant="destructive" className="gap-1 normal-case tracking-normal">
-      <XCircle className="h-3 w-3" />
-      Missing
-    </Badge>
   );
 }
 

@@ -49,7 +49,9 @@ export class SetupWizardPage {
   }
 
   depsHeading() {
-    return this.page.getByRole("heading", { name: "Dependencies" });
+    // v0.1.10 retitled the step from "Dependencies" to "Setting up Gistlist"
+    // when the per-row install buttons were replaced by the chain UI.
+    return this.page.getByRole("heading", { name: "Setting up Gistlist" });
   }
 
   // Permissions step controls
@@ -153,19 +155,54 @@ export class SetupWizardPage {
     return this.page.locator('input[type="password"]').first();
   }
 
-  // Step 4: Dependencies. Uses exact match so we don't collide with the
-  // path-and-source string the row also renders (e.g. the ffmpeg row
-  // shows both "ffmpeg" as a title and "/opt/homebrew/bin/ffmpeg (system)"
-  // as a value — non-exact match would resolve to two elements).
-  depRowByName(name: string) {
-    return this.page.getByText(name, { exact: true });
+  // Step 4: Dependencies — chain-install UI (v0.1.10).
+  //
+  // Each row in the checklist has `data-testid="dep-row-<id>"` and a
+  // `data-state` attribute (pending|ready|running|done|failed|cancelled)
+  // for state-aware assertions without scraping pixel layout.
+  dependencyChecklist() {
+    return this.page.getByTestId("dependency-checklist");
   }
 
-  recheckButton() {
-    return this.page.getByRole("button", { name: "Re-check" });
+  depRow(id: "ffmpeg" | "parakeet" | "ollama" | "embed-model" | "local-llm") {
+    return this.page.getByTestId(`dep-row-${id}`);
   }
 
-  installButton(name: string) {
-    return this.page.getByRole("button", { name }).first();
+  /**
+   * Install-all primary button. Visible in idle state when at least one
+   * dep is missing. Label includes the rough total bytes ("Install all
+   * (~1.4 GB)"); a regex match keeps the assertion robust to size shifts
+   * as bundled binary versions tick.
+   */
+  installAllButton() {
+    return this.page.getByRole("button", { name: /^install all/i });
+  }
+
+  /** Cancel button visible during a running chain. */
+  cancelChainButton() {
+    return this.page.getByRole("button", { name: /^cancel$/i });
+  }
+
+  /**
+   * Footer Retry button visible when the chain is paused on a failure.
+   * Distinct from the per-row Retry button (`dep-row-retry`) — the
+   * `.last()` skips past any per-row Retry that's also visible.
+   */
+  chainRetryButton() {
+    return this.page.getByRole("button", { name: /^retry$/i }).last();
+  }
+
+  /** Resume button visible after the chain was cancelled. */
+  resumeChainButton() {
+    return this.page.getByRole("button", { name: /^resume install/i });
+  }
+
+  activityLog() {
+    return this.page.getByTestId("install-activity-log");
+  }
+
+  /** Per-row error text under a failed dep. */
+  depRowError(id: "ffmpeg" | "parakeet" | "ollama" | "embed-model" | "local-llm") {
+    return this.page.getByTestId(`dep-row-${id}-error`);
   }
 }

@@ -1,33 +1,25 @@
 import { test, expect } from "../fixtures/setup-wizard.fixture";
 
-// Phase 2 swapped the brew wrapper for a direct-download installer
-// pipeline (download → SHA-256 → extract → codesign → atomic swap →
-// verifyExec). This spec exercises the failure path the real pipeline
-// can hit, surfaced through the wizard UI:
+// The wizard's chain-install Dependencies step (v0.1.10) surfaces install
+// pipeline failures inline on the failed row instead of a separate panel.
+// These specs lock the renderer's UX contract per failure phase:
 //
-//   - SHA-256 mismatch ("verify-checksum" phase)
-//   - network failure ("download" phase)
-//   - extraction failure ("extract" phase)
-//   - verifyExec failure ("verify-exec" phase)
-//
-// We don't drive a real download here — the mock IPC surfaces a
-// canned failure result via `__MEETING_NOTES_TEST.setNextInstallFailure`.
-// The point is to lock the renderer's UX contract:
-//
-//   1. The error message includes the failedPhase in [brackets].
-//   2. The Install button stays clickable so the user can retry.
-//   3. Retry after a transient failure picks up the happy path
-//      (the install-failure override is one-shot).
+//   1. The error message includes the failedPhase in [brackets] so the
+//      user knows what step blew up (download / verify-checksum /
+//      verify-exec / extract).
+//   2. The chain pauses on the failed row; later rows stay Pending.
+//   3. Retry resumes from the failed row (the install-failure override is
+//      one-shot, so the retry hits the happy path).
 
 test.describe("Installer failure modes", () => {
-  test("verify-checksum failure surfaces the phase + allows retry", async ({
+  test("verify-checksum failure surfaces the phase + Retry resumes", async ({
     wizard,
     page,
   }) => {
-    // Start with ffmpeg missing so the wizard offers Install ffmpeg.
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ffmpeg: null,
+        ffprobe: null,
       });
       (window as any).__MEETING_NOTES_TEST.setNextInstallFailure("ffmpeg", {
         ok: false,
@@ -37,43 +29,31 @@ test.describe("Installer failure modes", () => {
       });
     });
 
-    // Walk to the dependencies step.
     await wizard.getStartedButton().click();
-    await wizard.nextButton().click(); // data dir
-    await wizard.nextButton().click(); // transcription
+    await wizard.nextButton().click();
+    await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
     await page.getByRole("option", { name: /Anthropic Claude/ }).click();
     await wizard.apiKeyInput().fill("sk-ant-test-key");
     await wizard.nextButton().click(); // permissions
     await wizard.advanceFromPermissionsToDeps();
 
-    // Click Install ffmpeg → mock returns the canned failure.
-    await wizard.installButton("Install ffmpeg").click();
+    await wizard.installAllButton().click();
 
-    // Error must surface BOTH the failed phase (so the user knows what
-    // step blew up) and the underlying message. The phase + message
-    // appear in two places (DependencyInstallProgress header + activity
-    // stream) — .first() picks one, which is enough to assert the contract.
-    await expect(
-      page.getByText(/Install failed \[verify-checksum\]/).first()
-    ).toBeVisible();
-    await expect(page.getByText(/SHA-256 mismatch/).first()).toBeVisible();
+    // Failure surfaces on the ffmpeg row with the phase label.
+    await expect(wizard.depRow("ffmpeg")).toHaveAttribute("data-state", "failed", {
+      timeout: 5000,
+    });
+    await expect(wizard.depRowError("ffmpeg")).toContainText(
+      /Install failed \[verify-checksum\]/,
+    );
+    await expect(wizard.depRowError("ffmpeg")).toContainText(/SHA-256 mismatch/);
 
-    // Dismiss the failure panel before retrying so the row is visible again.
-    await page
-      .getByTestId("dep-install-progress")
-      .getByRole("button", { name: /dismiss/i })
-      .click();
-
-    // The Install button stays clickable — failure does NOT permanently
-    // disable the row. The override is one-shot, so a retry click hits
-    // the happy path and the row goes from missing → ready.
-    await wizard.installButton("Install ffmpeg").click();
-
-    // The wizard's depsCheck refresh after install should show ffmpeg
-    // as resolved (mock sets path on success). The (system) badge is
-    // visible once the row reports ready.
-    await expect(page.getByText(/\(system\)/)).toBeVisible();
+    // Retry — override is one-shot, install succeeds.
+    await wizard.chainRetryButton().click();
+    await expect(wizard.depRow("ffmpeg")).toHaveAttribute("data-state", "done", {
+      timeout: 5000,
+    });
   });
 
   test("network failure during download is reported with the right phase", async ({
@@ -83,6 +63,7 @@ test.describe("Installer failure modes", () => {
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ffmpeg: null,
+        ffprobe: null,
       });
       (window as any).__MEETING_NOTES_TEST.setNextInstallFailure("ffmpeg", {
         ok: false,
@@ -100,12 +81,13 @@ test.describe("Installer failure modes", () => {
     await wizard.nextButton().click(); // permissions
     await wizard.advanceFromPermissionsToDeps();
 
-    await wizard.installButton("Install ffmpeg").click();
+    await wizard.installAllButton().click();
 
-    await expect(
-      page.getByText(/Install failed \[download\]/).first()
-    ).toBeVisible();
-    await expect(page.getByText(/Connection timeout/).first()).toBeVisible();
+    await expect(wizard.depRowError("ffmpeg")).toContainText(
+      /Install failed \[download\]/,
+      { timeout: 5000 },
+    );
+    await expect(wizard.depRowError("ffmpeg")).toContainText(/Connection timeout/);
   });
 
   test("verify-exec failure surfaces the phase", async ({ wizard, page }) => {
@@ -114,6 +96,7 @@ test.describe("Installer failure modes", () => {
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ffmpeg: null,
+        ffprobe: null,
       });
       (window as any).__MEETING_NOTES_TEST.setNextInstallFailure("ffmpeg", {
         ok: false,
@@ -131,24 +114,26 @@ test.describe("Installer failure modes", () => {
     await wizard.nextButton().click(); // permissions
     await wizard.advanceFromPermissionsToDeps();
 
-    await wizard.installButton("Install ffmpeg").click();
+    await wizard.installAllButton().click();
 
-    await expect(
-      page.getByText(/Install failed \[verify-exec\]/).first()
-    ).toBeVisible();
+    await expect(wizard.depRowError("ffmpeg")).toContainText(
+      /Install failed \[verify-exec\]/,
+      { timeout: 5000 },
+    );
   });
 
   test("Parakeet auto-chain ffmpeg sub-step failure surfaces the phase", async ({
     wizard,
     page,
   }) => {
-    // The setup-asr IPC handler now does ffmpeg + ffprobe + Python +
-    // venv + smoke test all in one click. If any installer sub-step
-    // fails, the renderer must show `[<phase>]:` from the chain's
-    // {ok,error,failedPhase} return shape — same UX as deps:install.
+    // The setup-asr IPC handler does ffmpeg + ffprobe + Python + venv +
+    // smoke test in one call. If any sub-step fails, the wizard surfaces
+    // `[<phase>]:` on the Parakeet row from the chain's {ok,error,
+    // failedPhase} return shape.
     await page.evaluate(() => {
       (window as any).__MEETING_NOTES_TEST.setDependencyState({
         ffmpeg: null,
+        ffprobe: null,
         parakeet: null,
       });
       (window as any).__MEETING_NOTES_TEST.setNextSetupAsrFailure({
@@ -160,29 +145,32 @@ test.describe("Installer failure modes", () => {
           "  ✘ ffmpeg: SHA-256 mismatch",
         ],
       });
+      // Make ffmpeg dispatcher a no-op success so the chain reaches the
+      // parakeet row (which is what we want to fail).
     });
 
     await wizard.getStartedButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
-    await wizard.llmProviderSelect().click();
-    await page.getByRole("option", { name: /Anthropic Claude/ }).click();
-    await wizard.apiKeyInput().fill("sk-ant-test-key");
+    // Default ASR is parakeet-mlx; default LLM is Ollama. No keys needed.
     await wizard.nextButton().click(); // permissions
     await wizard.advanceFromPermissionsToDeps();
 
-    await wizard.installButton("Install Parakeet").click();
+    await wizard.installAllButton().click();
 
-    await expect(
-      page.getByText(/Install failed \[verify-checksum\]/).first()
-    ).toBeVisible();
-    await expect(
-      page.getByText(/ffmpeg bundle install failed/).first()
-    ).toBeVisible();
-    // Sub-step log lines surface in the install pane so the user can see
-    // exactly which step inside the chain blew up.
-    await expect(
-      page.getByText(/ensuring ffmpeg \+ ffprobe/).first()
-    ).toBeVisible();
+    await expect(wizard.depRow("parakeet")).toHaveAttribute(
+      "data-state",
+      "failed",
+      { timeout: 8000 },
+    );
+    await expect(wizard.depRowError("parakeet")).toContainText(
+      /Install failed \[verify-checksum\]/,
+    );
+    await expect(wizard.depRowError("parakeet")).toContainText(
+      /ffmpeg bundle install failed/,
+    );
+    // Sub-step log lines surface in the activity log.
+    await wizard.activityLog().click();
+    await expect(wizard.activityLog()).toContainText(/ensuring ffmpeg \+ ffprobe/);
   });
 });

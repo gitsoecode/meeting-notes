@@ -28,12 +28,19 @@ locations:
 
 The wizard runs in 6 steps: Welcome → Storage → Retention → Providers →
 **Permissions** (mic + optional system-audio test) → **Dependencies**
-(install deps + Finish). The Permissions step is dedicated and only
+(install all + Finish). The Permissions step is dedicated and only
 prompts the OS when the user clicks Test/Grant — never on mount. The
-Dependencies step renders a live install-progress panel above the row
-list with an honest current-download progress bar, MB/s, ETA, an
-activity stream of phase boundaries / ✓ / ✘ markers, and a "View raw
-log" toggle.
+Dependencies step is a single chain-install loading-screen: missing
+deps appear as a vertical checklist with size estimates, and a single
+"Install all (~X MB)" button kicks off a sequential install of every
+missing item in dependency order (ffmpeg → Parakeet → Ollama → embed
+model → local LLM). The active row shows inline progress (bytes / MB/s
+/ ETA when known, percent otherwise); failures halt the chain on the
+failed row with a Retry that resumes from there; Cancel triggers a
+graceful break (it aborts Parakeet directly, lets others finish then
+stops). Already-installed deps render as Ready and the chain skips
+them. A collapsed Activity log under the checklist exposes the raw
+install stream when needed.
 
 For contributor work where you want to run the engine outside the wizard
 (CLI, headless tests), system-PATH `ffmpeg` and `python3.12` still work
