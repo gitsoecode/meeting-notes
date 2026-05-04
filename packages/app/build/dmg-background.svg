@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  DMG installer background for Gistlist.
+
+  540×380 base canvas at @1x. The build script renders @1x and @2x PNGs
+  for retina displays. Reasoning behind the design:
+
+  - Soft cool-gray gradient that reads in both light and dark Finder
+    chrome. DMG backgrounds are not theme-aware (one static image
+    serves both modes), so high-contrast neutral tones win.
+  - Two icon "wells" — left for the Gistlist app icon (Finder draws
+    the actual app on top), right for a baked Applications-folder
+    glyph. The right glyph is the visual fallback for the dark-mode
+    case where Finder's render of the `/Applications` symlink is
+    invisible. The alias is still placed at the same coordinates by
+    `dmg.contents` in package.json — when Finder draws it visibly,
+    it overlays the baked glyph.
+  - Subtle "→" arrow between them so the gesture is unmistakable.
+  - Brand stripe in the Gistlist green (#2d6b3f) along the top.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="540"
+  height="380"
+  viewBox="0 0 540 380"
+>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6f7f4" />
+      <stop offset="100%" stop-color="#e9ebe6" />
+    </linearGradient>
+    <linearGradient id="well" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.7" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+    <!-- Folder glyph for the baked Applications fallback. Stroked
+         outline + a tab + the "A" letterform, rendered in the
+         neutral icon gray that reads on both modes. -->
+    <symbol id="apps-folder" viewBox="0 0 100 100">
+      <!-- Folder body -->
+      <path
+        d="M 8 28 L 8 88 Q 8 92 12 92 L 88 92 Q 92 92 92 88 L 92 36 Q 92 32 88 32 L 50 32 L 44 26 Q 42 24 40 24 L 12 24 Q 8 24 8 28 Z"
+        fill="#c9cbc4"
+        stroke="#9da19a"
+        stroke-width="1.5"
+        stroke-linejoin="round"
+      />
+      <!-- Inner highlight to suggest the folder face -->
+      <path
+        d="M 12 36 L 88 36 L 88 86 Q 88 88 86 88 L 14 88 Q 12 88 12 86 Z"
+        fill="#dbdcd5"
+      />
+      <!-- 4-app dot grid (mac Applications-folder style) -->
+      <g fill="#7a7d76">
+        <circle cx="38" cy="55" r="4" />
+        <circle cx="50" cy="55" r="4" />
+        <circle cx="62" cy="55" r="4" />
+        <circle cx="38" cy="68" r="4" />
+        <circle cx="50" cy="68" r="4" />
+        <circle cx="62" cy="68" r="4" />
+      </g>
+    </symbol>
+  </defs>
+
+  <!-- Soft neutral background -->
+  <rect width="540" height="380" fill="url(#bg)" />
+
+  <!-- Quiet Gistlist accent stripe at the top -->
+  <rect x="0" y="0" width="540" height="3" fill="#2d6b3f" />
+
+  <!-- Title hint above the icon row -->
+  <text
+    x="270"
+    y="80"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', sans-serif"
+    font-size="15"
+    font-weight="500"
+    fill="#5d605a"
+    letter-spacing="0.2"
+  >
+    Drag Gistlist to Applications to install
+  </text>
+
+  <!-- Left icon well — empty; Finder draws the actual Gistlist.app icon
+       here per `dmg.contents[0]` in package.json. The well is a subtle
+       tinted disc that anchors the spot when no icon is rendered. -->
+  <circle cx="140" cy="200" r="58" fill="url(#well)" />
+
+  <!-- Arrow → -->
+  <g stroke="#9da19a" stroke-width="3" stroke-linecap="round" fill="none">
+    <line x1="225" y1="200" x2="305" y2="200" />
+    <polyline points="295,188 310,200 295,212" stroke-linejoin="round" />
+  </g>
+
+  <!-- Right icon well — Finder draws the /Applications alias here on top
+       of the baked folder glyph. When the alias's runtime icon is
+       invisible (dark mode regression), the baked glyph below remains
+       visible so the user still sees a folder to drop onto. -->
+  <circle cx="400" cy="200" r="58" fill="url(#well)" />
+  <use href="#apps-folder" x="350" y="150" width="100" height="100" />
+
+  <!-- Helper labels under each icon position, faintly so they don't
+       compete with the Finder-rendered alias label. -->
+  <text
+    x="140"
+    y="290"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
+    font-size="12"
+    fill="#7a7d76"
+  >
+    Gistlist
+  </text>
+  <text
+    x="400"
+    y="290"
+    text-anchor="middle"
+    font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif"
+    font-size="12"
+    fill="#7a7d76"
+  >
+    Applications
+  </text>
+</svg>

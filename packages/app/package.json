@@ -9,8 +9,9 @@
   "scripts": {
     "rebuild:native": "electron-rebuild -f -w better-sqlite3 && npm run patch:audiotee",
     "build": "npm run build:main && npm run build:preload && npm run build:renderer && npm run build:assets && npm run build:mic-capture",
-    "build:assets": "npm run build:icons && node -e \"require('fs').cpSync('assets','dist/assets',{recursive:true});\"",
+    "build:assets": "npm run build:icons && npm run build:dmg-bg && node -e \"require('fs').cpSync('assets','dist/assets',{recursive:true});\"",
     "build:icons": "/usr/bin/python3 scripts/generate-icons.py",
+    "build:dmg-bg": "node scripts/build-dmg-background.mjs",
     "build:main": "node scripts/write-build-flags.mjs && tsc -p tsconfig.main.json",
     "build:mic-capture": "node scripts/build-mic-capture.mjs",
     "build:preload": "tsc -p tsconfig.preload.json && node -e \"require('fs').writeFileSync('dist/preload/package.json','{\\\"type\\\":\\\"commonjs\\\"}\\n')\"",
@@ -88,6 +89,7 @@
     "electron": "41.2.0",
     "electron-builder": "^25.0.0",
     "postcss": "^8.5.9",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.8.0",
     "vite": "^6.0.3",
@@ -136,6 +138,15 @@
       "provider": "github",
       "owner": "gitsoecode",
       "repo": "meeting-notes"
+    },
+    "dmg": {
+      "background": "build/dmg-background.png",
+      "iconSize": 96,
+      "window": { "width": 540, "height": 380 },
+      "contents": [
+        { "x": 140, "y": 200, "type": "file" },
+        { "x": 400, "y": 200, "type": "link", "path": "/Applications" }
+      ]
     },
     "mac": {
       "icon": "assets/app-icon.icns",
