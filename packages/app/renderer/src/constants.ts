@@ -15,19 +15,24 @@ export {
  * list — the wizard's auto-select uses this on first run.
  */
 export function recommendLocalModel(ramGb: number | undefined): string {
-  if (!ramGb || ramGb < 8) return "qwen3.5:2b";
-  return "gemma4:e4b";
+  if (!ramGb || ramGb < 8) return "qwen3.5:0.8b";
+  if (ramGb < 16) return "qwen3.5:2b";
+  if (ramGb < 24) return "qwen3.5:4b";
+  return "qwen3.5:9b";
 }
 
 /**
  * Models to flag with the "recommended" pill in the wizard's local-model
- * picker. Returns multiple ids per tier so the user can see both a Gemma and
- * a Qwen option highlighted on capable machines.
+ * picker. Returns multiple ids per tier so the user sees a couple of
+ * sensible options for their machine. Defaults are biased toward smaller
+ * models — heavier picks (Gemma 4) only show up at 24 GB+, where they
+ * have real RAM headroom after macOS + the app.
  */
 export function recommendedLocalModelIds(ramGb: number | undefined): string[] {
-  if (!ramGb || ramGb < 8) return ["qwen3.5:2b"];
-  if (ramGb < 16) return ["gemma4:e4b", "qwen3.5:4b"];
-  return ["gemma4:e4b", "qwen3.5:9b"];
+  if (!ramGb || ramGb < 8) return ["qwen3.5:0.8b", "phi3:latest"];
+  if (ramGb < 16) return ["qwen3.5:2b", "phi3:latest"];
+  if (ramGb < 24) return ["qwen3.5:4b", "llama3.1:8b"];
+  return ["qwen3.5:9b", "gemma4:e4b"];
 }
 
 /** Format an ISO date as a relative label like "Today" / "Yesterday" / "3d ago". */

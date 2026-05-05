@@ -13,7 +13,12 @@ import type {
   UpdaterStatus,
   UpdaterPreferences,
 } from "../../../shared/ipc";
-import { classifyModelClient, findModelEntry } from "../constants";
+import {
+  classifyModelClient,
+  findModelEntry,
+  localModelIdsMatch,
+  recommendLocalModel,
+} from "../constants";
 import { PageIntro, PageScaffold } from "../components/PageScaffold";
 import { ModelDropdown } from "../components/ModelDropdown";
 import { LocalModelInstaller } from "../components/LocalModelInstaller";
@@ -78,14 +83,19 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
   const [confirmingAction, setConfirmingAction] = useState(false);
   const [installingFfmpeg, setInstallingFfmpeg] = useState(false);
   const [appleSilicon, setAppleSilicon] = useState<boolean | null>(null);
+  const [totalRamGb, setTotalRamGb] = useState<number | undefined>(undefined);
 
   const apiKeysRef = useRef<HTMLElement>(null);
 
-  const refreshInstalledLocal = () => {
-    api.llm
-      .listInstalled()
-      .then(setInstalledLocal)
-      .catch(() => setInstalledLocal([]));
+  const refreshInstalledLocal = async (): Promise<string[]> => {
+    try {
+      const list = await api.llm.listInstalled();
+      setInstalledLocal(list);
+      return list;
+    } catch {
+      setInstalledLocal([]);
+      return [];
+    }
   };
 
   const refreshDeps = () => {
@@ -98,8 +108,14 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
     api.secrets.has("openai").then(setHasOpenai).catch(() => {});
     api.system
       .detectHardware()
-      .then((h) => setAppleSilicon(h.appleSilicon))
-      .catch(() => setAppleSilicon(null));
+      .then((h) => {
+        setAppleSilicon(h.appleSilicon);
+        setTotalRamGb(h.totalRamGb);
+      })
+      .catch(() => {
+        setAppleSilicon(null);
+        setTotalRamGb(undefined);
+      });
     refreshDeps();
     refreshInstalledLocal();
   }, []);
@@ -735,7 +751,27 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
                     action: async () => {
                       try {
                         await api.llm.remove(model);
-                        refreshInstalledLocal();
+                        const remaining = await refreshInstalledLocal();
+                        // If the removed model was the configured default,
+                        // the dropdown's `installed-only` mode would render
+                        // it as an empty selection. Heal by promoting the
+                        // first surviving installed chat model, or falling
+                        // back to a RAM-tier recommendation if nothing's
+                        // left.
+                        if (
+                          config.llm_provider === "ollama" &&
+                          localModelIdsMatch(config.ollama.model, model)
+                        ) {
+                          const remainingChat = remaining.filter(
+                            (id) => !/embed/i.test(id)
+                          );
+                          const fallback =
+                            remainingChat[0] ?? recommendLocalModel(totalRamGb);
+                          await save({
+                            ...config,
+                            ollama: { ...config.ollama, model: fallback },
+                          });
+                        }
                       } catch (err) {
                         setError(err instanceof Error ? err.message : String(err));
                       }

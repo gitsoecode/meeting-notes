@@ -112,6 +112,7 @@ export async function installMockApi(page: Page) {
     // download row.
     let installEmbedModelCallCount = 0;
     const installedLocalModels = ["qwen3.5:9b"];
+    let totalRamGb = 32;
     const jobs = [
       {
         id: "job-1",
@@ -602,6 +603,7 @@ export async function installMockApi(page: Page) {
       nextRunCounter,
       nextJobCounter,
       installedLocalModels: clone(installedLocalModels),
+      totalRamGb,
       jobs: clone(jobs),
       appLogEntries: clone(appLogEntries),
       processes: clone(processes),
@@ -634,6 +636,7 @@ export async function installMockApi(page: Page) {
         nextRunCounter = parsed.nextRunCounter ?? nextRunCounter;
         nextJobCounter = parsed.nextJobCounter ?? nextJobCounter;
         hydrateArray(installedLocalModels, parsed.installedLocalModels ?? installedLocalModels);
+        if (typeof parsed.totalRamGb === "number") totalRamGb = parsed.totalRamGb;
         hydrateArray(jobs, parsed.jobs ?? jobs);
         hydrateArray(appLogEntries, parsed.appLogEntries ?? appLogEntries);
         hydrateArray(processes, parsed.processes ?? processes);
@@ -1123,6 +1126,15 @@ export async function installMockApi(page: Page) {
       setInstalledLocalModels(models) {
         installedLocalModels.length = 0;
         for (const m of models) installedLocalModels.push(m);
+      },
+      /**
+       * Test helper: override the value returned by `system:detect-hardware`
+       * for `totalRamGb`. Used by the wizard's RAM-tier recommendation
+       * specs to drive `recommendLocalModel` through each tier (4 / 8 /
+       * 16 / 32) without launching multiple Electron hosts.
+       */
+      setTotalRamGb(gb) {
+        totalRamGb = Math.max(0, Number(gb) || 0);
       },
       /**
        * Test helper: artificially delay every install IPC (deps.install,
@@ -2087,7 +2099,7 @@ export async function installMockApi(page: Page) {
           return {
             arch: "arm64",
             platform: "darwin",
-            totalRamGb: 32,
+            totalRamGb,
             chip: "Apple M3 Pro",
             appleSilicon: true,
           };

@@ -142,6 +142,51 @@ test.describe("Settings", () => {
     await expect(page.getByRole("button", { name: "Remove" })).toHaveCount(0);
   });
 
+  test("removing the configured default reconciles to the surviving model", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    // Default fixture has qwen3.5:9b as the configured default and the
+    // only installed chat model. Add a second installed model, then
+    // remove the configured default and assert the dropdown follows the
+    // survivor instead of stranding on the removed id (the bug this
+    // test guards against). The Settings component fetches the
+    // installed list on mount, so re-navigate to force a remount after
+    // mutating the harness state.
+    await page.evaluate(() => {
+      (window as any).__MEETING_NOTES_TEST.setInstalledLocalModels([
+        "qwen3.5:9b",
+        "qwen3.5:2b",
+      ]);
+    });
+    await app.navigateTo("Home");
+    await app.navigateTo("Settings");
+
+    await settings.openTab("Models");
+    await expect(settings.defaultModelCombobox()).toContainText("qwen3.5:9b");
+
+    // Both models render in the Installed list; the page object's
+    // `modelRemoveButton(name)` filters by descendant text, which double-
+    // matches the wrapper container with two children. Pick the row by
+    // its exact label and click its Remove button directly.
+    await page
+      .locator("div", {
+        has: page.getByText("qwen3.5:9b", { exact: true }),
+      })
+      .filter({ hasNot: page.getByText("qwen3.5:2b", { exact: true }) })
+      .getByRole("button", { name: "Remove" })
+      .first()
+      .click();
+    await settings.removeModelConfirmButton().click();
+
+    await expect(settings.defaultModelCombobox()).toContainText("qwen3.5:2b");
+    const persisted = await page.evaluate(() =>
+      (window as any).api.config.get()
+    );
+    expect(persisted.ollama.model).toBe("qwen3.5:2b");
+  });
+
   test("dependencies card shows all rows", async ({ settings, page }) => {
     await settings.openTab("Other");
     await expect(page.getByText("ffmpeg", { exact: true })).toBeVisible();

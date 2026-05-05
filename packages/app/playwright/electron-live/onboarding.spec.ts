@@ -120,7 +120,7 @@ async function backToStart() {
   }
 }
 
-test("1. wizard renders all five steps without crashing (Ollama path)", async () => {
+test("1. wizard renders all six steps without crashing (Ollama path)", async () => {
   await expectNoRendererErrors();
 
   // Step 0: Welcome
@@ -171,10 +171,29 @@ test("1. wizard renders all five steps without crashing (Ollama path)", async ()
 
   await window.getByRole("button", { name: "Next" }).click();
 
-  // Step 4: Dependencies — must render (this is where the crash lived).
+  // Step 4: Permissions — sits between Providers and Dependencies in the
+  // current consent-first layout. The spec doesn't exercise the OS prompt
+  // (live mic permission would either prompt or be sticky from a prior
+  // run, neither of which we want to depend on here); just walk past it.
   await expect(
-    window.getByRole("heading", { name: "Dependencies" }),
+    window.getByRole("heading", { name: "Permissions" }),
   ).toBeVisible({ timeout: 15_000 });
+  const grantMic = window.getByRole("button", {
+    name: /grant microphone access/i,
+  });
+  if (await grantMic.isVisible().catch(() => false)) {
+    await grantMic.click();
+  }
+  await window.getByRole("button", { name: "Next" }).click();
+
+  // Step 5: Dependencies — must render (this is where the crash lived).
+  // The step's section heading is "Setting up Gistlist"; the rendered
+  // dep rows (ffmpeg, parakeet, ollama, etc.) are the real signal that
+  // the step actually mounted.
+  await expect(
+    window.getByRole("heading", { name: /Setting up Gistlist/i }),
+  ).toBeVisible({ timeout: 15_000 });
+  await expect(window.getByText(/ffmpeg\s*\+\s*ffprobe/i)).toBeVisible();
 
   await expectNoRendererErrors();
 
@@ -200,7 +219,12 @@ test("2. Claude path hides the local-model picker and accepts a fake key", async
     window.getByRole("heading", { name: "Transcription & Summarization" }),
   ).toBeVisible();
 
-  // Default LLM provider is Claude. Local-model picker must not render.
+  // The wizard now defaults to Local (Ollama) summarization, so the
+  // local-model picker is initially visible. Switch the LLM provider to
+  // Anthropic Claude and confirm the picker disappears.
+  const llmProvider = window.getByRole("combobox").nth(1);
+  await llmProvider.click();
+  await window.getByRole("option", { name: /Anthropic Claude/ }).click();
   await expect(window.getByTestId("local-llm-picker")).toHaveCount(0);
 
   // Anthropic key field is required to advance.

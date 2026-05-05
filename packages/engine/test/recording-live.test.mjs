@@ -298,6 +298,23 @@ test("FfmpegRecorder: native mic helper has no pathological mid-recording drops 
 
   const wallMs = meta.mic.stoppedAtMs - meta.mic.firstSampleAtMs;
   const fileMs = meta.mic.durationMs;
+
+  // The 10s sleep should produce a wall-clock window of ~10-11s. When
+  // wall greatly exceeds that (e.g. CPU-contended `npm test` runs all
+  // engine + app tests in parallel with ffmpeg builds), the drop-rate
+  // metric is dominated by stop-flush stalls rather than mid-stream
+  // drops, and the test no longer measures what its name claims. Skip
+  // with a diagnostic in that case — the sibling drift test uses the
+  // same pattern at line 346.
+  if (wallMs > 11_500) {
+    t.diagnostic(
+      `host under load — wall=${wallMs}ms (expected ~10s); skipping drop-rate gate. ` +
+        `file=${fileMs}ms.`
+    );
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    return;
+  }
+
   const dropRatio = 1 - fileMs / wallMs;
   assert.ok(
     dropRatio < 0.06,

@@ -137,7 +137,7 @@ test.describe("Setup Wizard", () => {
     // RAM probe and Ollama's installed-models probe before locking in a
     // default. The mock has qwen3.5:9b installed, so "installed wins"
     // should pick it. If either probe is skipped on initial mount, the
-    // wizard freezes in recommendLocalModel(undefined) = qwen3.5:2b.
+    // wizard freezes in recommendLocalModel(undefined) = qwen3.5:0.8b.
     await expect(wizard.localModelSelect()).toContainText("qwen3.5:9b");
 
     // Switch summarization to Anthropic Claude — Next must now be disabled
@@ -154,6 +154,57 @@ test.describe("Setup Wizard", () => {
       fullPage: true,
     });
   });
+
+  // RAM-tier recommendation matrix. The wizard auto-selects via
+  // `recommendLocalModel(totalRamGb)` when no chat models are installed,
+  // so each case clears the installed-models list and pins a different
+  // RAM value. Each row also asserts the dropdown's per-option labels:
+  // the expected default shows the "recommended" pill, and gemma4:e4b
+  // is gated by a "needs 24 GB RAM" warning everywhere except the top
+  // tier where it joins the co-recommendation set.
+  for (const { ramGb, expected, gemmaState } of [
+    { ramGb: 4, expected: "qwen3.5:0.8b", gemmaState: "warned" as const },
+    { ramGb: 8, expected: "qwen3.5:2b", gemmaState: "warned" as const },
+    { ramGb: 16, expected: "qwen3.5:4b", gemmaState: "warned" as const },
+    { ramGb: 32, expected: "qwen3.5:9b", gemmaState: "recommended" as const },
+  ]) {
+    test(`Recommended local model for ${ramGb} GB RAM is ${expected}`, async ({
+      wizard,
+      page,
+    }) => {
+      await page.evaluate((gb) => {
+        const harness = (window as any).__MEETING_NOTES_TEST;
+        harness.setInstalledLocalModels([]);
+        harness.setTotalRamGb(gb);
+      }, ramGb);
+
+      await wizard.getStartedButton().click();
+      await wizard.nextButton().click(); // data dir
+      await wizard.nextButton().click(); // providers
+
+      // Auto-select picks the RAM-appropriate default.
+      await expect(wizard.localModelSelect()).toContainText(expected, {
+        timeout: 3000,
+      });
+
+      // Open the picker and inspect per-option labels for the
+      // recommended pill and the gemma RAM warning.
+      await wizard.localModelSelect().click();
+      const expectedOption = page.getByRole("option", { name: expected });
+      await expect(expectedOption).toContainText("recommended");
+
+      const gemmaOption = page.getByRole("option", { name: /gemma4:e4b/ });
+      if (gemmaState === "recommended") {
+        await expect(gemmaOption).toContainText("recommended");
+        await expect(gemmaOption).not.toContainText(/needs \d+ GB RAM/);
+      } else {
+        await expect(gemmaOption).toContainText("needs 24 GB RAM");
+        await expect(gemmaOption).not.toContainText(" · recommended");
+      }
+
+      await page.keyboard.press("Escape");
+    });
+  }
 
   test("dependencies step never mentions Homebrew or Terminal", async ({
     wizard,

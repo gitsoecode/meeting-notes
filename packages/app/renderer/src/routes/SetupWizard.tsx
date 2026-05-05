@@ -326,7 +326,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
     // Wait for both step-3 fetches before locking in a default. With
     // ollama as the first-run provider this effect runs on initial mount
     // (hardware=null, models not yet probed). Picking now would freeze in
-    // recommendLocalModel(undefined)=qwen3.5:2b, and the truthy guard
+    // recommendLocalModel(undefined)=qwen3.5:0.8b, and the truthy guard
     // above blocks any later correction. Even after step 3 fires,
     // hardware (a fast process-info IPC) typically resolves before
     // Ollama's HTTP probe, so we also need to wait for the model list
