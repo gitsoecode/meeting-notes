@@ -34,7 +34,14 @@ export class MeetingsListPage {
   }
 
   meetingRow(title: string) {
-    return this.main.locator("tbody tr").filter({ hasText: new RegExp(title, "i") }).first();
+    // Desktop renders rows in <tbody>; narrow viewports render mobile cards
+    // (the desktop table is hidden via `hidden md:flex`). Match either so
+    // page-object callers don't need to branch on viewport width.
+    return this.main
+      .locator('tbody tr, [data-testid="mobile-meeting-card"]')
+      .filter({ hasText: new RegExp(title, "i") })
+      .filter({ visible: true })
+      .first();
   }
 
   checkboxes() {
@@ -85,7 +92,15 @@ export class MeetingsListPage {
   async waitForReady() {
     await this.heading().waitFor();
     await this.searchInput().waitFor();
-    await this.main.locator("table").waitFor();
+    // Wait for whichever rendering applies at the current viewport — desktop
+    // table on md+, mobile cards below md. The desktop table is always
+    // attached to the DOM (just `display: none` at narrow widths), so we
+    // filter to the visible match before picking first.
+    await this.main
+      .locator('table, [data-testid="mobile-meeting-card"]')
+      .filter({ visible: true })
+      .first()
+      .waitFor();
   }
 
   // Column header row — the grid structure

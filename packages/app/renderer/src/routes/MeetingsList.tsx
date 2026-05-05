@@ -3,7 +3,6 @@ import { FileUp, PlayCircle, Trash2 } from "lucide-react";
 import { api } from "../ipc-client";
 import type { BulkReprocessResult, JobSummary, PromptRow, RunSummary } from "../../../shared/ipc";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { PageScaffold } from "../components/PageScaffold";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -180,8 +179,8 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
   };
 
   return (
-    <PageScaffold
-      className="gap-4 md:gap-5"
+    <div
+      className="@container/main flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4 md:gap-5 md:p-6"
       onDragOver={(event) => {
         if (importing || event.dataTransfer.files.length === 0) return;
         event.preventDefault();
@@ -251,9 +250,14 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
         </div>
       ) : (
         <>
-          <div className="overflow-hidden rounded-lg border border-[var(--border-default)] bg-white shadow-sm">
-            <Table>
-              <TableHeader>
+          <div className="hidden min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-[var(--border-default)] bg-white shadow-sm md:flex">
+            <div
+              className="min-h-0 flex-1 overflow-y-auto"
+              style={{ scrollbarGutter: "stable" }}
+              data-testid="meetings-list-scroll"
+            >
+            <Table containerClassName="overflow-visible">
+              <TableHeader className="sticky top-0 z-10 bg-[var(--bg-secondary)]">
                 <TableRow className="bg-[var(--bg-secondary)] hover:bg-[var(--bg-secondary)]">
                   <TableHead className="w-10">
                     <Checkbox
@@ -346,10 +350,11 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </div>
 
           {/* Mobile cards */}
-          <div className="space-y-2 md:hidden">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto md:hidden">
             {filteredRuns.map((run) => (
               (() => {
                 const activeJob = activeJobsByRunFolder.get(run.folder_path);
@@ -357,6 +362,7 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
                   <button
                     key={run.folder_path}
                     type="button"
+                    data-testid="mobile-meeting-card"
                     onClick={() => onOpen(run.folder_path)}
                     className="w-full rounded-lg border border-[var(--border-default)] bg-white p-3 text-left shadow-sm"
                   >
@@ -433,7 +439,7 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
           }}
         />
       ) : null}
-    </PageScaffold>
+    </div>
   );
 }
 

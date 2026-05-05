@@ -125,3 +125,75 @@ test.describe("Meetings List", () => {
     });
   });
 });
+
+// Regression: in a short viewport, rows below the fold must be reachable by
+// scrolling inside the table card. Existing specs run at the default viewport
+// and would not catch a regression where the card clips overflow rows. The
+// fix relies on the card claiming `flex-1 min-h-0` and hosting an internal
+// `overflow-y-auto` scroll region with a sticky `<thead>`.
+test.describe("Meetings List — short viewport scroll", () => {
+  test("last meeting is reachable via in-card scroll, header stays sticky", async ({
+    app,
+    page,
+    meetingsList,
+  }) => {
+    // Synthesize many meetings so the table comfortably overflows a 500px
+    // viewport. Bootstrap is on Home, so MeetingsList hasn't mounted yet —
+    // override runs.list before navigating so the list mounts with our seed.
+    const manyRuns = Array.from({ length: 30 }, (_, i) => {
+      const n = i + 1;
+      const id = String(n).padStart(2, "0");
+      return {
+        run_id: `bulk-run-${id}`,
+        title: `Bulk meeting ${id}`,
+        description: `Synthetic row ${n}`,
+        date: "2026-04-01",
+        started: "2026-04-01T15:00:00.000Z",
+        ended: "2026-04-01T15:30:00.000Z",
+        updated_at: `2026-04-${(n % 28 + 1).toString().padStart(2, "0")}T12:00:00.000Z`,
+        status: "complete",
+        source_mode: "both",
+        duration_minutes: 30,
+        tags: [],
+        folder_path: `/runs/bulk-${id}`,
+        prompt_output_ids: [],
+        folder_size_bytes: 1_000_000,
+      };
+    });
+
+    await page.evaluate((runs) => {
+      // Override the mock-api's runs.list so MeetingsList loads our seed.
+      const api = (window as unknown as { api: { runs: { list: () => Promise<unknown> } } }).api;
+      api.runs.list = async () => runs;
+    }, manyRuns);
+
+    // Force a short viewport before MeetingsList mounts so the table card
+    // is constrained from the start.
+    await page.setViewportSize({ width: 1200, height: 500 });
+
+    await app.navigateTo("Meetings");
+    await meetingsList.waitForReady();
+
+    const firstRow = meetingsList.meetingRow("Bulk meeting 01");
+    const lastRow = meetingsList.meetingRow("Bulk meeting 30");
+
+    // Precondition: first row is visible, last row is in the DOM but below
+    // the visible area. If the card silently clipped overflow (the bug),
+    // the last row would still be attached to the DOM but unreachable.
+    await expect(firstRow).toBeVisible();
+    await expect(lastRow).toBeAttached();
+    await expect(lastRow).not.toBeInViewport();
+
+    // The fix: the card hosts an inner scroll region. scrollIntoViewIfNeeded
+    // will only succeed if a real scrollable ancestor exists.
+    await lastRow.scrollIntoViewIfNeeded();
+    await expect(lastRow).toBeInViewport();
+
+    // Sticky header proof: the "Meeting" column label should still be in
+    // viewport after scrolling rows beneath it.
+    const meetingHeader = page
+      .getByRole("columnheader", { name: "Meeting" })
+      .first();
+    await expect(meetingHeader).toBeInViewport();
+  });
+});
