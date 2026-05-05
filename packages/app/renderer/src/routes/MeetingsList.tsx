@@ -214,19 +214,34 @@ export function MeetingsList({ onOpen, onOpenPrep }: MeetingsListProps) {
           className="w-full sm:max-w-sm"
         />
         <span className="text-xs text-[var(--text-tertiary)]">{runs.length} meetings</span>
-        <div className="ml-auto flex flex-wrap items-center gap-2">
-          {selected.size > 0 ? (
-            <>
-              <Button variant="destructive" onClick={() => setConfirmBulkDelete(true)} disabled={bulkDeleting}>
-                <Trash2 className="h-4 w-4" />
-                Delete {selected.size}
-              </Button>
-              <Button onClick={() => setBulkOpen(true)}>
-                <PlayCircle className="h-4 w-4" />
-                Run prompt on {selected.size}
-              </Button>
-            </>
-          ) : null}
+        {/* Always render bulk-action buttons so the toolbar height stays
+            constant between selected/unselected — the card below would
+            otherwise nudge down when the buttons appear. `invisible` keeps
+            their layout footprint and hides them visually; `disabled` +
+            `tabIndex={-1}` keeps them uninteractive and out of the tab order. */}
+        <div
+          className="ml-auto flex flex-wrap items-center gap-2"
+          aria-hidden={selected.size === 0}
+        >
+          <Button
+            variant="destructive"
+            onClick={() => setConfirmBulkDelete(true)}
+            disabled={bulkDeleting || selected.size === 0}
+            tabIndex={selected.size === 0 ? -1 : 0}
+            className={selected.size === 0 ? "invisible" : undefined}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete {selected.size || ""}
+          </Button>
+          <Button
+            onClick={() => setBulkOpen(true)}
+            disabled={selected.size === 0}
+            tabIndex={selected.size === 0 ? -1 : 0}
+            className={selected.size === 0 ? "invisible" : undefined}
+          >
+            <PlayCircle className="h-4 w-4" />
+            Run prompt on {selected.size || ""}
+          </Button>
         </div>
       </div>
 
