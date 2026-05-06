@@ -233,6 +233,7 @@ program
 
     const config: AppConfig = {
       data_path: dataPath,
+      user_name: DEFAULT_CONFIG.user_name,
       obsidian_integration: {
         enabled: obsidianEnabled,
         vault_name: obsidianVaultName,
@@ -620,6 +621,7 @@ program
         date: manifest.date,
         meExcerpts: "",
         othersExcerpts: "",
+        userName: config.user_name,
       },
       (sys, usr) => claude.call(sys, usr),
       logger,
@@ -814,7 +816,7 @@ prompts
     const body = `Describe what this prompt should produce.
 
 You have access to the transcript and any manual notes from the meeting.
-Available variables: {{title}}, {{date}}, {{transcript}}, {{notes}}, {{me_excerpts}}, {{others_excerpts}}.
+Available variables: {{title}}, {{date}}, {{transcript}}, {{notes}}, {{me_excerpts}}, {{others_excerpts}}, {{prep_notes}}, {{attachment_context}}, {{user_name}}.
 `;
     const frontmatter = {
       id,
@@ -949,6 +951,7 @@ prompts
         date: manifest.date,
         meExcerpts: "",
         othersExcerpts: "",
+        userName: config.user_name,
       },
       (sys, usr) => claude.call(sys, usr),
       logger,

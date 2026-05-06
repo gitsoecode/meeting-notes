@@ -670,6 +670,12 @@ export interface LaunchChatResult {
 
 export interface AppConfigDTO {
   data_path: string;
+  /**
+   * Display name used to personalize prompt templates via `{{user_name}}`.
+   * Free-form text — typically a first name. Empty string falls back to
+   * "the user" at render time.
+   */
+  user_name: string;
   obsidian_integration: {
     enabled: boolean;
     vault_name?: string;
@@ -719,6 +725,12 @@ export interface AppConfigDTO {
 
 export interface InitConfigRequest {
   data_path: string;
+  /**
+   * Display name from the wizard's "Your name" step. Optional — when
+   * omitted, the IPC handler must NOT clobber an existing value (this
+   * avoids a wizard-rerun erasing a previously-set name).
+   */
+  user_name?: string;
   obsidian_integration: {
     enabled: boolean;
     vault_name?: string;

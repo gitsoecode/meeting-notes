@@ -53,6 +53,7 @@ export async function installMockApi(page: Page) {
 
     const config = {
       data_path: "/Users/test/Gistlist",
+      user_name: "",
       obsidian_integration: {
         enabled: false,
       },
@@ -216,6 +217,14 @@ export async function installMockApi(page: Page) {
       },
     ];
 
+    // The `body` strings below are intentionally synthetic stand-ins —
+    // decoupled from the real shipped defaults at
+    // `packages/engine/src/defaults/prompts/*.md`. Tests assert presence
+    // and ordering of prompts, not exact prompt content, so keeping
+    // these short keeps the mock readable. If you need to assert that
+    // the real default contains `{{user_name}}` or a specific phrase,
+    // add a unit test that reads the shipped file directly instead of
+    // bloating these fixtures.
     const defaultPrompts = [
       {
         id: "summary",
@@ -229,7 +238,7 @@ export async function installMockApi(page: Page) {
         model: null,
         temperature: null,
         source_path: "/Users/test/.gistlist/prompts/summary.md",
-        body: "Produce a concise summary and action items.",
+        body: "Produce a concise summary and action items for {{user_name}}.",
       },
       {
         id: "one-on-one-follow-up",
@@ -1211,6 +1220,13 @@ export async function installMockApi(page: Page) {
           // see ipc.ts config:init handler — otherwise tests catch mock
           // bugs instead of production regressions.
           config.data_path = req.data_path;
+          // Preserve any existing user_name when the wizard rerun omits the
+          // field — mirrors the real IPC handler's non-clobber semantics
+          // (see ipc.ts config:init). Without this, a wizard rerun without
+          // touching the name step would erase a previously-set value.
+          if (req.user_name !== undefined) {
+            config.user_name = req.user_name.trim();
+          }
           config.obsidian_integration = clone(req.obsidian_integration);
           config.asr_provider = req.asr_provider;
           if (req.llm_provider) config.llm_provider = req.llm_provider;
@@ -1929,7 +1945,10 @@ export async function installMockApi(page: Page) {
         async resetToDefault(id) {
           const prompt = prompts.find((item) => item.id === id);
           if (prompt) {
-            prompt.body = "Produce a concise summary and action items.";
+            // Synthetic stand-in — see comment on `defaultPrompts`. The
+            // real reset reads the shipped `summary.md` from the engine
+            // package; tests just need a stable string to assert against.
+            prompt.body = "Produce a concise summary and action items for {{user_name}}.";
             persistPromptState();
           }
         },

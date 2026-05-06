@@ -227,6 +227,11 @@ test("prompt-file.png", async ({ browser }) => {
 
   // Left pane: summary.md rendered as a raw source file (YAML frontmatter + prompt body),
   // styled to match the Gistlist app's light theme. A single tab row shows the filename.
+  // Note: this is a marketing-only synthetic fixture — intentionally short and
+  // visually clean for the screenshot, not a verbatim copy of the shipped
+  // `packages/engine/src/defaults/prompts/summary.md`. If the real default
+  // grows or changes, do not chase parity here unless the screenshot needs
+  // to demonstrate a specific feature (template variables, etc.).
   const summaryMdSource = `---\nid: summary\nlabel: Summary & Action Items\nfilename: summary.md\nenabled: true\nauto: true\n---\n\nYou are a meeting analyst. Given the transcript and any manual notes\nfrom this meeting, produce two sections.\n\n## Summary\nA concise summary covering:\n- Key topics discussed\n- Decisions made\n- Important context or background\n\n## Action Items\nExtract all action items as a checklist. For each item include:\n- What needs to be done\n- Who is responsible (if mentioned)\n- Deadline (if mentioned)\n\nFormat the entire response as clean markdown.\n`;
   const leftHtml = `<!doctype html>
 <html><head><meta charset="utf-8"/>

@@ -28,6 +28,24 @@ export class SetupWizardPage {
     return this.page.getByRole("heading", { name: "Welcome to Gistlist" });
   }
 
+  nameHeading() {
+    return this.page.getByRole("heading", { name: "What should we call you?" });
+  }
+
+  userNameInput() {
+    return this.page.getByTestId("wizard-user-name-input");
+  }
+
+  /**
+   * Optional NAME step (added in the user-name personalization change).
+   * Most specs that don't care about the field can call this with no
+   * argument to fill an empty value and click Next.
+   */
+  async fillNameAndAdvance(name: string = "") {
+    await this.userNameInput().fill(name);
+    await this.nextButton().click();
+  }
+
   obsidianHeading() {
     return this.page.getByRole("heading", { name: "Do you use Obsidian?" });
   }

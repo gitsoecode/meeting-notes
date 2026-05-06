@@ -76,6 +76,14 @@ export interface PipelineInput {
   prepNotes?: string;
   /** Text content extracted from attached documents, concatenated. */
   attachmentContext?: string;
+  /**
+   * Display name of the user being summarized for, sourced from
+   * `config.user_name`. Falls back to `"the user"` inside
+   * `renderPromptTemplate()` when empty/whitespace, so prompts that
+   * reference `{{user_name}}` still read naturally for first-run users
+   * who haven't filled in the wizard step.
+   */
+  userName?: string;
 }
 
 export interface PipelineResult {
@@ -446,6 +454,10 @@ export function renderPromptTemplate(template: string, input: PipelineInput): st
     others_excerpts: input.othersExcerpts,
     prep_notes: input.prepNotes ?? "",
     attachment_context: input.attachmentContext ?? "",
+    // 3rd-person fallback (not "you") because the prompt addresses the
+    // LLM in 2nd person — using "you" for the subject of summarization
+    // would collide with that frame.
+    user_name: input.userName?.trim() || "the user",
   };
 
   return template.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {

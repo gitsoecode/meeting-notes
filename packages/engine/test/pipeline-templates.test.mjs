@@ -49,6 +49,36 @@ test("renderPromptTemplate: handles empty optional fields", () => {
   assert.ok(rendered.includes("Prep:  Attach: "), "optional fields should render as empty strings");
 });
 
+test("renderPromptTemplate: substitutes user_name when set", () => {
+  const input = { ...baseInput, userName: "Jesse" };
+  const rendered = renderPromptTemplate("Hello {{user_name}}.", input);
+  assert.equal(rendered, "Hello Jesse.");
+});
+
+test("renderPromptTemplate: user_name falls back to 'the user' when empty", () => {
+  const blank = { ...baseInput, userName: "" };
+  const undef = { ...baseInput }; // userName not set
+  const whitespace = { ...baseInput, userName: "   " };
+  for (const [label, input] of [
+    ["empty string", blank],
+    ["undefined", undef],
+    ["whitespace", whitespace],
+  ]) {
+    const rendered = renderPromptTemplate("Hello {{user_name}}.", input);
+    assert.equal(
+      rendered,
+      "Hello the user.",
+      `expected fallback for ${label}, got: ${rendered}`
+    );
+  }
+});
+
+test("renderPromptTemplate: user_name trims surrounding whitespace", () => {
+  const input = { ...baseInput, userName: "  Jesse  " };
+  const rendered = renderPromptTemplate("Hello {{user_name}}.", input);
+  assert.equal(rendered, "Hello Jesse.");
+});
+
 test("renderPromptTemplate: handles template with no placeholders", () => {
   const rendered = renderPromptTemplate("Just plain text.", baseInput);
   assert.equal(rendered, "Just plain text.");

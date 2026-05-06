@@ -81,6 +81,13 @@ export interface AppConfig {
    * identical whether or not Obsidian is used as a viewer.
    */
   data_path: string;
+  /**
+   * Display name used to personalize prompt templates via `{{user_name}}`.
+   * Free-form text — typically a first name, but anything is allowed.
+   * Captured during onboarding; empty string falls back to "the user" at
+   * render time so prompts still read naturally when unset.
+   */
+  user_name: string;
   obsidian_integration: ObsidianIntegrationConfig;
   asr_provider: "whisper-local" | "openai" | "parakeet-mlx";
   /**
@@ -128,6 +135,7 @@ interface LegacyAppConfig {
 
 const DEFAULT_CONFIG: AppConfig = {
   data_path: path.join(os.homedir(), "Documents", "Gistlist"),
+  user_name: "",
   obsidian_integration: {
     enabled: false,
   },

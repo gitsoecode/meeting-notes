@@ -209,6 +209,7 @@ export async function reprocessRun(
         othersExcerpts,
         prepNotes,
         attachmentContext,
+        userName: config.user_name,
       },
       llmCall,
       logger,

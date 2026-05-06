@@ -109,13 +109,14 @@ function retentionFromConfig(days: number | null): {
 // and the underlying `step: number` state.
 const STEP = {
   WELCOME: 0,
-  STORAGE: 1,
-  RETENTION: 2,
-  PROVIDERS: 3,
-  PERMISSIONS: 4,
-  DEPS: 5,
+  NAME: 1,
+  STORAGE: 2,
+  RETENTION: 3,
+  PROVIDERS: 4,
+  PERMISSIONS: 5,
+  DEPS: 6,
 } as const;
-const TOTAL_STEPS = 6;
+const TOTAL_STEPS = 7;
 
 function hasInstalledLocalModel(
   installedLocalModels: readonly string[],
@@ -170,6 +171,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
   const [detectedVaults, setDetectedVaults] = useState<DetectedVault[]>([]);
 
   const [dataPath, setDataPath] = useState<string>(initialConfig?.data_path ?? "");
+  const [userName, setUserName] = useState<string>(initialConfig?.user_name ?? "");
   // Seed `dataPathTouched=true` when reopened so the auto-suggest effect
   // (which derives a default path from Obsidian/no-Obsidian) doesn't
   // overwrite the user's existing data_path.
@@ -819,6 +821,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
 
       const req: InitConfigRequest = {
         data_path: dataPath,
+        user_name: userName.trim(),
         obsidian_integration: {
           enabled: usesObsidian,
           vault_name: usesObsidian && vaultPath ? basename(vaultPath) : undefined,
@@ -903,7 +906,7 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             <WizardStep
               title="Welcome to Gistlist"
               description="A local-first desktop app for meeting notes. Record in the app or import an existing recording, and your transcript, summary, and custom outputs land in editable markdown on disk. Obsidian is optional. Let's get you set up."
-              footer={<Button onClick={() => setStep(STEP.STORAGE)}>Get started</Button>}
+              footer={<Button onClick={() => setStep(STEP.NAME)}>Get started</Button>}
             >
               <p
                 className="text-xs leading-5 text-[var(--text-tertiary)]"
@@ -932,13 +935,42 @@ export function SetupWizard({ onComplete, initialConfig, onCancel }: SetupWizard
             </WizardStep>
           )}
 
+          {step === STEP.NAME && (
+            <WizardStep
+              title="What should we call you?"
+              description='Used to personalize meeting summaries — your name is substituted into the default summary prompt where "{{user_name}}" appears, so the AI knows who is being summarized for. First name is fine; leave blank to use a generic "the user". You can change this any time in Settings.'
+              footer={
+                <WizardActions
+                  back={{ label: "Back", onClick: () => setStep(STEP.WELCOME) }}
+                  primary={{
+                    label: "Next",
+                    onClick: () => setStep(STEP.STORAGE),
+                  }}
+                />
+              }
+            >
+              <Field label="Your name" htmlFor="wizard-user-name">
+                <Input
+                  id="wizard-user-name"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder="Jesse"
+                  data-testid="wizard-user-name-input"
+                />
+              </Field>
+              <p className="text-xs leading-5 text-[var(--text-tertiary)]">
+                When a prompt runs on Claude or OpenAI, your name is sent as part of the prompt to that provider. With Ollama it stays on your machine.
+              </p>
+            </WizardStep>
+          )}
+
           {step === STEP.STORAGE && (
             <WizardStep
               title="Do you use Obsidian?"
               description="Obsidian is an optional viewer. The app works perfectly without it — it has its own markdown editor and browser. If you already use Obsidian, we can store meetings inside your vault so they show up alongside your other notes."
               footer={
                 <WizardActions
-                  back={{ label: "Back", onClick: () => setStep(STEP.WELCOME) }}
+                  back={{ label: "Back", onClick: () => setStep(STEP.NAME) }}
                   primary={{
                     label: "Next",
                     onClick: () => setStep(STEP.RETENTION),

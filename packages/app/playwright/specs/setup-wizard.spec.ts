@@ -5,14 +5,17 @@ test.describe("Setup Wizard", () => {
   test("full forward path without Obsidian", async ({ wizard, page }) => {
     await expect(wizard.welcomeHeading()).toBeVisible();
     // Phase 4 added a dedicated Permissions step between Providers and
-    // Dependencies — total step count is 6 now.
-    await expect(wizard.progressDots()).toHaveCount(6);
+    // Dependencies (6 steps); the user-name personalization change
+    // inserted an optional NAME step between WELCOME and STORAGE,
+    // bringing the total to 7.
+    await expect(wizard.progressDots()).toHaveCount(7);
     await page.screenshot({
       path: "test-results/screenshots/wizard-step0-welcome.png",
       fullPage: true,
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await expect(wizard.obsidianHeading()).toBeVisible();
     await page.screenshot({
       path: "test-results/screenshots/wizard-step1-obsidian.png",
@@ -67,6 +70,7 @@ test.describe("Setup Wizard", () => {
 
   test("forward path with Obsidian toggle", async ({ wizard }) => {
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await expect(wizard.obsidianHeading()).toBeVisible();
 
     await wizard.obsidianToggle().click();
@@ -86,6 +90,7 @@ test.describe("Setup Wizard", () => {
 
   test("pick buttons populate vault and data paths", async ({ wizard }) => {
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.obsidianToggle().click();
     await wizard.pickVaultButton().click();
     await expect(wizard.vaultPathInput()).toHaveValue("/Users/test/Documents");
@@ -97,6 +102,9 @@ test.describe("Setup Wizard", () => {
 
   test("back navigation works at each step", async ({ wizard }) => {
     await wizard.getStartedButton().click();
+    await expect(wizard.nameHeading()).toBeVisible();
+
+    await wizard.nextButton().click();
     await expect(wizard.obsidianHeading()).toBeVisible();
 
     await wizard.nextButton().click();
@@ -106,11 +114,15 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.obsidianHeading()).toBeVisible();
 
     await wizard.backButton().click();
+    await expect(wizard.nameHeading()).toBeVisible();
+
+    await wizard.backButton().click();
     await expect(wizard.welcomeHeading()).toBeVisible();
   });
 
   test("Next disabled when data path is empty", async ({ wizard }) => {
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await expect(wizard.dataDirHeading()).toBeVisible();
 
@@ -126,6 +138,7 @@ test.describe("Setup Wizard", () => {
     page,
   }) => {
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click(); // to data dir
     await wizard.nextButton().click(); // to transcription
 
@@ -179,6 +192,7 @@ test.describe("Setup Wizard", () => {
       }, ramGb);
 
       await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
       await wizard.nextButton().click(); // data dir
       await wizard.nextButton().click(); // providers
 
@@ -220,6 +234,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click(); // data dir
     await wizard.nextButton().click(); // transcription
     await wizard.llmProviderSelect().click();
@@ -260,6 +275,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click(); // step 1 → 2
     await wizard.nextButton().click(); // step 2 → 3
     await wizard.llmProviderSelect().click();
@@ -325,6 +341,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
@@ -367,6 +384,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     // OpenAI cloud ASR + Ollama LLM. Mock has Ollama daemon up + qwen3.5:9b
@@ -419,6 +437,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
@@ -455,6 +474,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     // Toggle semantic search OFF on the providers step.
@@ -490,6 +510,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     // Switch LLM to Claude — Ollama row should still appear because
@@ -534,6 +555,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click(); // Obsidian
     await wizard.nextButton().click(); // data dir
     // Default ASR = Parakeet, default LLM = Ollama, semantic search on.
@@ -574,6 +596,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     // Default ASR = Parakeet, LLM = Ollama (mock has qwen3.5:9b installed).
@@ -623,6 +646,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
@@ -672,6 +696,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     // Default ASR = Parakeet, default LLM = Ollama.
@@ -728,6 +753,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
@@ -762,6 +788,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
@@ -804,6 +831,7 @@ test.describe("Setup Wizard", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.nextButton().click();
@@ -839,12 +867,18 @@ test.describe("Setup Wizard", () => {
     await expect(wizard.activeDot()).toHaveCount(1);
     await expect(wizard.doneDots()).toHaveCount(0);
 
+    // WELCOME → NAME
     await wizard.getStartedButton().click();
     await expect(wizard.doneDots()).toHaveCount(1);
     await expect(wizard.activeDot()).toHaveCount(1);
 
+    // NAME → STORAGE
     await wizard.nextButton().click();
     await expect(wizard.doneDots()).toHaveCount(2);
+
+    // STORAGE → RETENTION
+    await wizard.nextButton().click();
+    await expect(wizard.doneDots()).toHaveCount(3);
   });
 });
 
@@ -871,6 +905,9 @@ appTest.describe("Setup Wizard — reopened from Settings", () => {
     await appExpect(page.getByTestId("wizard-cancel")).toBeVisible();
 
     await page.getByRole("button", { name: "Get started" }).click();
+    // Skip optional NAME step (rerun-from-Settings preserves existing
+    // user_name when wizard omits the field).
+    await page.getByRole("button", { name: "Next" }).click();
 
     // Step 1 — Obsidian (mock default: disabled). Switch should be off.
     await appExpect(page.locator("#wizard-use-obsidian")).not.toBeChecked();
@@ -894,10 +931,11 @@ appTest.describe("Setup Wizard — reopened from Settings", () => {
     await appExpect(page.getByText("Gistlist setup")).toBeVisible();
 
     // Click through every step to Finish. Mic field is never touched.
-    await page.getByRole("button", { name: "Get started" }).click(); // step 0
-    await page.getByRole("button", { name: "Next" }).click(); // step 1 (Obsidian)
-    await page.getByRole("button", { name: "Next" }).click(); // step 2 (data dir + retention)
-    await page.getByRole("button", { name: "Next" }).click(); // step 3 (providers)
+    await page.getByRole("button", { name: "Get started" }).click(); // step 0 (welcome)
+    await page.getByRole("button", { name: "Next" }).click(); // step 1 (name — optional, skip)
+    await page.getByRole("button", { name: "Next" }).click(); // step 2 (Obsidian)
+    await page.getByRole("button", { name: "Next" }).click(); // step 3 (data dir + retention)
+    await page.getByRole("button", { name: "Next" }).click(); // step 4 (providers)
     // Phase 4 added a Permissions step between providers and deps. The
     // rerun-from-Settings fixture inherits mic permission state from the
     // mocked config (default "not-determined"), so grant it and advance.
@@ -926,6 +964,56 @@ appTest.describe("Setup Wizard — reopened from Settings", () => {
     // Verify the saved config still has the original mic.
     const savedConfig = await page.evaluate(() => (window as any).api.config.get());
     appExpect(savedConfig.recording.mic_device).toBe("Built-in Mic");
+  });
+
+  appTest("rerun preserves an existing user_name when wizard submits an empty value", async ({
+    app,
+    settings,
+    page,
+  }) => {
+    // Regression guard: a wizard rerun where the user doesn't touch the
+    // NAME step must NOT erase a previously-set user_name. The NAME field
+    // is optional and the wizard pre-fills from existing config; if the
+    // IPC handler ever flips back to the naive `req.user_name?.trim() ??
+    // ""` pattern, this asserts the clobber.
+    // Seed the name through the Settings UI so the parent component's
+    // config state actually updates (a raw api.config.save would bypass
+    // React state propagation; the wizard receives initialConfig from
+    // App's state, which only refreshes on UI-driven saves).
+    await app.navigateTo("Settings");
+    await settings.openTab("Other");
+    const nameInput = page.getByTestId("settings-user-name");
+    await nameInput.fill("Existing Name");
+    await nameInput.blur();
+    // Wait for the save round-trip to land in the mock and propagate.
+    await appExpect.poll(async () =>
+      (await page.evaluate(() => (window as any).api.config.get())).user_name
+    ).toBe("Existing Name");
+
+    await page.getByTestId("settings-rerun-wizard").click();
+    await appExpect(page.getByText("Gistlist setup")).toBeVisible();
+
+    // Walk through every step without touching NAME — the input is
+    // pre-filled from the existing config, but the user just clicks Next.
+    await page.getByRole("button", { name: "Get started" }).click(); // WELCOME
+    // NAME — pre-filled, advance without modifying.
+    await appExpect(page.getByTestId("wizard-user-name-input")).toHaveValue("Existing Name");
+    await page.getByRole("button", { name: "Next" }).click();
+    await page.getByRole("button", { name: "Next" }).click(); // Obsidian
+    await page.getByRole("button", { name: "Next" }).click(); // data dir + retention
+    await page.getByRole("button", { name: "Next" }).click(); // providers
+    const grantMic = page.getByRole("button", { name: /grant microphone access/i });
+    if (await grantMic.isVisible().catch(() => false)) {
+      await grantMic.click();
+    }
+    await page.getByRole("button", { name: "Next" }).click(); // permissions → deps
+    await page.getByRole("button", { name: /finish setup/i }).click();
+
+    // Saved config still has the original name, not "".
+    const savedConfig = await page.evaluate(() =>
+      (window as any).api.config.get()
+    );
+    appExpect(savedConfig.user_name).toBe("Existing Name");
   });
 
   appTest("Cancel returns to Settings without writing config", async ({

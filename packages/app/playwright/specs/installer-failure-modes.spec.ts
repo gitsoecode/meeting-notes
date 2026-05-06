@@ -30,6 +30,7 @@ test.describe("Installer failure modes", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
@@ -73,6 +74,7 @@ test.describe("Installer failure modes", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
@@ -106,6 +108,7 @@ test.describe("Installer failure modes", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     await wizard.llmProviderSelect().click();
@@ -150,6 +153,7 @@ test.describe("Installer failure modes", () => {
     });
 
     await wizard.getStartedButton().click();
+    await wizard.nextButton().click(); // skip optional NAME step
     await wizard.nextButton().click();
     await wizard.nextButton().click();
     // Default ASR is parakeet-mlx; default LLM is Ollama. No keys needed.

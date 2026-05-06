@@ -112,15 +112,16 @@ async function expectNoRendererErrors() {
 
 async function backToStart() {
   // Click Back as many times as needed to return to the welcome step
-  // without finishing setup. Bounded to avoid infinite loops.
-  for (let i = 0; i < 6; i++) {
+  // without finishing setup. Bounded to avoid infinite loops; bound now
+  // accommodates the optional NAME step so 7 max clicks is safe.
+  for (let i = 0; i < 7; i++) {
     const back = window.getByRole("button", { name: "Back" });
     if ((await back.count()) === 0) break;
     await back.click();
   }
 }
 
-test("1. wizard renders all six steps without crashing (Ollama path)", async () => {
+test("1. wizard renders all seven steps without crashing (Ollama path)", async () => {
   await expectNoRendererErrors();
 
   // Step 0: Welcome
@@ -129,7 +130,13 @@ test("1. wizard renders all six steps without crashing (Ollama path)", async () 
   ).toBeVisible();
   await window.getByRole("button", { name: "Get started" }).click();
 
-  // Step 1: Obsidian (skip)
+  // Step 1: Name (optional, skip — empty falls back to "the user")
+  await expect(
+    window.getByRole("heading", { name: "What should we call you?" }),
+  ).toBeVisible();
+  await window.getByRole("button", { name: "Next" }).click();
+
+  // Step 2: Obsidian (skip)
   await expect(
     window.getByRole("heading", { name: "Do you use Obsidian?" }),
   ).toBeVisible();
@@ -212,6 +219,7 @@ test("2. Claude path hides the local-model picker and accepts a fake key", async
     window.getByRole("heading", { name: "Welcome to Gistlist" }),
   ).toBeVisible();
   await window.getByRole("button", { name: "Get started" }).click();
+  await window.getByRole("button", { name: "Next" }).click(); // skip optional NAME step
   await window.getByRole("button", { name: "Next" }).click(); // skip Obsidian
   await window.getByRole("button", { name: "Next" }).click(); // accept data dir
 

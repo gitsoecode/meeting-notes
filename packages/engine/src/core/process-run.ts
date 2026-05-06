@@ -1501,6 +1501,7 @@ export async function processRun(opts: ProcessRunOptions): Promise<{
     othersExcerpts: buildSpeakerExcerpts(transcriptResult, "others"),
     prepNotes,
     attachmentContext,
+    userName: config.user_name,
   };
   const llmCall: LlmCallFn = (
     systemPrompt: string,

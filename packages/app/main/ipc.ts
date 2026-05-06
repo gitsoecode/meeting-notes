@@ -161,6 +161,7 @@ const pendingMediaSelections = new Map<string, string>();
 function configToDto(config: AppConfig): AppConfigDTO {
   return {
     data_path: config.data_path,
+    user_name: config.user_name,
     obsidian_integration: {
       enabled: config.obsidian_integration.enabled,
       vault_name: config.obsidian_integration.vault_name,
@@ -184,6 +185,7 @@ function configToDto(config: AppConfig): AppConfigDTO {
 function dtoToConfig(dto: AppConfigDTO): AppConfig {
   return {
     data_path: dto.data_path,
+    user_name: dto.user_name ?? "",
     obsidian_integration: {
       enabled: dto.obsidian_integration.enabled,
       vault_name: dto.obsidian_integration.vault_name,
@@ -469,9 +471,17 @@ export function registerIpcHandlers(): void {
     const systemDevice = ""; // System audio handled by AudioTee, not a device
 
     const llmProvider = req.llm_provider ?? "claude";
+    // Preserve any existing user_name when the wizard rerun omits the field.
+    // A naive `req.user_name?.trim() ?? ""` would clobber on rerun and erase
+    // a previously-set name.
+    const userName =
+      req.user_name !== undefined
+        ? req.user_name.trim()
+        : existing?.user_name ?? "";
     const config: AppConfig = {
       ...(existing ?? {}),
       data_path: req.data_path.replace(/^~/, os.homedir()),
+      user_name: userName,
       obsidian_integration: req.obsidian_integration,
       asr_provider: req.asr_provider,
       llm_provider: llmProvider,

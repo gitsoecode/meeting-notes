@@ -84,6 +84,7 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
   const [installingFfmpeg, setInstallingFfmpeg] = useState(false);
   const [appleSilicon, setAppleSilicon] = useState<boolean | null>(null);
   const [totalRamGb, setTotalRamGb] = useState<number | undefined>(undefined);
+  const [userNameInput, setUserNameInput] = useState<string>(config.user_name ?? "");
 
   const apiKeysRef = useRef<HTMLElement>(null);
 
@@ -991,6 +992,31 @@ export function Settings({ config, onChange, onReopenWizard }: SettingsProps) {
 
         {/* ── General tab ── */}
         <TabsContent value="system" className="max-w-2xl space-y-5 outline-none">
+          <section className="space-y-4">
+            <div className="space-y-1">
+              <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">Your name</h3>
+              <p className="text-sm leading-6 text-[var(--text-secondary)]">
+                Substituted into the default summary prompt where <code>{`{{user_name}}`}</code> appears, so the AI knows who is being summarized for. First name is fine; leave blank to use a generic "the user". When a prompt runs on Claude or OpenAI, this value is sent as part of the prompt to that provider; with Ollama it stays on your machine.
+              </p>
+            </div>
+            <div>
+              <Input
+                value={userNameInput}
+                onChange={(e) => setUserNameInput(e.target.value)}
+                onBlur={() => {
+                  const next = userNameInput.trim();
+                  if (next !== (config.user_name ?? "")) {
+                    void save({ ...config, user_name: next });
+                  }
+                }}
+                placeholder="Jesse"
+                data-testid="settings-user-name"
+              />
+            </div>
+          </section>
+
+          <Separator />
+
           <section className="space-y-4">
             <div className="space-y-1">
               <h3 className="text-base font-semibold tracking-[-0.01em] text-[var(--text-primary)]">System Health</h3>
