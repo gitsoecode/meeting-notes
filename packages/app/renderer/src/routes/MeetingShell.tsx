@@ -1134,11 +1134,11 @@ export function MeetingShell({
           )}
           <div className="flex items-center rounded-md border border-[var(--border-subtle)] bg-white shadow-sm overflow-hidden">
             {isPaused ? (
-              <Button variant="ghost" size="sm" onClick={onResume} className="h-8 rounded-none border-r border-[var(--border-subtle)] px-3 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" title="Resume recording">
+              <Button variant="ghost" size="sm" onClick={onResume} className="h-9 rounded-none border-r border-[var(--border-subtle)] px-3 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" title="Resume recording">
                 <Play className="h-4 w-4" />
               </Button>
             ) : (
-              <Button variant="ghost" size="sm" onClick={onPause} className="h-8 rounded-none border-r border-[var(--border-subtle)] px-3 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" title="Pause recording">
+              <Button variant="ghost" size="sm" onClick={onPause} className="h-9 rounded-none border-r border-[var(--border-subtle)] px-3 text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]" title="Pause recording">
                 <Pause className="h-4 w-4" />
               </Button>
             )}
@@ -1150,7 +1150,7 @@ export function MeetingShell({
                 setEndDialogOpen(true);
               }}
               disabled={stopping}
-              className="h-8 rounded-none px-3 text-[var(--error)] hover:bg-[var(--error-muted)] hover:text-[var(--error)]"
+              className="h-9 rounded-none px-3 text-[var(--error)] hover:bg-[var(--error-muted)] hover:text-[var(--error)]"
               title="End meeting"
             >
               <Square className="h-4 w-4" />
@@ -1163,7 +1163,7 @@ export function MeetingShell({
       return (
         <>
           <Button onClick={onStart} size="sm">
-            <CirclePlay className="h-3.5 w-3.5" /> Start recording
+            <CirclePlay className="h-4 w-4" /> Start recording
           </Button>
           {wasCompleted && (
             <Button
@@ -1197,14 +1197,14 @@ export function MeetingShell({
             }
           }}
         >
-          <PlayCircle className="h-3.5 w-3.5" /> Continue recording
+          <PlayCircle className="h-4 w-4" /> Continue recording
         </Button>
       );
     }
     if (isError) {
       return (
         <Button size="sm" onClick={() => setReprocessOpen(true)}>
-          <RefreshCcw className="h-3.5 w-3.5" /> Reprocess
+          <RefreshCcw className="h-4 w-4" /> Reprocess
         </Button>
       );
     }
@@ -1214,7 +1214,7 @@ export function MeetingShell({
   const overflowMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="More actions">
+        <Button variant="ghost" size="icon" aria-label="More actions" className="h-9 w-9">
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -1315,24 +1315,24 @@ export function MeetingShell({
               }}
               aria-label="Meeting view"
             >
-              <TabsList className="w-auto gap-0.5 rounded-lg border-0 bg-[var(--bg-secondary)] p-0.5">
+              <TabsList className="w-auto gap-0.5 rounded-lg border-0 bg-[var(--bg-secondary)] p-1">
                 <TabsTrigger
                   value="workspace"
-                  className="gap-1.5 rounded-md border-0 px-3 py-1 text-xs -mb-0 data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] data-[state=active]:shadow-sm"
+                  className="gap-1.5 rounded-md border-0 px-3 py-1.5 text-sm -mb-0 data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] data-[state=active]:shadow-sm"
                 >
-                  <NotebookPen className="h-3.5 w-3.5" />
+                  <NotebookPen className="h-4 w-4" />
                   Workspace
                 </TabsTrigger>
                 <TabsTrigger
                   value="details"
-                  className="gap-1.5 rounded-md border-0 px-3 py-1 text-xs -mb-0 data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] data-[state=active]:shadow-sm"
+                  className="gap-1.5 rounded-md border-0 px-3 py-1.5 text-sm -mb-0 data-[state=active]:bg-white data-[state=active]:text-[var(--text-primary)] data-[state=active]:shadow-sm"
                 >
-                  <FileText className="h-3.5 w-3.5" />
+                  <FileText className="h-4 w-4" />
                   Details
                 </TabsTrigger>
               </TabsList>
             </Tabs>
-            <div aria-hidden className="h-5 w-px bg-[var(--border-subtle)]" />
+            <div aria-hidden className="h-6 w-px bg-[var(--border-subtle)]" />
             <div className="flex items-center gap-2">
               {recordingControls}
               {overflowMenu}
