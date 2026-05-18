@@ -140,9 +140,7 @@ export class MeetingWorkspacePage {
   }
 
   moreActionsButton() {
-    // The shell header right-cluster ends with the ⋯ DropdownMenu trigger.
-    // It's the last button in the header before the tabs row.
-    return this.page.locator("main header button").last();
+    return this.page.locator("main header").getByRole("button", { name: "More actions" });
   }
 
   openFolderButton() {

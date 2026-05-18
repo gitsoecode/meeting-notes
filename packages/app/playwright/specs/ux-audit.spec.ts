@@ -463,8 +463,8 @@ test.describe("UX Audit: Intent-Driven Evaluation", () => {
     await app.navigateRoute({ name: "meeting", runFolder: "/runs/weekly-planning" });
     await expect(page.locator("header h1")).toContainText("Meeting");
 
-    // Reprocess modal — open the ⋯ overflow menu (last button in the shell header).
-    await page.locator("main header button").last().click();
+    // Reprocess modal — open the ⋯ overflow menu via its aria-label.
+    await page.locator("main header").getByRole("button", { name: "More actions" }).click();
     await page.getByRole("menuitem", { name: "Reprocess" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("dialog")).not.toBeVisible();

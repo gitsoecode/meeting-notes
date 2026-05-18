@@ -292,6 +292,7 @@ export async function installMockApi(page: Page) {
         date: "2026-04-08",
         started: "2026-04-08T17:30:00.000Z",
         ended: "2026-04-08T18:10:00.000Z",
+        scheduled_time: "2026-04-08T17:30:00.000Z",
         status: "complete",
         source_mode: "both",
         duration_minutes: 40,
