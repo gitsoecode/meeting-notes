@@ -1214,7 +1214,7 @@ export function MeetingShell({
   const overflowMenu = (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon">
+        <Button variant="ghost" size="icon" aria-label="More actions">
           <MoreHorizontal className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
@@ -1273,38 +1273,37 @@ export function MeetingShell({
             ) : (
               <EditableTitle value={detail.title} onSave={onTitleSave} />
             )}
-            <TooltipProvider delayDuration={120}>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label="Meeting status details"
-                    className="shrink-0 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
-                  >
-                    <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent align="start" className="flex flex-col gap-1.5 max-w-xs">
-                  {isDraft ? (
-                    <InlineScheduledTime
-                      value={detail.scheduled_time ?? null}
-                      onChange={onScheduledTimeChange}
-                    />
-                  ) : (detail.started || detail.date) ? (
-                    <>
+            {detail.started || detail.ended ? (
+              <TooltipProvider delayDuration={120}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="Meeting status details"
+                      className="shrink-0 cursor-default rounded-full outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]"
+                    >
+                      <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent align="start" className="flex flex-col gap-1.5 max-w-xs">
+                    {detail.started ? (
                       <span className="text-[var(--text-secondary)]">
-                        Started {new Date(detail.started ?? detail.date).toLocaleString()}
+                        Started {new Date(detail.started).toLocaleString()}
                       </span>
-                      {detail.ended && (
-                        <span className="text-[var(--text-secondary)]">
-                          Ended {new Date(detail.ended).toLocaleString()}
-                        </span>
-                      )}
-                    </>
-                  ) : null}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                    ) : null}
+                    {detail.ended ? (
+                      <span className="text-[var(--text-secondary)]">
+                        Ended {new Date(detail.ended).toLocaleString()}
+                      </span>
+                    ) : null}
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            ) : (
+              <div className="shrink-0">
+                <StatusLine status={effectiveStatus} duration={detail.duration_minutes} />
+              </div>
+            )}
           </div>
 
           {/* Right toolbar: view tabs, a divider, then recording controls + ⋯ */}
@@ -1339,6 +1338,12 @@ export function MeetingShell({
               {overflowMenu}
             </div>
           </div>
+        </div>
+        <div className="flex items-center gap-2 text-sm" data-testid="meeting-scheduled-time">
+          <InlineScheduledTime
+            value={detail.scheduled_time ?? null}
+            onChange={onScheduledTimeChange}
+          />
         </div>
       </header>
 
